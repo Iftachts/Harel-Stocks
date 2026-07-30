@@ -1,0 +1,326 @@
+# =============================================================================
+# Harel Terminal - Source registry
+# =============================================================================
+# trust:      0.0-1.0 . Multiplies materiality. Primary/issuer sources = 1.0,
+#             aggregators = 0.6-0.8, forums/blogs = 0.3.
+# latency:    Expected staleness. "realtime" sources are polled hardest.
+# poll_sec:   Polling interval when the scheduler runs in `live` mode.
+# requires:   Env var name for an API key. Source is skipped (with a warning)
+#             when the key is absent - the system degrades, it does not crash.
+# =============================================================================
+
+defaults:
+  user_agent: "HarelTerminal/1.0 (single-user research; contact: {SEC_CONTACT_EMAIL})"
+  timeout_sec: 25
+  max_retries: 3
+  backoff_base_sec: 2
+
+sources:
+
+  # ---------------------------------------------------------------- issuer ---
+  sec_edgar_submissions:
+    kind: edgar_submissions
+    label: SEC EDGAR - company filings
+    base_url: https://data.sec.gov/submissions/CIK{cik}.json
+    ticker_map_url: https://www.sec.gov/files/company_tickers.json
+    trust: 1.0
+    latency: near_realtime      # EDGAR disseminates within seconds-minutes
+    poll_sec: 120
+    notes: >
+      The single highest-value source. 8-K / 6-K are the legally-required
+      material-event channel. No API key; SEC requires a descriptive
+      User-Agent with a contact email (set SEC_CONTACT_EMAIL).
+
+  sec_edgar_full_text:
+    kind: edgar_full_text
+    label: SEC EDGAR - full text search (indirect mentions)
+    base_url: https://efts.sec.gov/LATEST/search-index?q={q}
+    api_url: https://efts.sec.gov/LATEST/search-index?q={q}&dateRange=custom&startdt={start}&enddt={end}
+    trust: 1.0
+    latency: near_realtime
+    poll_sec: 900
+    notes: >
+      Finds our companies named inside OTHER issuers' filings - e.g. a
+      competitor's 10-K risk factor naming Teva, or a customer disclosing a
+      Camtek order. This is the "indirect news" channel Bloomberg gets from
+      its entity graph.
+
+  company_ir_rss:
+    kind: rss
+    label: Company IR press releases
+    trust: 1.0
+    latency: realtime
+    poll_sec: 180
+    feeds_from: universe.ir_feeds
+    notes: Issuer-controlled. Often beats the wire aggregators by 1-3 minutes.
+
+  maya_tase:
+    kind: maya
+    label: TASE MAYA - Israeli immediate reports
+    base_url: https://mayaapi.tase.co.il
+    endpoints:
+      company_reports: /api/report/company?companyId={tase_id}&fromDate={from}&toDate={to}
+      priority: /api/report/priority
+    headers:
+      X-Maya-With: allow
+      Referer: https://maya.tase.co.il/
+      Accept-Language: he-IL
+    official_api_base: https://openapi.tase.co.il/tase/prod
+    requires: TASE_API_KEY
+    key_optional: true            # without the key we fall back to the public endpoints
+    trust: 1.0
+    latency: realtime
+    poll_sec: 120
+    notes: >
+      CRITICAL EDGE for this basket. 18 of these names are dual-listed. Israeli
+      "immediate reports" (דיווח מיידי) are frequently published on MAYA during
+      Israeli hours - i.e. BEFORE the US pre-market. Endpoint shapes are
+      best-effort (see docs/LIMITATIONS.md); verify on first run.
+
+  # ------------------------------------------------------------- regulator ---
+  fda_press:
+    kind: rss
+    label: FDA press announcements
+    feeds:
+      - https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml
+      - https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/medwatch/rss.xml
+    trust: 1.0
+    latency: realtime
+    poll_sec: 300
+
+  fda_drug_approvals:
+    kind: openfda
+    label: FDA drug approvals (Drugs@FDA)
+    base_url: https://api.fda.gov/drug/drugsfda.json
+    trust: 1.0
+    latency: daily            # openFDA lags the FDA website by ~1 day
+    poll_sec: 3600
+    notes: >
+      Batch/daily. For same-day approval news, fda_press + the issuer PR are
+      the fast channels; this is the reliable structured backfill.
+
+  fda_enforcement:
+    kind: openfda
+    label: FDA recalls / enforcement reports
+    base_url: https://api.fda.gov/drug/enforcement.json
+    extra_endpoints:
+      device: https://api.fda.gov/device/enforcement.json
+      food: https://api.fda.gov/food/enforcement.json
+    trust: 1.0
+    latency: daily
+    poll_sec: 3600
+
+  fda_device_clearances:
+    kind: openfda
+    label: FDA 510(k) / De Novo clearances
+    base_url: https://api.fda.gov/device/510k.json
+    trust: 1.0
+    latency: weekly
+    poll_sec: 21600
+
+  fda_warning_letters:
+    kind: html_table
+    label: FDA warning letters & import alerts
+    base_url: https://www.fda.gov/inspections-compliance-enforcement-and-criminal-investigations/compliance-actions-and-activities/warning-letters
+    trust: 1.0
+    latency: weekly
+    poll_sec: 21600
+    fragile: true             # HTML scrape - guarded, failure is non-fatal
+
+  ema_news:
+    kind: rss
+    label: EMA news & CHMP outcomes
+    feeds:
+      - https://www.ema.europa.eu/en/rss.xml
+    trust: 1.0
+    latency: daily
+    poll_sec: 3600
+
+  federal_register:
+    kind: federal_register
+    label: US Federal Register (all agencies)
+    base_url: https://www.federalregister.gov/api/v1/documents.json
+    trust: 1.0
+    latency: daily            # published 06:00 ET, public inspection ~previous day
+    poll_sec: 1800
+    notes: >
+      Free, no key, excellent filtering by agency + term. Covers BIS export
+      controls, FDA rules, CMS rates, IRS energy-credit guidance, EPA/TSCA,
+      ITC duty rulings. Public Inspection endpoint gives ~1 day of lead time.
+
+  federal_register_public_inspection:
+    kind: federal_register_pi
+    label: Federal Register - public inspection (1 day early)
+    base_url: https://www.federalregister.gov/api/v1/public-inspection-documents/current.json
+    trust: 1.0
+    latency: near_realtime
+    poll_sec: 900
+
+  clinicaltrials:
+    kind: clinicaltrials
+    label: ClinicalTrials.gov (API v2)
+    base_url: https://clinicaltrials.gov/api/v2/studies
+    trust: 0.9
+    latency: daily
+    poll_sec: 3600
+    notes: >
+      Status transitions (Recruiting -> Active, not recruiting -> Completed),
+      primary-completion-date changes and silent terminations are leading
+      indicators of readouts - for our names AND for their competitors.
+
+  dod_contracts:
+    kind: rss
+    label: US DoD daily contract announcements
+    feeds:
+      - https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=9&Site=945&max=50
+    trust: 1.0
+    latency: daily            # published ~17:00 ET
+    poll_sec: 3600
+    notes: Elbit America / TAT contract awards appear here first.
+
+  dsca_fms:
+    kind: rss
+    label: DSCA foreign military sale notifications
+    feeds:
+      - https://www.dsca.mil/major-arms-sales/rss.xml
+    trust: 1.0
+    latency: daily
+    poll_sec: 7200
+    fragile: true
+
+  faa_ads:
+    kind: federal_register
+    label: FAA airworthiness directives
+    agency_filter: [federal-aviation-administration]
+    trust: 1.0
+    latency: daily
+    poll_sec: 21600
+
+  fcc_filings:
+    kind: fcc_ecfs
+    label: FCC ECFS filings
+    base_url: https://publicapi.fcc.gov/ecfs/filings
+    requires: FCC_API_KEY        # free key from api.data.gov
+    trust: 0.9
+    latency: daily
+    poll_sec: 7200
+
+  ferc_filings:
+    kind: rss
+    label: FERC news & orders
+    feeds:
+      - https://www.ferc.gov/news-events/news/rss.xml
+    trust: 1.0
+    latency: daily
+    poll_sec: 7200
+    fragile: true
+
+  echa_reach:
+    kind: rss
+    label: ECHA / EU REACH news
+    feeds:
+      - https://echa.europa.eu/-/asset_publisher/rss
+    trust: 0.9
+    latency: weekly
+    poll_sec: 43200
+    fragile: true
+
+  # --------------------------------------------------------------- markets ---
+  prices_stooq:
+    kind: prices
+    label: Stooq daily + intraday OHLCV
+    base_url: https://stooq.com/q/d/l/?s={symbol}&i=d
+    trust: 0.8
+    latency: eod
+    poll_sec: 900
+    notes: Free, no key, daily bars. Used for ADV / gap / range context.
+
+  prices_yahoo:
+    kind: prices
+    label: Yahoo Finance chart API
+    base_url: https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
+    trust: 0.7
+    latency: delayed_15m
+    poll_sec: 300
+    notes: >
+      Unofficial endpoint. Gives pre/post-market prices, which matter a lot for
+      an overnight-gap workflow. Treat as best-effort; see LIMITATIONS.
+
+  # ------------------------------------------------------------ aggregate ---
+  google_news:
+    kind: rss
+    label: Google News per-entity RSS
+    base_url: https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en
+    trust: 0.6
+    latency: minutes
+    poll_sec: 300
+    notes: >
+      Broad safety net that catches wire stories our other feeds miss.
+      Low trust: headline-only, aggregator-rewritten, prone to SEO spam.
+      The scorer requires corroboration from a higher-trust source before a
+      google_news-only item can reach ALERT level.
+
+  google_news_he:
+    kind: rss
+    label: Google News - Hebrew
+    base_url: https://news.google.com/rss/search?q={q}&hl=iw-IL&gl=IL&ceid=IL:iw
+    trust: 0.6
+    latency: minutes
+    poll_sec: 600
+
+  globes:
+    kind: rss
+    label: Globes (Hebrew business daily)
+    feeds:
+      - https://www.globes.co.il/webservice/rss/rssfeeder.asmx/FeederNode?iID=1725
+      - https://www.globes.co.il/webservice/rss/rssfeeder.asmx/FeederNode?iID=2
+    trust: 0.75
+    latency: minutes
+    poll_sec: 600
+    notes: Israeli scoops on these names frequently precede the English wires.
+
+  calcalist:
+    kind: rss
+    label: Calcalist (Hebrew business daily)
+    feeds:
+      - https://www.calcalist.co.il/GeneralRSS/0,16335,L-8,00.xml
+    trust: 0.7
+    latency: minutes
+    poll_sec: 600
+    fragile: true
+
+  # ------------------------------------------------------- optional / paid ---
+  courtlistener:
+    kind: courtlistener
+    label: CourtListener / RECAP dockets
+    base_url: https://www.courtlistener.com/api/rest/v4/search/
+    requires: COURTLISTENER_TOKEN    # free
+    trust: 0.95
+    latency: daily
+    poll_sec: 7200
+    notes: Patent (Paragraph IV) and securities litigation docket events.
+
+  benzinga_ratings:
+    kind: benzinga
+    label: Analyst rating changes (Benzinga)
+    base_url: https://api.benzinga.com/api/v2.1/calendar/ratings
+    requires: BENZINGA_API_KEY       # PAID
+    trust: 0.9
+    latency: realtime
+    poll_sec: 300
+    enabled: false
+    notes: >
+      Analyst upgrades/downgrades are a top-3 intraday mover and have NO free,
+      reliable, licence-clean source. See docs/LIMITATIONS.md - this is the
+      single largest quality gap vs Bloomberg.
+
+  finnhub:
+    kind: finnhub
+    label: Finnhub (news, earnings calendar, ratings)
+    base_url: https://finnhub.io/api/v1
+    requires: FINNHUB_API_KEY        # free tier available
+    trust: 0.8
+    latency: realtime
+    poll_sec: 300
+    enabled: false
+    notes: Free tier covers earnings calendar + basic news; ratings need a paid plan.

@@ -1,0 +1,20 @@
+{
+  "count": 1,
+  "results": [
+    {
+      "document_number": "2026-14321",
+      "title": "Implementation of Additional Export Controls: Certain Advanced Computing and Semiconductor Manufacturing Equipment Items",
+      "abstract": "The Bureau of Industry and Security amends the Export Administration Regulations to impose new controls on semiconductor manufacturing equipment.",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/29/2026-14321/export-controls",
+      "publication_date": "2026-07-29",
+      "type": "Rule",
+      "action": "Interim final rule",
+      "agency_names": ["Industry and Security Bureau"],
+      "agencies": [{"slug": "industry-and-security-bureau", "name": "Industry and Security Bureau"}],
+      "docket_ids": ["BIS-2026-0011"],
+      "topics": ["Exports"],
+      "significant": true,
+      "effective_on": "2026-08-15"
+    }
+  ]
+}

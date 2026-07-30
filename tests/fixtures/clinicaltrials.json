@@ -1,0 +1,31 @@
+{
+  "studies": [
+    {
+      "protocolSection": {
+        "identificationModule": {"nctId": "NCT05555555", "briefTitle": "A Study of Rilvegostomig in Advanced Solid Tumors"},
+        "statusModule": {
+          "overallStatus": "ACTIVE_NOT_RECRUITING",
+          "lastUpdatePostDateStruct": {"date": "2026-07-29"},
+          "primaryCompletionDateStruct": {"date": "2026-11-30"},
+          "startDateStruct": {"date": "2024-01-15"}
+        },
+        "sponsorCollaboratorsModule": {"leadSponsor": {"name": "AstraZeneca"}},
+        "designModule": {"phases": ["PHASE3"], "enrollmentInfo": {"count": 900}},
+        "conditionsModule": {"conditions": ["Non-Small Cell Lung Cancer"]}
+      }
+    },
+    {
+      "protocolSection": {
+        "identificationModule": {"nctId": "NCT01111111", "briefTitle": "Phase 1 Dose Escalation"},
+        "statusModule": {
+          "overallStatus": "RECRUITING",
+          "lastUpdatePostDateStruct": {"date": "2026-07-29"},
+          "primaryCompletionDateStruct": {"date": "2027-06-01"}
+        },
+        "sponsorCollaboratorsModule": {"leadSponsor": {"name": "Compugen"}},
+        "designModule": {"phases": ["PHASE1"], "enrollmentInfo": {"count": 30}},
+        "conditionsModule": {"conditions": ["Solid Tumor"]}
+      }
+    }
+  ]
+}

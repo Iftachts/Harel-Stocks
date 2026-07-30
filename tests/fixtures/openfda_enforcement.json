@@ -1,0 +1,24 @@
+{
+  "results": [
+    {
+      "recall_number": "D-1234-2026",
+      "recalling_firm": "Teva Pharmaceuticals USA, Inc.",
+      "product_description": "Amlodipine Besylate Tablets USP, 10 mg, 90-count bottle",
+      "reason_for_recall": "Failed dissolution specifications",
+      "classification": "Class II",
+      "status": "Ongoing",
+      "report_date": "20260729",
+      "recall_initiation_date": "20260720",
+      "distribution_pattern": "Nationwide"
+    },
+    {
+      "recall_number": "D-9999-2026",
+      "recalling_firm": "Unrelated Pharma Co",
+      "product_description": "Something we do not care about",
+      "reason_for_recall": "Labeling",
+      "classification": "Class III",
+      "status": "Ongoing",
+      "report_date": "20260729"
+    }
+  ]
+}

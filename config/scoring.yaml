@@ -1,0 +1,400 @@
+# =============================================================================
+# Harel Terminal - Materiality model for a SHORT-TERM / INTRADAY trader
+# =============================================================================
+# final_score = clamp(
+#     base(event_type)
+#   * source_trust
+#   * relation_multiplier
+#   * float_sensitivity
+#   * recency_decay
+#   + boosts
+#   - penalties , 0, 100)
+#
+# Tiers:  >=75 ALERT   |  55-74 HIGH  |  35-54 NORMAL  |  <35 NOISE (hidden)
+#
+# Design principle: a day trader cares about ONE question - "can this move the
+# print in the next few hours?". Everything else is archive.
+# =============================================================================
+
+tiers:
+  alert: 75
+  high: 55
+  normal: 35
+  # below `normal` -> stored but filtered out of the default feed
+
+# ---------------------------------------------------------------------------
+# Event taxonomy. `patterns` are case-insensitive regexes matched against
+# title + summary + filing form type. First match with the highest base wins;
+# an item can carry several event types (all are recorded, max score used).
+# ---------------------------------------------------------------------------
+events:
+
+  merger_acquisition:
+    base: 96
+    label: M&A / takeover
+    patterns:
+      - "\\b(to be acquired|agrees? to acquire|definitive (merger|acquisition) agreement)\\b"
+      - "\\b(takeover (bid|offer)|tender offer|going private|buyout offer)\\b"
+      - "\\b(merger agreement|scheme of arrangement)\\b"
+      - "\\b(strategic alternatives|exploring a sale|review of strategic)\\b"
+      - "הצעת רכש|מיזוג|רכישת השליטה"
+
+  short_seller_report:
+    base: 88
+    label: Short-seller report
+    patterns:
+      - "\\b(short (seller|report)|Hindenburg|Muddy Waters|Culper|Kerrisdale|Grizzly Research|Fuzzy Panda|Scorpion Capital|Night Market)\\b"
+      - "\\baccounting (fraud|irregularit)"
+
+  regulatory_decision_primary:
+    base: 92
+    label: FDA/EMA decision on our product
+    patterns:
+      - "\\b(FDA approv|approves|approval of)\\b"
+      - "\\bcomplete response letter\\b|\\bCRL\\b"
+      - "\\b(refuse to file|clinical hold|partial clinical hold)\\b"
+      - "\\b(CHMP (positive|negative) opinion|marketing authorisation)\\b"
+      - "\\b(PDUFA|BsUFA|GDUFA) (date|action)\\b"
+      - "\\b(advisory committee|AdCom) (vote|meeting|recommend)"
+      - "\\b(510\\(k\\) clearance|De Novo (grant|classification)|premarket approval)\\b"
+      - "\\bbreakthrough therapy designation\\b|\\bfast track designation\\b"
+      - "\\b(BLA|NDA|ANDA|sNDA|sBLA) (approv|accept|submi)"
+
+  clinical_readout:
+    base: 90
+    label: Clinical trial readout
+    patterns:
+      - "\\b(top-?line|topline) (results|data)\\b"
+      - "\\b(met|did not meet|failed to meet|missed) (the )?primary endpoint\\b"
+      - "\\bphase (1|2|3|I{1,3})\\b.{0,40}\\b(results|data|readout|trial (met|failed))"
+      - "\\b(pivotal|registrational) (trial|study)\\b.{0,30}\\b(result|data)"
+      - "\\b(trial (halted|terminated|discontinued)|study discontinued)\\b"
+      - "\\b(interim analysis|DSMB|data safety monitoring)\\b"
+
+  guidance_change:
+    base: 86
+    label: Guidance raised / cut / withdrawn
+    patterns:
+      - "\\b(raises?|lifts?|cuts?|lowers?|slashes?|withdraws?|suspends?)\\b.{0,25}\\b(guidance|outlook|forecast)\\b"
+      - "\\b(guidance|outlook) (raised|cut|lowered|reduced|withdrawn|reaffirmed)\\b"
+      - "\\bpre-?announce"
+      - "\\bprofit warning\\b"
+      - "עדכון תחזית|אזהרת רווח"
+
+  earnings:
+    base: 80
+    label: Earnings / results
+    patterns:
+      - "\\b(reports?|announces?) (fourth|third|second|first|Q[1-4]|full[- ]year|quarterly|annual)\\b.{0,30}\\b(results|earnings)\\b"
+      - "\\b(Q[1-4]|first|second|third|fourth) quarter (\\d{4} )?(results|earnings)\\b"
+      - "\\bfinancial results for\\b"
+      - "דוחות כספיים|תוצאות רבעון"
+    # No form_types here on purpose. 8-K / 6-K are far too generic to imply
+    # earnings; the 8-K Item code (2.02) carries that signal instead, via
+    # `item_severity` from the EDGAR collector.
+
+  equity_offering:
+    base: 82
+    label: Offering / dilution
+    patterns:
+      - "\\b(public offering|registered direct|private placement|PIPE)\\b"
+      - "\\b(at-the-market|ATM) (offering|program|facility)\\b"
+      - "\\b(pricing of|prices) .{0,30}\\boffering\\b"
+      - "\\b(convertible (notes|senior notes) offering)\\b"
+      - "\\bshelf registration\\b"
+      - "הנפקת מניות|גיוס הון|הקצאה פרטית"
+    form_types: ["424B5", "424B4", "S-1", "S-3", "F-1", "F-3", "S-3ASR"]
+    float_sensitive: true            # micro/small caps score much higher here
+
+  major_contract:
+    base: 78
+    label: Large order / contract win
+    patterns:
+      - "\\b(awarded|wins?|secures?|receives?)\\b.{0,40}\\b(contract|order|award|tender)\\b"
+      - "\\b\\$\\s?\\d+(\\.\\d+)?\\s?(million|billion|M|B)\\b.{0,30}\\b(contract|order|award|deal)\\b"
+      - "\\b(follow-on order|framework agreement|IDIQ|indefinite delivery)\\b"
+      - "\\bforeign military sale\\b"
+      - "זכייה במכרז|הזמנה בהיקף"
+
+  litigation_outcome:
+    base: 76
+    label: Legal / enforcement outcome
+    patterns:
+      - "\\b(jury (verdict|awards)|court (rules|ruling|orders)|judge (rules|dismisses))\\b"
+      - "\\b(settlement|settles?)\\b.{0,30}\\b(\\$|million|billion|DOJ|SEC|FTC)"
+      - "\\b(injunction|patent (invalidated|upheld)|infringement (found|ruling))\\b"
+      - "\\b(DOJ|SEC|FTC|CMA|European Commission) (charges?|sues?|fines?|investigat)"
+      - "\\bParagraph IV\\b"
+
+  compliance_action:
+    base: 74
+    label: Inspection / recall / warning letter
+    patterns:
+      - "\\b(warning letter|Form 483|import alert|consent decree)\\b"
+      - "\\b(class (I|II) recall|recalls?|market withdrawal)\\b"
+      - "\\b(OAI|official action indicated)\\b"
+
+  index_event:
+    base: 72
+    label: Index add / delete
+    patterns:
+      - "\\b(added to|removed from|deleted from|joins?)\\b.{0,25}\\b(S&P|Russell|Nasdaq-100|MSCI|FTSE|TA-35|TA-125|TA-90)\\b"
+      - "\\bindex (rebalance|reconstitution)\\b"
+      - "נכנסת למדד|נגרעת מהמדד"
+
+  rating_change:
+    base: 70
+    label: Analyst rating / PT change
+    patterns:
+      - "\\b(upgrades?|downgrades?)\\b.{0,30}\\b(to|from)\\b.{0,25}\\b(buy|sell|hold|overweight|underweight|neutral|outperform|underperform)\\b"
+      - "\\b(initiates? coverage|resumes? coverage)\\b"
+      - "\\b(price target)\\b.{0,20}\\b(raised|cut|lowered|to \\$)"
+
+  listing_compliance:
+    base: 68
+    label: Listing / going-concern / restatement
+    patterns:
+      - "\\b(minimum bid price|listing (deficiency|compliance)|delisting notice)\\b"
+      - "\\b(going concern|substantial doubt)\\b"
+      - "\\b(restate(ment|s)?|non-reliance|material weakness)\\b"
+      - "\\breverse stock split\\b"
+    # Only forms that are unambiguous on their own. 8-K / 6-K must NOT be here:
+    # they would tag every routine filing as a listing-compliance event.
+    form_types: ["NT 10-K", "NT 10-Q", "NT 20-F", "25-NSE"]
+
+  capital_return:
+    base: 58
+    label: Buyback / dividend
+    patterns:
+      - "\\b(share (repurchase|buyback)|buyback program)\\b"
+      - "\\b(initiates?|increases?|raises?|cuts?|suspends?) .{0,15}\\bdividend\\b"
+      - "\\bspecial dividend\\b"
+
+  management_change:
+    base: 60
+    label: CEO / CFO change
+    patterns:
+      - "\\b(chief executive|CEO|chief financial|CFO|chairman)\\b.{0,40}\\b(resign|steps? down|departs?|appoint|named|to succeed|terminat)"
+      - "\\bsudden (resignation|departure)\\b"
+
+  partnership_licensing:
+    base: 62
+    label: Partnership / licensing / milestone
+    patterns:
+      - "\\b(license agreement|licensing deal|collaboration agreement|strategic partnership)\\b"
+      - "\\b(milestone payment|upfront payment|option exercise)\\b"
+      - "\\b(exclusive distribution agreement)\\b"
+
+  insider_activity:
+    base: 48
+    label: Insider / large holder move
+    patterns:
+      - "\\b(13D|13G|schedule 13D)\\b"
+      - "\\b(activist (stake|investor)|builds? (a )?stake)\\b"
+      - "\\bsecondary offering by (a )?(shareholder|holder)\\b"
+    form_types: ["SC 13D", "SC 13D/A", "SC 13G/A", "4"]
+
+  operational_disruption:
+    base: 70
+    label: Plant / supply / outage / cyber
+    patterns:
+      - "\\b(cyber ?attack|ransomware|data breach|security incident)\\b"
+      - "\\b(plant (shutdown|fire|explosion)|production (halt|suspension)|force majeure)\\b"
+      - "\\b(supply (disruption|shortage)|unplanned outage)\\b"
+
+  macro_sector_policy:
+    base: 66
+    label: Policy / tariff / export control
+    patterns:
+      - "\\b(export control|entity list|foreign direct product rule)\\b"
+      - "\\b(tariff|Section 232|Section 301|countervailing dut|antidumping)\\b"
+      - "\\b(sanction(s|ed)?)\\b"
+      - "\\b(final rule|interim final rule|proposed rule)\\b"
+      - "\\b(reimbursement (rate|cut)|fee schedule)\\b"
+
+  commodity_move:
+    base: 60
+    label: Commodity / price benchmark
+    patterns:
+      - "\\b(potash|bromine|phosphate|urea|ammonia) (price|contract)\\b"
+      - "\\b(contract (settled|settlement)) .{0,20}\\b(China|India)\\b"
+      - "\\bspot price (jump|surge|collapse|falls?|rises?)\\b"
+
+  product_launch:
+    base: 52
+    label: Product launch / design win
+    patterns:
+      - "\\b(launches?|unveils?|introduces?|announces? availability)\\b"
+      - "\\b(design win|qualified by|volume production)\\b"
+
+  conference_presentation:
+    base: 18
+    label: Conference / webcast
+    patterns:
+      - "\\b(to present at|will present at|to participate in|investor (day|conference)|webcast|fireside chat)\\b"
+      - "\\b(poster presentation|abstract accepted)\\b"
+
+  patent_grant:
+    base: 22
+    label: Patent granted
+    patterns:
+      - "\\b(receives?|granted|issued) .{0,20}\\b(patent|patents)\\b"
+      - "\\bnotice of allowance\\b"
+
+  award_recognition:
+    base: 10
+    label: Award / recognition / ESG
+    patterns:
+      - "\\b(named a leader|recognized (as|by)|wins? .{0,20}award|Gartner Magic Quadrant|best places to work)\\b"
+      - "\\b(sustainability report|ESG report|corporate responsibility)\\b"
+
+# ---------------------------------------------------------------------------
+# Noise suppression. Matching items are hard-capped at `cap` regardless of any
+# other signal. This is what keeps the feed usable for a day trader.
+# ---------------------------------------------------------------------------
+noise:
+  hard_cap_default: 12
+
+  form_types:
+    # Routine SEC/TASE paperwork with ~zero intraday information content
+    "S-8": 8
+    "424B3": 10          # resale prospectus - already-issued shares
+    "424B2": 10
+    "144": 6             # notice of proposed sale
+    "SC 13G": 14         # passive index holder crossing 5%
+    "SC 13F-HR": 6
+    "ARS": 5
+    "DEF 14A": 15
+    "DEFA14A": 12
+    "PRE 14A": 12
+    "CERT": 5
+    "8-A12B": 8
+    "EFFECT": 5
+    "FWP": 12
+    "NT 10-Q": 55        # exception: late filing IS material - not noise
+    "3": 6
+    "5": 5
+    "SD": 5              # conflict minerals
+    "ARS/A": 5
+    "6-K/A": 25
+
+  title_patterns:
+    - pattern: "\\b(annual general meeting|extraordinary general meeting|AGM|EGM|proxy statement|notice of meeting)\\b"
+      cap: 15
+    - pattern: "\\b(to (present|participate)|will (present|host|participate)|investor conference|webcast (of|will))\\b"
+      cap: 18
+    - pattern: "\\b(appoints? .{0,30}(director|board member)|board of directors appoint)\\b"
+      cap: 22
+    - pattern: "\\b(publishes|releases) .{0,20}(sustainability|ESG|corporate responsibility|diversity) report\\b"
+      cap: 8
+    - pattern: "\\b(celebrates|congratulates|sponsors|donates|charitable|partnership with .{0,20}(university|school))\\b"
+      cap: 8
+    - pattern: "\\b(webinar|white ?paper|blog post|case study|customer story)\\b"
+      cap: 8
+    - pattern: "\\b(participation in|attends) .{0,25}(exhibition|trade show|expo)\\b"
+      cap: 10
+    - pattern: "\\b(monthly|weekly) (shareholding|share capital) (update|notification)\\b"
+      cap: 6
+    - pattern: "\\b(total voting rights|holdings? in company|transaction in own shares)\\b"
+      cap: 10
+    - pattern: "דוח מיידי על שינוי בהחזקות בעל עניין|הודעה על אסיפה|תשקיף מדף"
+      cap: 12
+    - pattern: "\\b(price target)\\b.{0,20}\\b(maintained|reiterat)"
+      cap: 20
+
+  # Aggregator-only, low-trust items never reach ALERT without corroboration
+  require_corroboration_below_trust: 0.7
+  corroboration_cap: 60
+
+# ---------------------------------------------------------------------------
+# Relation multipliers - how much an item about something *else* matters to us
+# ---------------------------------------------------------------------------
+relations:
+  DIRECT:        1.00     # our issuer / our CIK / our IR feed
+  SUBSIDIARY:    0.95     # OPC Energy -> KEN, Elbit America -> ESLT
+  PRODUCT_RIVAL: 0.85     # same molecule / same mechanism / same socket
+  PEER:          0.65     # named competitor's own news
+  CUSTOMER:      0.70     # a customer's capex/order (TSMC -> CAMT)
+  SUPPLIER:      0.55
+  SECTOR_REG:    0.60     # regulator action on the sector
+  SECTOR_THEME:  0.45     # thematic story touching the sector
+  MACRO:         0.35
+
+# float_class -> sensitivity. A $50m float microcap moves 20% on news that a
+# $20bn large cap shrugs off.
+float_sensitivity:
+  micro: 1.25
+  small: 1.12
+  mid: 1.00
+  large: 0.90
+  unknown: 1.00
+
+# ---------------------------------------------------------------------------
+# Recency: intraday traders decay fast. Half-life in hours.
+# ---------------------------------------------------------------------------
+recency:
+  half_life_hours: 8
+  floor: 0.25              # never decay below this (so the archive stays searchable)
+  # Items published while the US market is closed but before the open are the
+  # most tradeable of all - they create the gap.
+  premarket_boost: 6       # +6 raw points, 04:00-09:30 ET
+  intraday_boost: 4        # +4 raw points, 09:30-16:00 ET
+
+# ---------------------------------------------------------------------------
+# Price-action confirmation. If the tape is already moving, the news is real.
+# ---------------------------------------------------------------------------
+price_confirmation:
+  enabled: true
+  abs_move_pct_threshold: 3.0
+  volume_multiple_threshold: 2.0
+  boost_move: 8
+  boost_volume: 6
+  # An unexplained move with NO news is itself an alert ("what do they know?")
+  unexplained_move_pct: 5.0
+  unexplained_alert_score: 70
+
+# ---------------------------------------------------------------------------
+# Per-ticker overrides
+# ---------------------------------------------------------------------------
+overrides:
+  CGEN:
+    # TIGIT-class read-across is effectively direct news for Compugen
+    relation_overrides:
+      PRODUCT_RIVAL: 0.95
+  PERI:
+    # Bing/Google terms-of-trade changes have historically caused >30% gaps
+    keyword_boosts:
+      - pattern: "\\b(Microsoft|Bing)\\b.{0,60}\\b(search|advertis|revenue share|agreement)\\b"
+        boost: 25
+      - pattern: "\\bGoogle\\b.{0,50}\\b(antitrust remedy|ad tech divestiture|policy change)\\b"
+        boost: 15
+  AUDC:
+    keyword_boosts:
+      - pattern: "\\bMicrosoft\\b.{0,60}\\b(Teams|Operator Connect|Direct Routing|certif)"
+        boost: 20
+  ICL:
+    keyword_boosts:
+      - pattern: "\\b(China|India)\\b.{0,40}\\bpotash\\b.{0,25}\\bcontract\\b"
+        boost: 20
+      - pattern: "\\bDead Sea\\b.{0,40}\\b(concession|royalt|franchise)\\b"
+        boost: 22
+  ESLT:
+    keyword_boosts:
+      - pattern: "\\b(arms embargo|export licen[cs]e (suspend|revok|denied))\\b.{0,40}\\bIsrael\\b"
+        boost: 25
+      - pattern: "\\b(Germany|Netherlands|UK|Denmark|Spain)\\b.{0,50}\\b(halts?|suspends?)\\b.{0,30}\\barms\\b"
+        boost: 20
+  TEVA:
+    keyword_boosts:
+      - pattern: "\\bfirst (generic|to file)\\b"
+        boost: 12
+      - pattern: "\\bAUSTEDO\\b|\\bAJOVY\\b|\\bUZEDY\\b"
+        boost: 10
+  ORMP:
+    keyword_boosts:
+      - pattern: "\\b(reverse (stock )?split|Nasdaq (minimum bid|compliance))\\b"
+        boost: 15
+  LPSN:
+    keyword_boosts:
+      - pattern: "\\b(convertible|exchange offer|debt restructur|going concern)\\b"
+        boost: 18

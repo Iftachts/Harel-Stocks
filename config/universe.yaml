@@ -1,0 +1,546 @@
+# =============================================================================
+# Harel Terminal - Stock universe
+# =============================================================================
+# Every entry drives collection AND entity-linking. Fields:
+#
+#   name          Legal/common name (used for headline matching)
+#   aliases       Other strings that mean "this company" in a headline
+#   cik           SEC CIK (leave null -> resolved at runtime from SEC ticker map)
+#   tase_id       TASE security id for MAYA (null -> not dual listed / unknown)
+#   sector        Key into config/sectors.yaml
+#   float_class   micro | small | mid | large  -> news sensitivity multiplier
+#   ir_feeds      Company-controlled press release feeds (highest trust).
+#                 NOTE: these URLs follow each company's usual site convention
+#                 but have NOT been verified against the live sites. Run
+#                 `harel verify-feeds` on first deployment and fix the dead
+#                 ones. A wrong URL degrades that name to Google News (trust
+#                 0.6) rather than losing it entirely.
+#   peers         Tickers/companies whose news reads across to this name
+#   themes        Free-text terms that make a sector story relevant to this name
+#   products      Product-level watch terms (drug names, platforms, programs)
+#   catalysts     Recurring scheduled events to track in the calendar
+# =============================================================================
+
+meta:
+  owner: single-user
+  trading_style: short_term_intraday
+  base_currency: USD
+
+tickers:
+
+  TEVA:
+    name: Teva Pharmaceutical Industries Ltd
+    aliases: ["Teva", "טבע", "Teva Pharmaceutical", "Teva Pharmaceuticals USA", "Teva API"]
+    cik: "0000818686"
+    tase_id: "629014"
+    exchange: NYSE
+    sector: pharma_generics_branded
+    float_class: large
+    ir_feeds:
+      - https://www.tevapharm.com/news-and-media/latest-news/rss
+    peers: [VTRS, AMRX, PRGO, RDY, OGN, HIK.L, SDZ.SW, LLY, ABBV, PFE, ALKS, BIIB, NVO]
+    peer_names:
+      ["Viatris", "Sandoz", "Amneal", "Dr. Reddy's", "Sun Pharma", "Hikma",
+       "Perrigo", "Organon", "Aurobindo", "Lupin", "Cipla", "Zydus", "Alvotech"]
+    themes:
+      ["generic drug approval", "ANDA", "Paragraph IV", "first-to-file",
+       "biosimilar", "drug pricing", "opioid settlement", "price fixing",
+       "drug shortage", "IRA drug price negotiation", "MFN drug pricing"]
+    products:
+      AUSTEDO: ["deutetrabenazine", "tardive dyskinesia", "Huntington chorea"]
+      AJOVY: ["fremanezumab", "CGRP", "migraine prevention"]
+      UZEDY: ["risperidone extended-release", "TV-46000"]
+      COPAXONE: ["glatiramer", "Glatopa"]
+      OLANZAPINE_LAI: ["TEV-'749", "olanzapine long-acting", "post-injection delirium"]
+      DUVAKITUG: ["TEV-48574", "anti-TL1A", "Sanofi"]
+      ICS_SABA: ["ProAir", "QVAR", "AirDuo"]
+    competitor_products:
+      # A rival's readout/approval here moves TEVA
+      ["Emgality", "Nurtec", "Ubrelvy", "Qulipta", "Vyepti", "Ingrezza",
+       "Xenazine", "Uzedy competitor", "Abilify Asimtufii", "tulisokibart",
+       "RVT-3101", "duvakitug"]
+    catalysts: [earnings, jpm_healthcare, esmo, aan]
+
+  TSEM:
+    name: Tower Semiconductor Ltd
+    aliases: ["Tower Semiconductor", "TowerJazz", "טאואר", "Tower Partners Semiconductor", "TPSCo"]
+    cik: "0000928876"
+    tase_id: "1082510"
+    exchange: NASDAQ
+    sector: semiconductors_foundry
+    float_class: mid
+    ir_feeds:
+      - https://towersemi.com/feed/
+    peers: [GFS, UMC, SMIC, VIS, SKYT, TSM, INTC, X-FAB]
+    peer_names: ["GlobalFoundries", "UMC", "United Microelectronics", "SMIC",
+                 "Vanguard International Semiconductor", "SkyWater", "X-FAB",
+                 "TSMC", "Intel Foundry", "Samsung Foundry"]
+    themes:
+      ["specialty foundry", "analog foundry", "RF SOI", "silicon photonics",
+       "power management IC", "SiGe", "CMOS image sensor", "300mm capacity",
+       "foundry utilization", "wafer pricing", "CHIPS Act", "export controls",
+       "semiconductor tariffs", "Section 232 semiconductors"]
+    products:
+      SIPHO: ["silicon photonics", "800G", "1.6T optical", "co-packaged optics"]
+      RF: ["RF SOI", "5G front end module", "antenna tuner"]
+      POWER: ["BCD", "power management", "GaN", "SiC"]
+    catalysts: [earnings, semicon_west, isscc]
+
+  NVMI:
+    name: Nova Ltd
+    aliases: ["Nova Ltd", "Nova Measuring Instruments", "נובה", "Nova Metrology"]
+    cik: "0001109345"
+    tase_id: "1084557"
+    exchange: NASDAQ
+    sector: semicap_metrology
+    float_class: mid
+    ir_feeds:
+      - https://www.novami.com/feed/
+    peers: [KLAC, ONTO, ASML, AMAT, LRCX, TER, ACMR]
+    peer_names: ["KLA", "KLA-Tencor", "Onto Innovation", "ASML", "Applied Materials",
+                 "Lam Research", "Hitachi High-Tech", "Screen Holdings"]
+    themes:
+      ["wafer fab equipment", "WFE spending", "optical metrology", "OCD metrology",
+       "process control", "gate-all-around", "GAA", "high-NA EUV", "HBM",
+       "advanced packaging", "China semiconductor export controls", "entity list",
+       "SEMI billings", "foundry capex", "memory capex"]
+    peer_events_that_matter:
+      ["TSMC capex guidance", "Samsung capex", "Intel capex cut", "Micron capex",
+       "SK Hynix capex", "ASML bookings", "Applied Materials guidance",
+       "KLA guidance", "Lam Research guidance"]
+    catalysts: [earnings, semicon_west]
+
+  CAMT:
+    name: Camtek Ltd
+    aliases: ["Camtek", "קמטק"]
+    cik: "0001109138"
+    tase_id: "1095478"
+    exchange: NASDAQ
+    sector: semicap_inspection
+    float_class: small
+    ir_feeds:
+      - https://www.camtek.com/feed/
+    peers: [ONTO, KLAC, NVMI, ASMPT, TER]
+    peer_names: ["Onto Innovation", "KLA", "Nova", "ASMPT", "Besi",
+                 "Amkor", "ASE Technology", "JCET"]
+    themes:
+      ["advanced packaging inspection", "HBM", "high bandwidth memory",
+       "CoWoS", "hybrid bonding", "2.5D packaging", "3D packaging", "panel level packaging",
+       "chiplet", "OSAT capex", "bumping inspection", "AI accelerator packaging"]
+    peer_events_that_matter:
+      ["TSMC CoWoS capacity expansion", "SK Hynix HBM capacity", "Micron HBM",
+       "Samsung HBM qualification", "Nvidia supply chain", "Amkor capex", "ASE capex"]
+    catalysts: [earnings, semicon_west, ectc]
+
+  NICE:
+    name: NICE Ltd
+    aliases: ["NICE Ltd", "NICE Systems", "נייס", "NICE CXone", "NICE Actimize", "inContact"]
+    cik: "0001003935"
+    tase_id: "273011"
+    exchange: NASDAQ
+    sector: enterprise_software_cx
+    float_class: large
+    ir_feeds:
+      - https://www.nice.com/rss/press-releases.xml
+    peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, LPSN, PEGA]
+    peer_names: ["Genesys", "Five9", "Verint", "Twilio", "Salesforce", "Zoom",
+                 "8x8", "Amazon Connect", "Microsoft Dynamics", "Pegasystems",
+                 "Sprinklr", "Zendesk"]
+    themes:
+      ["contact center as a service", "CCaaS", "agentic AI", "AI agents replacing seats",
+       "conversational AI", "seat-based pricing disruption", "financial crime compliance",
+       "AML software", "workforce engagement management"]
+    peer_events_that_matter:
+      ["Salesforce Agentforce", "Five9 guidance cut", "Genesys IPO",
+       "Twilio AI", "OpenAI voice agents", "Sierra AI funding"]
+    catalysts: [earnings, interactions_conference]
+
+  LPSN:
+    name: LivePerson Inc
+    aliases: ["LivePerson", "לייבפרסון"]
+    cik: "0001102993"
+    tase_id: null
+    exchange: NASDAQ
+    sector: enterprise_software_cx
+    float_class: micro
+    ir_feeds:
+      - https://ir.liveperson.com/rss/pressrelease.aspx
+    peers: [NICE, VRNT, TWLO, ZM, EGHT]
+    peer_names: ["NICE", "Verint", "Twilio", "Genesys", "Intercom", "Zendesk", "Ada", "Sierra AI"]
+    themes:
+      ["conversational AI", "chatbot", "convertible notes", "debt exchange",
+       "going concern", "Nasdaq minimum bid price", "reverse stock split",
+       "customer churn", "restructuring", "activist investor"]
+    risk_flags: [dilution_risk, delisting_risk, high_short_interest]
+    catalysts: [earnings]
+
+  PERI:
+    name: Perion Network Ltd
+    aliases: ["Perion", "פריון", "Undertone", "Codefuel"]
+    cik: "0001338940"
+    tase_id: "1084132"
+    exchange: NASDAQ
+    sector: adtech
+    float_class: small
+    ir_feeds:
+      - https://investors.perion.com/rss/pressrelease.aspx
+    peers: [TBLA, OB, CRTO, MGNI, PUBM, TTD, DV, IAS, APPS, ZETA, GOOGL, META]
+    peer_names: ["Taboola", "Outbrain", "Teads", "Criteo", "Magnite", "PubMatic",
+                 "The Trade Desk", "DoubleVerify", "Integral Ad Science",
+                 "Digital Turbine", "Zeta Global", "Google", "Microsoft Advertising", "Bing"]
+    themes:
+      ["search advertising", "Microsoft Bing partnership", "publisher revenue share",
+       "cookie deprecation", "privacy sandbox", "retail media", "CTV advertising",
+       "programmatic ad spend", "Google antitrust remedies", "ad tech divestiture",
+       "AI search disruption", "SGE", "generative search"]
+    risk_flags: [single_partner_concentration]
+    single_points_of_failure:
+      ["Microsoft Bing search monetization terms", "Google ad policy change"]
+    catalysts: [earnings, holiday_ad_season]
+
+  NYAX:
+    name: Nayax Ltd
+    aliases: ["Nayax", "נייקס", "ניאקס", "Nayax Ltd", "Retail Pro", "Weezmo", "UPmarket"]
+    cik: "0001857816"
+    tase_id: "1175033"
+    exchange: NASDAQ
+    sector: fintech_payments
+    float_class: small
+    ir_feeds:
+      - https://investors.nayax.com/rss/pressrelease.aspx
+    peers: [CTLP, FOUR, PYPL, ADYEN.AS, GPN, TOST, WLN.PA, MARA]
+    peer_names: ["Cantaloupe", "Shift4", "PayPal", "Adyen", "Global Payments",
+                 "Toast", "Worldline", "Nuvei", "SumUp", "Verifone", "Ingenico"]
+    themes:
+      ["unattended payments", "vending payments", "EV charging payments",
+       "interchange fees", "card scheme fees", "payment facilitator regulation",
+       "PSD3", "EU interchange regulation", "take rate compression",
+       "merchant acquiring", "cashless vending mandate"]
+    catalysts: [earnings, nama_show, eu_vending]
+
+  ORA:
+    name: Ormat Technologies Inc
+    aliases: ["Ormat", "אורמת", "Ormat Technologies", "Ormat Industries"]
+    cik: "0001296445"
+    tase_id: "1134402"
+    exchange: NYSE
+    sector: renewable_power
+    float_class: mid
+    ir_feeds:
+      - https://investor.ormat.com/rss/pressrelease.aspx
+    peers: [NEE, BEP, CEG, VST, RUN, FSLR, ENPH, AES]
+    peer_names: ["NextEra Energy", "Brookfield Renewable", "Constellation Energy",
+                 "Vistra", "Calpine", "Enel Green Power", "AES", "Sunrun", "Fluence"]
+    themes:
+      ["geothermal", "power purchase agreement", "PPA award", "energy storage",
+       "BESS", "Inflation Reduction Act", "45U", "48E", "ITC", "PTC",
+       "tax credit transferability", "FERC", "interconnection queue",
+       "data center power demand", "behind the meter", "baseload clean power",
+       "BLM geothermal leasing", "categorical exclusion geothermal"]
+    geographies: ["Nevada", "Hawaii", "Puna", "Kenya", "Olkaria", "Indonesia", "Guatemala", "Honduras", "New Zealand"]
+    catalysts: [earnings, analyst_day, ferc_orders]
+
+  ICL:
+    name: ICL Group Ltd
+    aliases: ["ICL Group", "Israel Chemicals", "כיל", "ICL Fertilizers", "Dead Sea Works", "Rotem Amfert", "ICL Specialty Products"]
+    cik: "0000941221"
+    tase_id: "281014"
+    exchange: NYSE
+    sector: specialty_chemicals_fertilizer
+    float_class: mid
+    ir_feeds:
+      - https://www.icl-group.com/feed/
+    peers: [NTR, MOS, CF, YAR.OL, SQM, CMP, ALB, IPI]
+    peer_names: ["Nutrien", "Mosaic", "K+S", "Yara", "Uralkali", "Belaruskali",
+                 "Arab Potash", "SQM", "Compass Minerals", "Albemarle", "OCP",
+                 "PhosAgro", "Intrepid Potash"]
+    themes:
+      ["potash contract price", "China potash contract", "India potash contract",
+       "potash spot price", "bromine price", "phosphate price", "specialty phosphates",
+       "LFP battery materials", "Dead Sea concession", "royalty", "Sheshinski",
+       "REACH bromine restriction", "flame retardant regulation", "fertilizer export tariff",
+       "Belarus sanctions potash", "Russia fertilizer sanctions", "food security"]
+    commodity_watch: [potash, bromine, phosphate, sulphur, ammonia]
+    catalysts: [earnings, china_potash_contract, indian_potash_contract]
+
+  ESLT:
+    name: Elbit Systems Ltd
+    aliases: ["Elbit Systems", "אלביט", "Elbit Systems of America", "IMI Systems", "Elbit America"]
+    cik: "0001027664"
+    tase_id: "1081124"
+    exchange: NASDAQ
+    sector: defense
+    float_class: mid
+    ir_feeds:
+      - https://elbitsystems.com/feed/
+    peers: [RTX, LMT, GD, NOC, LHX, RHM.DE, BA.L, LDO.MI, HO.PA, KOG.OL, SAABB.ST]
+    peer_names: ["RTX", "Lockheed Martin", "General Dynamics", "Northrop Grumman",
+                 "L3Harris", "Rheinmetall", "BAE Systems", "Leonardo", "Thales",
+                 "Saab", "Kongsberg", "Hanwha", "Israel Aerospace Industries",
+                 "Rafael Advanced Defense Systems"]
+    themes:
+      ["defense budget", "NATO spending", "European rearmament", "ReArm Europe",
+       "munitions production capacity", "155mm artillery", "loitering munitions",
+       "drone procurement", "air defense order", "foreign military sale",
+       "DSCA notification", "arms export license", "arms embargo Israel",
+       "ITAR", "offset obligations", "backlog record"]
+    geographies: ["Israel", "United States", "Germany", "Netherlands", "UK", "Romania", "Sweden", "Australia", "India"]
+    risk_flags: [export_license_risk, geopolitical_headline_risk]
+    catalysts: [earnings, dsei, eurosatory, ila_berlin, dod_contract_daily]
+
+  TATT:
+    name: TAT Technologies Ltd
+    aliases: ["TAT Technologies", "תת טכנולוגיות", "Limco-Piedmont", "Piedmont Aviation", "TAT Industries"]
+    cik: "0000808439"
+    tase_id: "180027"
+    exchange: NASDAQ
+    sector: aerospace_mro
+    float_class: micro
+    ir_feeds:
+      - https://www.tat-technologies.com/feed/
+    peers: [HEI, TDG, AIR, DCO, RTX, HON, GE, SPR]
+    peer_names: ["HEICO", "TransDigm", "AAR Corp", "Ducommun", "Collins Aerospace",
+                 "Honeywell Aerospace", "Safran", "StandardAero", "MTU Aero Engines"]
+    themes:
+      ["aftermarket MRO", "APU overhaul", "landing gear overhaul", "heat exchanger",
+       "PMA parts", "FAA airworthiness directive", "aircraft utilization",
+       "air traffic growth", "engine shop visits", "GTF powder metal", "aging fleet",
+       "Boeing production rate", "Airbus delivery rate", "aerospace supply chain"]
+    catalysts: [earnings, mro_americas, paris_air_show, farnborough]
+
+  GILT:
+    name: Gilat Satellite Networks Ltd
+    aliases: ["Gilat", "גילת", "Gilat Satellite Networks", "Wavestream", "Stellar Blu", "DataPath"]
+    cik: "0001090203"
+    tase_id: "1082494"
+    exchange: NASDAQ
+    sector: satcom
+    float_class: small
+    ir_feeds:
+      - https://www.gilat.com/feed/
+    peers: [VSAT, SATS, CMTL, ASTS, IRDM, SES.PA, RKLB]
+    peer_names: ["Viasat", "EchoStar", "Hughes Network Systems", "Comtech",
+                 "ST Engineering iDirect", "SES", "Intelsat", "Eutelsat", "OneWeb",
+                 "SpaceX", "Starlink", "AST SpaceMobile", "Iridium", "Telesat"]
+    themes:
+      ["in-flight connectivity", "IFC", "electronically steered antenna", "ESA antenna",
+       "LEO constellation", "multi-orbit", "defense satcom", "SATCOM as a service",
+       "military satellite communications", "FCC license", "spectrum allocation",
+       "ground segment", "gateway order", "direct to device"]
+    catalysts: [earnings, satellite_conference, aix]
+
+  ALLT:
+    name: Allot Ltd
+    aliases: ["Allot", "אלוט", "Allot Communications", "Allot Secure"]
+    cik: "0001365767"
+    tase_id: "1091915"
+    exchange: NASDAQ
+    sector: network_security
+    float_class: micro
+    ir_feeds:
+      - https://www.allot.com/feed/
+    peers: [RDWR, CHKP, CSCO, NOK, ERIC, JNPR]
+    peer_names: ["Radware", "Check Point", "Sandvine", "Cisco", "Nokia Deepfield",
+                 "Ericsson", "Juniper", "Palo Alto Networks", "Netscout"]
+    themes:
+      ["deep packet inspection", "DPI", "network intelligence", "security as a service",
+       "SECaaS", "telco security", "carrier capex", "5G core", "ARR growth",
+       "convertible loan", "Nasdaq listing compliance", "operator contract win"]
+    risk_flags: [dilution_risk, delisting_risk, customer_concentration]
+    catalysts: [earnings, mwc_barcelona]
+
+  AUDC:
+    name: AudioCodes Ltd
+    aliases: ["AudioCodes", "אודיוקודס", "AudioCodes Live", "Voca CIC"]
+    cik: "0001086222"
+    tase_id: "1084215"
+    exchange: NASDAQ
+    sector: voice_networking
+    float_class: small
+    ir_feeds:
+      - https://www.audiocodes.com/feed/
+    peers: [RBBN, CSCO, MSFT, ZM, FIVN, AVYA, NICE]
+    peer_names: ["Ribbon Communications", "Cisco", "Microsoft Teams", "Zoom",
+                 "Avaya", "Mitel", "Oracle Communications", "Five9", "Genesys"]
+    themes:
+      ["session border controller", "SBC", "Microsoft Teams Phone",
+       "Operator Connect", "Teams Direct Routing", "UCaaS", "voice AI agents",
+       "conversational AI for contact center", "Microsoft licensing change",
+       "share buyback", "dividend"]
+    single_points_of_failure:
+      ["Microsoft Teams certification/partner program change",
+       "Microsoft bundling native voice"]
+    catalysts: [earnings, enterprise_connect, microsoft_ignite]
+
+  OPK:
+    name: OPKO Health Inc
+    aliases: ["OPKO", "OPKO Health", "BioReference", "BioReference Laboratories", "GeneDx (legacy)", "ModeX", "ModeX Therapeutics"]
+    cik: "0000944809"
+    tase_id: "1128917"
+    exchange: NASDAQ
+    sector: diagnostics_pharma
+    float_class: small
+    ir_feeds:
+      - https://www.opko.com/feed/
+    peers: [LH, DGX, ASND, PFE, NVO, MRK, EXAS, NTRA]
+    peer_names: ["Labcorp", "Quest Diagnostics", "Ascendis Pharma", "Pfizer",
+                 "Novo Nordisk", "Merck", "Exact Sciences", "Natera", "Guardant"]
+    themes:
+      ["clinical lab reimbursement", "PAMA", "CMS clinical lab fee schedule",
+       "lab billing investigation", "DOJ False Claims Act laboratory",
+       "long-acting growth hormone", "hGH", "somatrogon", "Ngenla royalties",
+       "4Kscore", "vitamin D therapy", "secondary hyperparathyroidism",
+       "oncology bispecific", "antibody discovery partnership"]
+    products:
+      RAYALDEE: ["calcifediol", "secondary hyperparathyroidism"]
+      NGENLA: ["somatrogon", "long-acting growth hormone", "Pfizer partnership"]
+      MODEX: ["ModeX", "MDX-2001", "EBV vaccine", "Merck collaboration"]
+    competitor_products: ["Skytrofa", "lonapegsomatropin", "Sogroya", "somapacitan", "Norditropin"]
+    catalysts: [earnings, jpm_healthcare, cms_clfs_update]
+
+  ORMP:
+    name: Oramed Pharmaceuticals Inc
+    aliases: ["Oramed", "אורמד", "Oramed Pharmaceuticals", "Oravax", "Oravax Medical"]
+    cik: "0001176309"
+    tase_id: "1132273"
+    exchange: NASDAQ
+    sector: biotech_clinical
+    float_class: micro
+    ir_feeds:
+      - https://oramed.com/feed/
+    peers: [NVO, LLY, BIOX, SCLX, MNKD]
+    peer_names: ["Novo Nordisk", "Eli Lilly", "Biocon", "Scilex", "MannKind",
+                 "Diasome", "Generex"]
+    themes:
+      ["oral insulin", "oral GLP-1", "orforglipron", "oral semaglutide",
+       "protein oral delivery", "POD technology", "type 2 diabetes",
+       "NASH MASH", "cash runway", "at-the-market offering", "ATM program",
+       "reverse stock split", "Nasdaq minimum bid", "net cash vs market cap"]
+    risk_flags: [dilution_risk, binary_readout_risk, cash_shell_dynamics]
+    catalysts: [earnings, ada_scientific_sessions, easd, fda_meeting]
+
+  KMDA:
+    name: Kamada Ltd
+    aliases: ["Kamada", "כמאדה", "קמהדע", "Kamada Ltd", "Kamada Plasma"]
+    cik: "0001567529"
+    tase_id: "1094119"
+    exchange: NASDAQ
+    sector: plasma_biopharma
+    float_class: micro
+    ir_feeds:
+      - https://www.kamada.com/feed/
+    peers: [GRFS, ADMA, TAK, CSL.AX, EBS]
+    peer_names: ["Grifols", "ADMA Biologics", "Takeda", "CSL Behring",
+                 "Emergent BioSolutions", "Octapharma", "Kedrion", "BioLife Plasma"]
+    themes:
+      ["plasma-derived therapy", "hyperimmune globulin", "IgG shortage",
+       "plasma collection center", "source plasma supply", "BLA approval",
+       "biologics license application", "FDA inspection plasma", "alpha-1 antitrypsin",
+       "AAT deficiency", "rabies immune globulin", "CMV immune globulin",
+       "tender award Israeli Ministry of Health", "distribution agreement"]
+    products:
+      KEDRAB: ["rabies immune globulin", "HyperRAB competitor"]
+      CYTOGAM: ["CMV immune globulin", "transplant"]
+      GLASSIA: ["alpha-1 antitrypsin", "Takeda royalty"]
+      INHALED_AAT: ["inhaled alpha-1 antitrypsin", "InnovAATe", "Phase 3"]
+    competitor_products: ["HyperRAB", "Imogam", "Prolastin", "Zemaira", "Aralast"]
+    catalysts: [earnings, fda_bla_decision, plasma_industry_data]
+
+  CGEN:
+    name: Compugen Ltd
+    aliases: ["Compugen", "קומפיוג'ן", "Compugen Ltd"]
+    cik: "0001119774"
+    tase_id: "1092008"
+    exchange: NASDAQ
+    sector: biotech_clinical
+    float_class: micro
+    ir_feeds:
+      - https://ir.cgen.com/rss/pressrelease.aspx
+    peers: [RCUS, ITOS, MRK, AZN, GILD, BMY, RHHBY]
+    peer_names: ["Arcus Biosciences", "iTeos Therapeutics", "Merck", "AstraZeneca",
+                 "Gilead", "Bristol Myers Squibb", "Roche", "GSK", "Agenus", "Mereo"]
+    themes:
+      ["TIGIT", "PVRIG", "immuno-oncology checkpoint", "anti-TIGIT data",
+       "PD-1 bispecific", "milestone payment", "out-licensing deal",
+       "computational target discovery", "ovarian cancer", "NSCLC",
+       "biliary tract cancer", "cash runway", "royalty on partnered asset"]
+    products:
+      COM701: ["PVRIG antibody", "COM701"]
+      COM902: ["TIGIT antibody", "COM902"]
+      RILVEGOSTOMIG: ["rilvegostomig", "AZD2936", "AstraZeneca TIGIT PD-1 bispecific"]
+      GS4224: ["Gilead PD-L1 small molecule"]
+    competitor_products:
+      ["tiragolumab", "vibostolimab", "domvanalimab", "belrestotug",
+       "ociperlimab", "SKYSCRAPER", "STAR-221", "GALAXIES"]
+    read_across_note: >
+      Any large-pharma TIGIT-class readout (Roche tiragolumab, Merck vibostolimab,
+      Arcus/Gilead domvanalimab, GSK/iTeos belrestotug) moves CGEN hard in both
+      directions. Treat as DIRECT-equivalent materiality.
+    risk_flags: [binary_readout_risk, dilution_risk, class_read_across]
+    catalysts: [earnings, asco, esmo, sitc, aacr]
+
+  BWAY:
+    name: BrainsWay Ltd
+    aliases: ["BrainsWay", "בריינסוואי", "Brainsway Ltd", "Deep TMS", "dTMS"]
+    cik: "0001505497"
+    tase_id: "1132158"
+    exchange: NASDAQ
+    sector: medical_devices
+    float_class: micro
+    ir_feeds:
+      - https://www.brainsway.com/feed/
+    peers: [STIM, CMPS, JNJ, NUVA]
+    peer_names: ["Neuronetics", "NeuroStar", "Magstim", "MagVenture",
+                 "Compass Pathways", "Johnson & Johnson", "Spravato", "Greenbrook TMS"]
+    themes:
+      ["transcranial magnetic stimulation", "Deep TMS", "FDA 510(k) clearance",
+       "De Novo clearance", "CPT code reimbursement", "CMS coverage determination",
+       "treatment resistant depression", "OCD indication", "smoking cessation",
+       "adolescent depression", "installed base", "recurring revenue per system",
+       "accelerated TMS protocol", "SAINT protocol"]
+    catalysts: [earnings, apa_annual, clinical_tms_society]
+
+  KEN:
+    name: Kenon Holdings Ltd
+    aliases: ["Kenon", "Kenon Holdings", "קנון", "OPC Energy", "CPV Group", "Quantum Power"]
+    cik: "0001611005"
+    tase_id: "1141661"
+    exchange: NYSE
+    sector: power_holding
+    float_class: micro
+    ir_feeds:
+      - https://www.kenon-holdings.com/feed/
+    peers: [VST, CEG, NRG, TLN, ZIM]
+    peer_names: ["Vistra", "Constellation Energy", "NRG Energy", "Talen Energy",
+                 "OPC Energy", "ZIM Integrated Shipping", "Calpine"]
+    themes:
+      ["ERCOT capacity", "PJM capacity auction", "data center power PPA",
+       "independent power producer", "gas-fired generation", "special dividend",
+       "sum of the parts discount", "asset sale", "buyback",
+       "Israeli electricity tariff", "IPP tender", "container freight rate"]
+    structure_note: >
+      Holding company: value driven by OPC Energy (TASE: OPCE) and CPV.
+      OPC's TASE disclosures and PJM/ERCOT auction results are effectively
+      DIRECT news for KEN even though they carry a different issuer name.
+    catalysts: [earnings, pjm_capacity_auction, ercot_seasonal_assessment]
+
+  # ---------------------------------------------------------------------------
+  # UNRESOLVED - see docs/LIMITATIONS.md, section "Ticker resolution"
+  # "PAMW" does not resolve to any listed security on US or Israeli exchanges.
+  # Most likely intended: PANW (Palo Alto Networks) - Israeli-founded, heavy
+  # Israeli R&D, commonly tracked alongside this basket.
+  # Set `enabled: true` (and fix the ticker) once confirmed.
+  # ---------------------------------------------------------------------------
+  PAMW:
+    name: "UNRESOLVED TICKER"
+    enabled: false
+    unresolved: true
+    resolution_hint: "Did you mean PANW (Palo Alto Networks)? Or a TASE-only symbol?"
+    aliases: []
+    cik: null
+    tase_id: null
+    exchange: null
+    sector: unknown
+    float_class: unknown
+    peers: []
+    themes: []

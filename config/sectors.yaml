@@ -1,0 +1,275 @@
+# =============================================================================
+# Harel Terminal - Sector definitions
+# =============================================================================
+# A sector tells the collectors WHICH regulators to poll and tells the linker
+# WHICH sector-level stories read across to the tickers in that sector.
+#
+#   regulators      Collector ids (see config/sources.yaml) to run for this sector
+#   fr_agencies     federalregister.gov agency slugs to query
+#   fr_terms        Search terms used against the Federal Register API
+#   read_across     How strongly a *sector-level* story propagates to a ticker
+#                   (0.0-1.0 multiplier on the item's base materiality)
+#   peer_read_across  Same, but for a story about a named peer company
+# =============================================================================
+
+sectors:
+
+  pharma_generics_branded:
+    label: Pharma - generics & branded
+    regulators: [fda_press, fda_drug_approvals, fda_enforcement, fda_warning_letters,
+                 ema_news, federal_register, clinicaltrials]
+    fr_agencies: [food-and-drug-administration, centers-for-medicare-medicaid-services,
+                  health-and-human-services-department]
+    fr_terms:
+      ["abbreviated new drug application", "generic drug user fee", "drug pricing",
+       "biosimilar", "drug shortage", "Medicare drug price negotiation",
+       "340B", "orange book patent listing"]
+    read_across: 0.55
+    peer_read_across: 0.70
+    high_impact_events:
+      ["ANDA approval on a molecule we sell", "first generic approval",
+       "competitor CRL", "class-wide safety signal", "REMS change",
+       "Paragraph IV court ruling", "import alert on a competitor plant"]
+
+  biotech_clinical:
+    label: Clinical-stage biotech
+    regulators: [fda_press, fda_drug_approvals, ema_news, clinicaltrials, federal_register]
+    fr_agencies: [food-and-drug-administration]
+    fr_terms: ["advisory committee meeting", "breakthrough therapy", "accelerated approval"]
+    read_across: 0.40
+    # Class read-across is the dominant driver for CGEN/ORMP: a big-pharma
+    # readout in the same mechanism moves them more than their own PR does.
+    peer_read_across: 0.90
+    high_impact_events:
+      ["same-mechanism Phase 3 readout", "class discontinuation by big pharma",
+       "AdCom vote", "PDUFA date", "clinical hold", "partner milestone"]
+
+  plasma_biopharma:
+    label: Plasma-derived biopharma
+    regulators: [fda_press, fda_drug_approvals, fda_enforcement, fda_warning_letters,
+                 ema_news, clinicaltrials]
+    fr_agencies: [food-and-drug-administration]
+    fr_terms: ["blood and plasma", "source plasma", "biologics license application",
+               "immune globulin"]
+    read_across: 0.60
+    peer_read_across: 0.75
+    high_impact_events:
+      ["competitor plant warning letter", "IgG supply shortage", "BLA approval",
+       "plasma collection capacity change", "recall of a hyperimmune product"]
+
+  diagnostics_pharma:
+    label: Diagnostics & specialty pharma
+    regulators: [fda_press, fda_enforcement, federal_register, clinicaltrials]
+    fr_agencies: [centers-for-medicare-medicaid-services, food-and-drug-administration,
+                  health-and-human-services-department]
+    fr_terms:
+      ["clinical laboratory fee schedule", "PAMA", "laboratory developed tests",
+       "Medicare physician fee schedule", "clinical diagnostic laboratory test"]
+    read_across: 0.60
+    peer_read_across: 0.55
+    high_impact_events:
+      ["CLFS rate cut", "PAMA reporting delay/repeal", "LDT rule litigation",
+       "DOJ lab fraud action", "national coverage determination"]
+
+  medical_devices:
+    label: Medical devices - neuro
+    regulators: [fda_press, fda_device_clearances, fda_enforcement, federal_register, clinicaltrials]
+    fr_agencies: [food-and-drug-administration, centers-for-medicare-medicaid-services]
+    fr_terms: ["510(k)", "De Novo classification", "medical device reimbursement",
+               "CPT code", "hospital outpatient prospective payment"]
+    read_across: 0.50
+    peer_read_across: 0.70
+    high_impact_events:
+      ["competitor 510(k) clearance", "new CPT code / reimbursement rate",
+       "MAC coverage policy", "device recall", "pivotal trial readout"]
+
+  semiconductors_foundry:
+    label: Semiconductors - foundry
+    regulators: [federal_register, federal_register_public_inspection]
+    fr_agencies: [industry-and-security-bureau, commerce-department,
+                  trade-representative-office-of-united-states]
+    fr_terms:
+      ["semiconductor export controls", "entity list", "advanced computing",
+       "foreign direct product rule", "Section 232 semiconductors",
+       "CHIPS Act award", "semiconductor tariff"]
+    read_across: 0.70
+    peer_read_across: 0.65
+    high_impact_events:
+      ["new export control rule", "entity list addition", "tariff on semiconductors",
+       "peer foundry guidance", "TSMC monthly revenue", "CHIPS funding award"]
+
+  semicap_metrology:
+    label: Semicap - metrology / process control
+    regulators: [federal_register, federal_register_public_inspection]
+    fr_agencies: [industry-and-security-bureau, commerce-department]
+    fr_terms:
+      ["semiconductor manufacturing equipment export", "entity list",
+       "advanced computing", "deemed export", "China chip equipment"]
+    read_across: 0.75
+    # WFE names trade almost 1:1 with peers' guidance - this is the single most
+    # valuable "indirect" channel for NVMI/CAMT.
+    peer_read_across: 0.85
+    high_impact_events:
+      ["ASML/AMAT/LRCX/KLA guidance", "TSMC or Samsung or Micron capex change",
+       "China equipment export restriction", "HBM capacity announcement",
+       "SEMI billings report"]
+
+  semicap_inspection:
+    label: Semicap - inspection / advanced packaging
+    regulators: [federal_register, federal_register_public_inspection]
+    fr_agencies: [industry-and-security-bureau, commerce-department]
+    fr_terms: ["semiconductor manufacturing equipment export", "entity list",
+               "advanced packaging", "China chip equipment"]
+    read_across: 0.75
+    peer_read_across: 0.85
+    high_impact_events:
+      ["CoWoS / HBM capacity expansion", "Onto Innovation guidance",
+       "AI accelerator supply chain order", "OSAT capex"]
+
+  defense:
+    label: Defense & aerospace primes
+    regulators: [dod_contracts, dsca_fms, federal_register]
+    fr_agencies: [defense-department, state-department, industry-and-security-bureau]
+    fr_terms:
+      ["International Traffic in Arms Regulations", "defense trade",
+       "foreign military sale", "arms export", "munitions list"]
+    read_across: 0.55
+    peer_read_across: 0.45
+    high_impact_events:
+      ["DoD contract award", "DSCA FMS notification", "national defense budget",
+       "European rearmament package", "arms embargo / export licence suspension",
+       "large international order"]
+
+  aerospace_mro:
+    label: Aerospace aftermarket / MRO
+    regulators: [faa_ads, federal_register]
+    fr_agencies: [federal-aviation-administration, transportation-department]
+    fr_terms: ["airworthiness directive", "parts manufacturer approval",
+               "supplemental type certificate", "aircraft certification"]
+    read_across: 0.45
+    peer_read_across: 0.55
+    high_impact_events:
+      ["airworthiness directive on a platform we service",
+       "HEICO/TransDigm/AAR results", "OEM production rate change",
+       "engine fleet inspection mandate"]
+
+  satcom:
+    label: Satellite communications
+    regulators: [fcc_filings, federal_register, dod_contracts]
+    fr_agencies: [federal-communications-commission]
+    fr_terms: ["satellite communications", "spectrum allocation", "earth station",
+               "non-geostationary", "direct to cellular"]
+    read_across: 0.55
+    peer_read_across: 0.60
+    high_impact_events:
+      ["Starlink / LEO competitive move", "large IFC or defense satcom award",
+       "FCC spectrum decision", "peer bankruptcy or restructuring",
+       "satellite operator capex"]
+
+  network_security:
+    label: Network intelligence & security
+    regulators: [federal_register]
+    fr_agencies: [federal-communications-commission]
+    fr_terms: ["telecommunications security", "lawful intercept", "network resiliency"]
+    read_across: 0.35
+    peer_read_across: 0.50
+    high_impact_events:
+      ["tier-1 operator award", "telco capex cycle", "peer M&A",
+       "going-concern / financing event"]
+
+  voice_networking:
+    label: Voice networking & UC
+    regulators: [federal_register]
+    fr_agencies: [federal-communications-commission]
+    fr_terms: ["robocall", "STIR/SHAKEN", "interconnected VoIP"]
+    read_across: 0.35
+    peer_read_across: 0.55
+    high_impact_events:
+      ["Microsoft Teams voice program change", "Cisco/Ribbon guidance",
+       "large operator connect deal"]
+
+  enterprise_software_cx:
+    label: Enterprise software - customer experience
+    regulators: [federal_register]
+    fr_agencies: [federal-trade-commission]
+    fr_terms: ["artificial intelligence", "automated decision", "consumer privacy"]
+    read_across: 0.30
+    peer_read_across: 0.70
+    high_impact_events:
+      ["peer guidance cut (sector de-rate)", "AI-agent disruption headline",
+       "large logo win/loss", "seat-based pricing narrative shift"]
+
+  adtech:
+    label: Digital advertising technology
+    regulators: [federal_register]
+    fr_agencies: [federal-trade-commission]
+    fr_terms: ["children's online privacy", "data broker", "digital advertising",
+               "surveillance advertising"]
+    read_across: 0.45
+    peer_read_across: 0.75
+    high_impact_events:
+      ["Google/Microsoft ad policy or revenue-share change",
+       "ad-tech antitrust remedy ruling", "peer guidance cut",
+       "cookie/identifier deprecation update", "brand ad-spend datapoint"]
+
+  fintech_payments:
+    label: Payments & fintech
+    regulators: [federal_register]
+    fr_agencies: [consumer-financial-protection-bureau, federal-reserve-system]
+    fr_terms: ["interchange fee", "debit card interchange", "Regulation II",
+               "payment facilitator", "open banking"]
+    read_across: 0.40
+    peer_read_across: 0.60
+    high_impact_events:
+      ["interchange regulation change", "scheme fee change",
+       "peer take-rate compression", "large distribution partnership"]
+
+  renewable_power:
+    label: Renewable & geothermal power
+    regulators: [federal_register, federal_register_public_inspection, ferc_filings]
+    fr_agencies: [energy-department, internal-revenue-service,
+                  federal-energy-regulatory-commission, land-management-bureau]
+    fr_terms:
+      ["geothermal", "investment tax credit", "production tax credit",
+       "clean electricity", "section 45Y", "section 48E", "transferability",
+       "interconnection", "geothermal leasing", "categorical exclusion"]
+    read_across: 0.60
+    peer_read_across: 0.40
+    high_impact_events:
+      ["IRS tax-credit guidance", "FERC interconnection order",
+       "BLM geothermal leasing action", "large PPA with a data-center offtaker",
+       "state RPS change", "outage at a major plant"]
+
+  specialty_chemicals_fertilizer:
+    label: Specialty chemicals & fertilizers
+    regulators: [federal_register, echa_reach]
+    fr_agencies: [environmental-protection-agency, commerce-department,
+                  international-trade-commission]
+    fr_terms:
+      ["phosphate fertilizer countervailing duty", "potash", "bromine",
+       "flame retardant", "TSCA", "fertilizer import"]
+    read_across: 0.70
+    peer_read_across: 0.75
+    high_impact_events:
+      ["China/India potash contract settlement", "peer guidance / production cut",
+       "sanctions on Belarus/Russia potash", "CVD/AD duty ruling on phosphate",
+       "REACH restriction on brominated compounds", "Dead Sea concession news"]
+
+  power_holding:
+    label: Power holding / IPP
+    regulators: [federal_register, ferc_filings]
+    fr_agencies: [federal-energy-regulatory-commission, energy-department]
+    fr_terms: ["capacity auction", "PJM", "ERCOT", "interconnection", "reliability must run"]
+    read_across: 0.65
+    peer_read_across: 0.50
+    high_impact_events:
+      ["PJM capacity auction clearing price", "ERCOT scarcity pricing",
+       "data-center PPA at a peer IPP", "asset sale / special dividend"]
+
+  unknown:
+    label: Unclassified
+    regulators: []
+    fr_agencies: []
+    fr_terms: []
+    read_across: 0.0
+    peer_read_across: 0.0

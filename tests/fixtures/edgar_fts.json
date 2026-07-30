@@ -1,0 +1,27 @@
+{
+  "hits": {
+    "total": {"value": 2},
+    "hits": [
+      {
+        "_id": "0001234567-26-000009:doc1.htm",
+        "_source": {
+          "ciks": ["0001234567"],
+          "display_names": ["VIATRIS INC  (VTRS)"],
+          "file_type": "10-Q",
+          "root_form": "10-Q",
+          "file_date": "2026-07-29"
+        }
+      },
+      {
+        "_id": "0000818686-26-000042:ea0001.htm",
+        "_source": {
+          "ciks": ["0000818686"],
+          "display_names": ["TEVA PHARMACEUTICAL INDUSTRIES LTD  (TEVA)"],
+          "file_type": "8-K",
+          "root_form": "8-K",
+          "file_date": "2026-07-30"
+        }
+      }
+    ]
+  }
+}

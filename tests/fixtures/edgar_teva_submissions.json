@@ -1,0 +1,18 @@
+{
+  "cik": "818686",
+  "name": "TEVA PHARMACEUTICAL INDUSTRIES LTD",
+  "tickers": ["TEVA"],
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000818686-26-000042", "0000818686-26-000041", "0000818686-26-000040"],
+      "filingDate": ["2026-07-30", "2026-07-29", "2026-07-28"],
+      "acceptanceDateTime": ["2026-07-30T07:02:11.000Z", "2026-07-29T21:15:03.000Z", "2026-07-28T16:40:00.000Z"],
+      "form": ["8-K", "424B5", "S-8"],
+      "primaryDocument": ["ea0001.htm", "ea0002.htm", "ea0003.htm"],
+      "primaryDocDescription": ["FORM 8-K", "PROSPECTUS SUPPLEMENT", "FORM S-8"],
+      "items": ["2.02,9.01", "", ""],
+      "reportDate": ["2026-07-30", "2026-07-29", "2026-07-28"],
+      "fileNumber": ["001-16174", "333-1", "333-2"]
+    }
+  }
+}

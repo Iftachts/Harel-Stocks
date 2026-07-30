@@ -1,0 +1,17 @@
+# --- /etc/systemd/system/harel-terminal.service ------------------------------
+[Unit]
+Description=Harel Terminal - REST API and HTML terminal
+After=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/harel
+EnvironmentFile=/opt/harel/.env
+# Loopback only. Single-user system holding a trading edge - do not expose it.
+ExecStart=/opt/harel/.venv/bin/harel serve --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
