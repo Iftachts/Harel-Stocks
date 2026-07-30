@@ -385,6 +385,15 @@ def cmd_export(args) -> int:
     return 0
 
 
+def _mask_secrets(headers: dict) -> dict:
+    """Keep credentials out of terminal scrollback and pasted bug reports."""
+    out = dict(headers)
+    for key in ("apiKey", "apikey", "Authorization"):
+        if out.get(key):
+            out[key] = f"...{str(out[key])[-4:]}"
+    return out
+
+
 def cmd_probe_maya(args) -> int:
     """Hit the configured MAYA endpoint for one dual-listed name and report what
     actually came back. Run this once after deployment - the public endpoints
@@ -410,14 +419,24 @@ def cmd_probe_maya(args) -> int:
         print(f"{C.RED}no ticker has a tase_id set{C.RESET}")
         return 1
 
-    tase_id = str(cfg.ticker(probe).tase_id)
-    url, headers = collector._build_request(tase_id)
+    tc = cfg.ticker(probe)
+    tase_id = str(tc.tase_id)
+    issuer_id = tc.raw.get("tase_issuer_id")
+    if source.api_key and not issuer_id:
+        print(f"{C.RED}{probe} has no tase_issuer_id.{C.RESET}")
+        print(f"  The official v2 API keys on issuer number; tase_id ({tase_id}) is a")
+        print("  security id. Add `tase_issuer_id` to universe.yaml for this name.")
+        return 1
+
+    url, headers, params = collector._build_request(tc, issuer_id)
     print(f"probing {probe} (TASE {tase_id})\n  GET {url}")
-    print(f"  headers: {headers}")
+    if params:
+        print(f"  params:  {params}")
+    print(f"  headers: {_mask_secrets(headers)}")
     print(f"  auth: {'official API key' if source.api_key else 'public endpoint (undocumented)'}")
 
     try:
-        resp = client.get(url, headers=headers,
+        resp = client.get(url, headers=headers, params=params,
                           allow_status=(400, 401, 403, 404, 429, 500))
     except Exception as exc:
         print(f"{C.RED}request failed: {exc}{C.RESET}")
@@ -426,8 +445,19 @@ def cmd_probe_maya(args) -> int:
     print(f"  HTTP {resp.status}, {len(resp.content)} bytes")
     if resp.status >= 400:
         print(f"{C.RED}endpoint rejected the request.{C.RESET}")
-        print("  Fix: register at https://openapi.tase.co.il and set TASE_API_KEY,")
-        print("  or update sources.yaml -> maya_tase.endpoints.company_reports")
+        if resp.status == 401:
+            print("  401 - the apiKey header was missing or is not a valid key.")
+        elif resp.status == 403 and source.api_key:
+            print("  403 - the key authenticates, but the MAYA product is not active")
+            print("  for it. Check the product status in the TASE developer portal;")
+            print("  a subscription sitting at PENDING returns exactly this.")
+        elif resp.status == 403:
+            print("  403 - the undocumented public endpoint refused us, which is now")
+            print("  its normal state. The supported route is the official API: set")
+            print("  TASE_API_KEY once the MAYA product subscription is active.")
+        else:
+            print("  Update sources.yaml -> maya_tase.official_endpoint (official)")
+            print("  or maya_tase.endpoints.company_reports (public fallback).")
         return 1
 
     try:

@@ -68,6 +68,7 @@ class FakeHttpClient:
     def __init__(self, routes: dict[str, str | bytes | dict]):
         self.routes = routes
         self.calls: list[str] = []
+        self.headers_seen: list[dict[str, str]] = []
 
     def get(self, url, *, headers=None, params=None, etag=None,
             last_modified=None, allow_status=()):
@@ -79,6 +80,7 @@ class FakeHttpClient:
                 pairs = list(params)
             full += "?" + "&".join(f"{k}={v}" for k, v in pairs)
         self.calls.append(full)
+        self.headers_seen.append(dict(headers or {}))
 
         for needle, payload in self.routes.items():
             if needle in full:

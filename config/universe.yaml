@@ -33,6 +33,7 @@ tickers:
     aliases: ["Teva", "טבע", "Teva Pharmaceutical", "Teva Pharmaceuticals USA", "Teva API"]
     cik: "0000818686"
     tase_id: "629014"
+    tase_issuer_id: 629
     exchange: NYSE
     sector: pharma_generics_branded
     float_class: large
@@ -66,6 +67,7 @@ tickers:
     aliases: ["Tower Semiconductor", "TowerJazz", "טאואר", "Tower Partners Semiconductor", "TPSCo"]
     cik: "0000928876"
     tase_id: "1082510"
+    tase_issuer_id: 2028
     exchange: NASDAQ
     sector: semiconductors_foundry
     float_class: mid
@@ -83,7 +85,10 @@ tickers:
     products:
       SIPHO: ["silicon photonics", "800G", "1.6T optical", "co-packaged optics"]
       RF: ["RF SOI", "5G front end module", "antenna tuner"]
-      POWER: ["BCD", "power management", "GaN", "SiC"]
+      # Group keys become DIRECT match terms, so they must be as distinctive as
+      # a brand name. A bare "POWER" matched the word in any document body and
+      # tagged unrelated filings as Tower's own news.
+      POWER_MANAGEMENT: ["BCD", "power management", "GaN", "SiC"]
     catalysts: [earnings, semicon_west, isscc]
 
   NVMI:
@@ -91,6 +96,7 @@ tickers:
     aliases: ["Nova Ltd", "Nova Measuring Instruments", "נובה", "Nova Metrology"]
     cik: "0001109345"
     tase_id: "1084557"
+    tase_issuer_id: 2177
     exchange: NASDAQ
     sector: semicap_metrology
     float_class: mid
@@ -115,6 +121,7 @@ tickers:
     aliases: ["Camtek", "קמטק"]
     cik: "0001109138"
     tase_id: "1095478"
+    tase_issuer_id: 2174
     exchange: NASDAQ
     sector: semicap_inspection
     float_class: small
@@ -137,6 +144,7 @@ tickers:
     aliases: ["NICE Ltd", "NICE Systems", "נייס", "NICE CXone", "NICE Actimize", "inContact"]
     cik: "0001003935"
     tase_id: "273011"
+    tase_issuer_id: 273
     exchange: NASDAQ
     sector: enterprise_software_cx
     float_class: large
@@ -160,6 +168,7 @@ tickers:
     aliases: ["LivePerson", "לייבפרסון"]
     cik: "0001102993"
     tase_id: null
+    tase_issuer_id: 1579
     exchange: NASDAQ
     sector: enterprise_software_cx
     float_class: micro
@@ -179,6 +188,7 @@ tickers:
     aliases: ["Perion", "פריון", "Undertone", "Codefuel"]
     cik: "0001338940"
     tase_id: "1084132"
+    tase_issuer_id: 2240
     exchange: NASDAQ
     sector: adtech
     float_class: small
@@ -203,6 +213,7 @@ tickers:
     aliases: ["Nayax", "נייקס", "ניאקס", "Nayax Ltd", "Retail Pro", "Weezmo", "UPmarket"]
     cik: "0001857816"
     tase_id: "1175033"
+    tase_issuer_id: 1894
     exchange: NASDAQ
     sector: fintech_payments
     float_class: small
@@ -223,6 +234,7 @@ tickers:
     aliases: ["Ormat", "אורמת", "Ormat Technologies", "Ormat Industries"]
     cik: "0001296445"
     tase_id: "1134402"
+    tase_issuer_id: 2250
     exchange: NYSE
     sector: renewable_power
     float_class: mid
@@ -245,6 +257,7 @@ tickers:
     aliases: ["ICL Group", "Israel Chemicals", "כיל", "ICL Fertilizers", "Dead Sea Works", "Rotem Amfert", "ICL Specialty Products"]
     cik: "0000941221"
     tase_id: "281014"
+    tase_issuer_id: 281
     exchange: NYSE
     sector: specialty_chemicals_fertilizer
     float_class: mid
@@ -268,6 +281,7 @@ tickers:
     aliases: ["Elbit Systems", "אלביט", "Elbit Systems of America", "IMI Systems", "Elbit America"]
     cik: "0001027664"
     tase_id: "1081124"
+    tase_issuer_id: 1040
     exchange: NASDAQ
     sector: defense
     float_class: mid
@@ -293,6 +307,7 @@ tickers:
     aliases: ["TAT Technologies", "תת טכנולוגיות", "Limco-Piedmont", "Piedmont Aviation", "TAT Industries"]
     cik: "0000808439"
     tase_id: "180027"
+    tase_issuer_id: 2110
     exchange: NASDAQ
     sector: aerospace_mro
     float_class: micro
@@ -313,6 +328,7 @@ tickers:
     aliases: ["Gilat", "גילת", "Gilat Satellite Networks", "Wavestream", "Stellar Blu", "DataPath"]
     cik: "0001090203"
     tase_id: "1082494"
+    tase_issuer_id: 2030
     exchange: NASDAQ
     sector: satcom
     float_class: small
@@ -334,6 +350,7 @@ tickers:
     aliases: ["Allot", "אלוט", "Allot Communications", "Allot Secure"]
     cik: "0001365767"
     tase_id: "1091915"
+    tase_issuer_id: 2252
     exchange: NASDAQ
     sector: network_security
     float_class: micro
@@ -354,6 +371,7 @@ tickers:
     aliases: ["AudioCodes", "אודיוקודס", "AudioCodes Live", "Voca CIC"]
     cik: "0001086222"
     tase_id: "1084215"
+    tase_issuer_id: 2134
     exchange: NASDAQ
     sector: voice_networking
     float_class: small
@@ -377,6 +395,7 @@ tickers:
     aliases: ["OPKO", "OPKO Health", "BioReference", "BioReference Laboratories", "GeneDx (legacy)", "ModeX", "ModeX Therapeutics"]
     cik: "0000944809"
     tase_id: "1128917"
+    tase_issuer_id: 1610
     exchange: NASDAQ
     sector: diagnostics_pharma
     float_class: small
@@ -403,6 +422,7 @@ tickers:
     aliases: ["Oramed", "אורמד", "Oramed Pharmaceuticals", "Oravax", "Oravax Medical"]
     cik: "0001176309"
     tase_id: "1132273"
+    tase_issuer_id: 1691
     exchange: NASDAQ
     sector: biotech_clinical
     float_class: micro
@@ -424,6 +444,7 @@ tickers:
     aliases: ["Kamada", "כמאדה", "קמהדע", "Kamada Ltd", "Kamada Plasma"]
     cik: "0001567529"
     tase_id: "1094119"
+    tase_issuer_id: 1267
     exchange: NASDAQ
     sector: plasma_biopharma
     float_class: micro
@@ -451,6 +472,7 @@ tickers:
     aliases: ["Compugen", "קומפיוג'ן", "Compugen Ltd"]
     cik: "0001119774"
     tase_id: "1092008"
+    tase_issuer_id: 2188
     exchange: NASDAQ
     sector: biotech_clinical
     float_class: micro
@@ -484,6 +506,7 @@ tickers:
     aliases: ["BrainsWay", "בריינסוואי", "Brainsway Ltd", "Deep TMS", "dTMS"]
     cik: "0001505497"
     tase_id: "1132158"
+    tase_issuer_id: 1386
     exchange: NASDAQ
     sector: medical_devices
     float_class: micro
@@ -505,6 +528,7 @@ tickers:
     aliases: ["Kenon", "Kenon Holdings", "קנון", "OPC Energy", "CPV Group", "Quantum Power"]
     cik: "0001611005"
     tase_id: "1141661"
+    tase_issuer_id: 1635
     exchange: NYSE
     sector: power_holding
     float_class: micro
@@ -529,6 +553,7 @@ tickers:
     aliases: ["Palo Alto Networks", "פאלו אלטו", "פאלו אלטו נטוורקס", "Palo Alto Networks, Inc."]
     cik: "0001327567"
     tase_id: null
+    tase_issuer_id: 2538
     exchange: NASDAQ
     sector: cybersecurity_platform
     float_class: large

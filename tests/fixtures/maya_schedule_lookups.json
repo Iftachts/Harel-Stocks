@@ -1,0 +1,18 @@
+{
+  "report_types": {
+    "data": [
+      { "financialReportTypeId": 1, "financialReportType": "דוח כספי" },
+      { "financialReportTypeId": 2, "financialReportType": "שיחת ועידה" }
+    ],
+    "meta": { "total": 2, "hasMore": false, "keyset": null }
+  },
+  "period_types": {
+    "data": [
+      { "periodTypeId": 1, "periodType": "רבעון 1" },
+      { "periodTypeId": 2, "periodType": "חציון" },
+      { "periodTypeId": 3, "periodType": "רבעון 3" },
+      { "periodTypeId": 4, "periodType": "שנתי" }
+    ],
+    "meta": { "total": 4, "hasMore": false, "keyset": null }
+  }
+}

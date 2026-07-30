@@ -128,7 +128,11 @@ class PriceCollector(Collector):
         meta = result[0].get("meta") or {}
 
         last = meta.get("regularMarketPrice")
-        prev_close = meta.get("chartPreviousClose") or meta.get("previousClose")
+        # `chartPreviousClose` is the close before the *requested range*, so with
+        # range=5d it is last week's close and every move looks like a 5-day move.
+        # `previousClose` is the prior session's close, which is what an intraday
+        # move means. Keep the chart field only as a fallback.
+        prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
         # Pre/post prints live in a separate block on this endpoint.
         for key in ("preMarketPrice", "postMarketPrice"):
             if meta.get(key):

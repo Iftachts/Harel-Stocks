@@ -271,6 +271,10 @@ noise:
   hard_cap_default: 12
 
   form_types:
+    # A scheduled-results date is calendar data, not a headline. It is collected
+    # for the `calendar` table; capping it keeps it out of the ranked feed while
+    # the source still shows a live item count.
+    "MAYA-SCHEDULE": 6
     # Routine SEC/TASE paperwork with ~zero intraday information content
     "S-8": 8
     "424B3": 10          # resale prospectus - already-issued shares
