@@ -1,0 +1,304 @@
+# הוראות הפעלה — Harel Terminal
+
+---
+
+## שלב 0 — התקנה (פעם אחת)
+
+```bash
+cd Harel-Stocks
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[serve,mcp,dev]"
+```
+
+### הגדרת סביבה
+
+```bash
+cp .env.example .env
+```
+
+ערוך את `.env`. **שדה אחד חובה:**
+
+```bash
+SEC_CONTACT_EMAIL=iftachts@gmail.com
+```
+
+בלי זה ה־SEC מחזירה 403 ומאבדים את המקור הכי חשוב במערכת. ה־SEC דורשת
+User-Agent עם כתובת קשר — זה לא אופציונלי מבחינתם.
+
+טעינה לסביבה (בכל טרמינל חדש):
+
+```bash
+set -a && source .env && set +a
+```
+
+---
+
+## שלב 1 — אימות לפני שסומכים על משהו
+
+שלוש פקודות, בסדר הזה. **אל תדלג.**
+
+### 1.1 `harel doctor`
+
+```bash
+harel doctor
+```
+
+מה לחפש:
+- `universe  21 active, 1 unresolved` — ה־unresolved הוא PAMW (ראה שלב 2)
+- `sources   24/28 available` — 4 כבויים כי חסרים מפתחות, זה תקין
+- רשימת "Sources off" — מפתחות שאפשר להוסיף מאוחר יותר
+
+### 1.2 `harel verify-feeds`
+
+```bash
+harel verify-feeds
+```
+
+עובר על ~31 פידי RSS ומדווח `OK` / `EMPTY` / `DEAD` לכל אחד, עם ה־URL.
+
+**חשוב:** כתובות פידי ה־IR ב־`universe.yaml` נבנו לפי המוסכמה הרגילה של כל אתר
+אבל **לא אומתו מול האתרים החיים** — בסביבת הבנייה כל תעבורה יוצאת חסומה.
+חלקן כנראה שגויות.
+
+תיקון: פתח את `config/universe.yaml`, מצא את הטיקר, החלף את ה־URL תחת `ir_feeds`.
+פיד שבור לא מפיל שם — הוא רק יורד לכיסוי דרך Google News (אמון 0.6 במקום 1.0).
+
+### 1.3 `harel probe-maya`
+
+```bash
+harel probe-maya
+```
+
+בודק את הערוץ הישראלי מקצה לקצה ומדפיס בדיוק מה חזר.
+
+- `OK -> 2026-07-30T06:05:00+00:00 | [MAYA] דיווח מיידי…` → מצוין, הערוץ עובד
+- `HTTP 4xx` → ה־endpoint השתנה. פתרון: הירשם ב-`openapi.tase.co.il`, קבל מפתח,
+  שים `TASE_API_KEY` ב-`.env`
+- `records found but fields did not map` → שמות שדות השתנו. הפלט מציג את המפתחות
+  האמיתיים; הוסף אותם ל-`TITLE_KEYS` / `DATE_KEYS` ב-`src/harel/collect/maya.py`
+
+זה המקור בעל הערך הגבוה ביותר בסל הזה (20 מ-21 דואליים) — שווה את שתי הדקות.
+
+---
+
+## שלב 2 — לתקן את PAMW
+
+`PAMW` לא מתאים לשום נייר ערך רשום. כרגע הוא מסומן `unresolved` ו**לא נאסף עליו כלום**.
+
+ב-`config/universe.yaml`, בסוף הקובץ, החלף את הבלוק `PAMW:` בטיקר האמיתי.
+אם הכוונה הייתה PANW:
+
+```yaml
+  PANW:
+    name: Palo Alto Networks Inc
+    aliases: ["Palo Alto Networks", "פאלו אלטו", "Cortex", "Prisma"]
+    cik: null                # ייפתר אוטומטית ממפת הטיקרים של ה-SEC
+    tase_id: null
+    exchange: NASDAQ
+    sector: network_security
+    float_class: large
+    ir_feeds:
+      - https://investors.paloaltonetworks.com/rss/news-releases.xml
+    peers: [CRWD, ZS, FTNT, S, CHKP, NET, CSCO]
+    peer_names: ["CrowdStrike", "Zscaler", "Fortinet", "SentinelOne",
+                 "Check Point", "Cloudflare", "Cisco", "Microsoft Defender"]
+    themes:
+      ["SASE", "platformization", "next-gen firewall", "XDR", "SIEM replacement",
+       "billings growth", "federal cyber budget", "AI security"]
+    catalysts: [earnings, ignite_conference]
+```
+
+`pytest tests/test_config.py -q` יאמת שהבלוק תקין (הבדיקות דורשות `peer_names`
+ו-`themes` לכל שם פעיל — בלעדיהם אין כיסוי עקיף).
+
+---
+
+## שלב 3 — איסוף ראשון
+
+```bash
+harel collect --hours 336        # שבועיים אחורה, למלא את המסד
+```
+
+לוקח 3–10 דקות בפעם הראשונה (rate limiting מכוון מול ה-SEC). הפלט מראה
+כמה נאסף מכל מקור, אזהרות, ושגיאות.
+
+בדיקה שיש תוכן:
+
+```bash
+harel doctor          # אמור להראות אלפי items
+harel morning         # תדריך בוקר
+harel feed --limit 20 # הפיד המדורג
+```
+
+---
+
+## שלב 4 — הפעלה יומיומית
+
+### הרצה רציפה
+
+```bash
+harel watch --interval 120 --hours 12
+```
+
+מעבר איסוף כל שתי דקות, חלון מבט של 12 שעות. משאיר את המסד עדכני.
+הדפסה של התראות חדשות בכל מעבר.
+
+**כשירות (מומלץ):**
+
+```bash
+sudo cp scripts/harel-terminal.service /etc/systemd/system/harel-collect.service
+sudo cp scripts/harel-web.service /etc/systemd/system/harel-terminal.service
+# ערוך User, WorkingDirectory ונתיב ה-venv בשני הקבצים
+sudo systemctl daemon-reload
+sudo systemctl enable --now harel-collect harel-terminal
+```
+
+### הטרמינל
+
+```bash
+harel serve                  # http://127.0.0.1:8787
+```
+
+עמוד אחד, צפוף, ענבר על שחור: אזהרות כיסוי → התראות → מנייעים → פיד →
+MAYA לילי → לוח אירועים. אין JavaScript, אין רשת חיצונית.
+
+**מאזין רק ל-loopback בכוונה.** אל תחשוף החוצה.
+
+---
+
+## שלב 5 — הפקודות שתשתמש בהן בפועל
+
+```bash
+harel morning                      # ← תתחיל כאן כל בוקר
+harel morning --hours 16           # רק מאז הסגירה אתמול
+
+harel feed                         # ציון ≥45, 24 שעות אחרונות
+harel feed --min-score 70          # רק התראות
+harel feed --tickers TEVA,CGEN     # שמות ספציפיים
+harel feed --relations DIRECT      # רק חדשות של החברות עצמן
+harel feed --relations PRODUCT_RIVAL,PEER   # רק קריאה צולבת
+harel feed --events clinical_readout,equity_offering
+harel feed --why                   # למה כל פריט קיבל את הציון שלו
+
+harel brief TEVA                   # שם אחד: ישיר + עקיף + מחיר + לוח
+harel brief CGEN --hours 168       # שבוע אחורה
+
+harel search "potash contract"     # חיפוש מלא (עברית עובדת)
+harel search "דיווח מיידי"
+harel search '"export controls" NOT China'   # תחביר FTS5
+
+harel moving                       # מנייעים + ההסבר שלהם
+harel moving --min-pct 5
+
+harel export today.html            # תמונת מצב סטטית
+```
+
+**דגלים גלובליים:**
+
+| | |
+|---|---|
+| `--json` | פלט JSON גולמי — לצנרת, לסקריפטים, לסוכן |
+| `--db PATH` | מסד אחר (למשל `data/demo.db`) |
+| `-v` | לוגים מפורטים, לדיבוג |
+| `--no-color` | בלי ANSI |
+
+---
+
+## שלב 6 — לחבר את הסוכן
+
+### דרך MCP (מומלץ)
+
+`~/.claude.json` או הגדרות Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "harel": {
+      "command": "/full/path/to/Harel-Stocks/.venv/bin/harel",
+      "args": ["mcp"],
+      "env": { "SEC_CONTACT_EMAIL": "iftachts@gmail.com" }
+    }
+  }
+}
+```
+
+הסוכן מקבל 9 כלים: `morning_brief`, `feed`, `ticker_brief`, `search`,
+`whats_moving`, `get_item`, `calendar`, `universe`, `health`.
+
+השרת מזריק לסוכן הוראות שאוסרות עליו להציג ידיעה של `PEER` כחדשות של החברה
+שלנו, ומחייבות אותו לצטט `source` ו-`url`.
+
+### דרך REST
+
+```bash
+harel serve
+curl -s localhost:8787/agent/manifest | jq   # הסבר לסוכן איך לקרוא כל שדה
+curl -s "localhost:8787/api/feed?tickers=TEVA&min_score=60" | jq
+curl -s localhost:8787/api/brief/CGEN | jq
+```
+
+---
+
+## שלב 7 — כוונון אחרי שבוע
+
+הכול ב-`config/scoring.yaml`. **אל תיגע בקוד.**
+
+| מה מרגיש לא נכון | מה לשנות |
+|---|---|
+| הפיד שטחי מדי, מפספס דברים | `recency.half_life_hours` 8 → 12 |
+| הפיד מלא בישן | `recency.half_life_hours` 8 → 6 |
+| יותר מ-10 התראות ביום | `tiers.alert` 75 → 80 |
+| פחות מ-2 התראות ביום | `tiers.alert` 75 → 70 |
+| סוג ידיעה מסוים מדורג נמוך מדי | `events.<שם>.base` |
+| רעש חוזר שלא נחסם | הוסף שורה ל-`noise.title_patterns` |
+| מילת מפתח ספציפית לשם | `overrides.<TICKER>.keyword_boosts` |
+
+**איך מאבחנים:** `harel feed --why` מדפיס את עקבות הניקוד המלאות של כל פריט —
+איזה אירוע זוהה, אמון המקור, מכפיל ה-relation, דעיכת הזמן, כל בונוס. משם
+ברור מה לשנות.
+
+---
+
+## פתרון תקלות
+
+| תסמין | סיבה | פתרון |
+|---|---|---|
+| `HTTP 403` מ-`data.sec.gov` | `SEC_CONTACT_EMAIL` לא נטען | `set -a && source .env && set +a` |
+| `harel: command not found` | ה-venv לא פעיל | `source .venv/bin/activate` |
+| הפיד ריק | לא רץ איסוף | `harel collect --hours 336` |
+| `nothing at score >= 45` | סף גבוה מדי ליום שקט | `harel feed --min-score 20` |
+| שם ספציפי בלי חדשות | פיד IR שבור | `harel verify-feeds` |
+| MAYA לא מחזיר כלום | endpoint השתנה | `harel probe-maya` |
+| `harel doctor` מראה fails=5+ | מקור נשבר | ראה `last_error` בפלט |
+| הסוכן אומר "אין חדשות" | אולי אין **איסוף** | הוא חייב לקרוא `coverage_warnings` |
+
+**כלל הזהב:** שקט בפיד יכול להיות "אין חדשות" או "המערכת עיוורת". `harel doctor`
+ו-`coverage_warnings` בכל תדריך בוקר קיימים בדיוק כדי להבדיל בין השניים.
+
+---
+
+## דמו בלי רשת
+
+לראות את הדירוג והתיוג לפני שמגדירים משהו:
+
+```bash
+python scripts/seed_demo.py
+harel --db data/demo.db morning --hours 100000
+harel --db data/demo.db brief TEVA --hours 100000
+harel --db data/demo.db export demo.html
+```
+
+תוכן מציאותי אבל מומצא. לא נתוני שוק.
+
+---
+
+## בדיקות
+
+```bash
+pytest -q          # 78 בדיקות, רצות בלי רשת מול fixtures מוקלטים
+```
+
+הרץ אחרי כל שינוי ב-`config/` — הבדיקות תופסות שגיאות תצורה
+(סקטור שמצביע על מקור לא קיים, שם בלי `peer_names`, כלל שהיה מסווג כל 8-K כאירוע
+compliance).

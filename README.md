@@ -45,11 +45,16 @@ set -a && source .env && set +a
 
 ```bash
 harel doctor                  # מה מוגדר, מה חסר, מה שבור
-harel collect                 # מעבר איסוף אחד
+harel verify-feeds            # אילו פידי RSS באמת חיים
+harel probe-maya              # אימות הערוץ הישראלי
+harel collect --hours 336     # איסוף ראשון, שבועיים אחורה
 harel morning                 # תדריך בוקר
 harel watch --interval 120    # לולאת איסוף רציפה
 harel serve                   # http://127.0.0.1:8787  ← הטרמינל
 ```
+
+**הוראות ההפעלה המלאות: [`docs/RUNBOOK.md`](docs/RUNBOOK.md)** — התקנה, אימות,
+הרצה כשירות, חיבור הסוכן, כוונון ופתרון תקלות.
 
 ### דמו בלי רשת
 
