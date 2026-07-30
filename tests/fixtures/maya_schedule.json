@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "scheduledDate": "2026-11-12",
+      "scheduledTime": "09:30:00",
+      "financialReportTypeId": 1,
+      "issuerId": 629,
+      "year": 2026,
+      "periodTypeId": 3,
+      "timeZone": "Asia/Jerusalem",
+      "url": "https://maya.tase.co.il/reports/schedule/629"
+    },
+    {
+      "scheduledDate": "2027-03-04",
+      "scheduledTime": null,
+      "financialReportTypeId": 2,
+      "issuerId": 629,
+      "year": 2026,
+      "periodTypeId": 4,
+      "timeZone": "Asia/Jerusalem",
+      "url": null
+    }
+  ],
+  "meta": { "total": 2, "hasMore": false, "keyset": null }
+}

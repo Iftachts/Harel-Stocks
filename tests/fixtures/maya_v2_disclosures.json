@@ -1,0 +1,39 @@
+{
+  "data": [
+    {
+      "publicationDate": "2026-07-30T06:05:00.531Z",
+      "mayaReportId": 1662001,
+      "isPriorityReport": true,
+      "title": "דיווח מיידי על תוצאות כספיות לרבעון השני",
+      "isCorrection": false,
+      "url": "https://maya.tase.co.il/reports/details/1662001",
+      "issuer": [
+        { "issuerId": 629, "issuerName": "טבע תעשיות פרמצבטיות בע\"מ", "assosiated": true }
+      ],
+      "events": [
+        { "eventId": 300, "eventName": "דוחות כספיים" }
+      ],
+      "attachedFiles": [
+        { "url": "https://mayafiles.tase.co.il/rpdf/1662001.pdf" }
+      ]
+    },
+    {
+      "publicationDate": "2026-07-30T05:00:00Z",
+      "mayaReportId": 1662002,
+      "isPriorityReport": false,
+      "title": "הודעה על אסיפה כללית שנתית של בעלי המניות",
+      "isCorrection": true,
+      "url": "/reports/details/1662002",
+      "issuer": [
+        { "issuerId": 629, "issuerName": "טבע תעשיות פרמצבטיות בע\"מ", "assosiated": true }
+      ],
+      "events": [],
+      "attachedFiles": []
+    }
+  ],
+  "meta": {
+    "total": 42,
+    "hasMore": true,
+    "keyset": "eyJrIjoxNjYyMDAyfQ=="
+  }
+}

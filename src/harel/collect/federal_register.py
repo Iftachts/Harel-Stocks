@@ -33,6 +33,24 @@ FIELDS = [
 MAX_PER_QUERY = 40
 
 
+def _as_phrase(term: str) -> str:
+    """Quote multi-word terms so the API matches the phrase, not the loose words.
+
+    ``conditions[term]`` ANDs the words and searches the *full document text*,
+    not the phrase and not just the title. Unquoted, "entity list" matches any
+    rule whose body happens to contain both "entity" and "list" - which for
+    long regulatory documents is close to all of them. Combined with umbrella
+    agency slugs (commerce-department covers NOAA) that pulled fisheries and
+    marine-mammal rules in against the semiconductor names. Quoting restricts
+    the match to the exact phrase, which is what a term of art like "entity
+    list" or "deemed export" actually means.
+    """
+    term = term.strip()
+    if " " not in term or term.startswith('"'):
+        return term
+    return f'"{term}"'
+
+
 @register("federal_register")
 class FederalRegisterCollector(Collector):
     def collect(self) -> Iterator[RawItem]:
@@ -62,13 +80,20 @@ class FederalRegisterCollector(Collector):
             agencies = forced or sector.fr_agencies
             if not agencies or not sector.fr_terms:
                 continue
+            # A source that forces its own agency (faa_ads -> FAA) must only run
+            # for sectors that actually claim it as a regulator. Without this it
+            # pairs the FAA with every sector's search terms, which linked
+            # airworthiness directives to a medical-device maker and a
+            # geothermal operator at SECTOR_REG confidence.
+            if forced and self.source.key not in sector.regulators:
+                continue
             plan.append((list(agencies), list(sector.fr_terms), tickers, sector_key))
         return plan
 
     def _query(self, agencies: list[str], term: str, tickers: list[str],
                sector_key: str) -> Iterator[RawItem]:
         params: list[tuple[str, str]] = [
-            ("conditions[term]", term),
+            ("conditions[term]", _as_phrase(term)),
             ("conditions[publication_date][gte]", self.ctx.since.date().isoformat()),
             ("per_page", str(MAX_PER_QUERY)),
             ("order", "newest"),

@@ -189,6 +189,16 @@ class Pipeline:
         if meta.get("comments_close_on"):
             add("comment_deadline", meta["comments_close_on"],
                 f"Comment deadline: {scored.raw.title[:90]}", 0.9)
+        if meta.get("scheduled_report_on"):
+            # TASE-published expected results date. These are the dates a
+            # short-term trader must not be caught short into; they are official
+            # but can still move, hence 0.9 rather than 1.0.
+            clock = meta.get("scheduled_time")
+            add("earnings", meta["scheduled_report_on"],
+                "Expected results: "
+                + (meta.get("schedule_label") or scored.raw.title[:90])
+                + (f" at {clock}" if clock else ""),
+                0.9)
 
         if entries:
             self.db.save_calendar(entries)

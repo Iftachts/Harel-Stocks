@@ -32,6 +32,7 @@ HOST_RATE_LIMITS = {
     "clinicaltrials.gov": 3.0,
     "www.federalregister.gov": 5.0,
     "mayaapi.tase.co.il": 2.0,
+    "datawise.tase.co.il": 2.0,
     "news.google.com": 2.0,
     "stooq.com": 2.0,
     "query1.finance.yahoo.com": 2.0,

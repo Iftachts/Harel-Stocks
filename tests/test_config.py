@@ -34,6 +34,37 @@ def test_every_active_ticker_has_peers_and_themes(config):
         assert tc.themes, f"{ticker} has no themes"
 
 
+def test_no_product_term_is_a_generic_english_word(config):
+    """Product terms become DIRECT match rules - the relation the MCP server
+    tells the agent to treat as fact about the issuer. A term like "POWER"
+    matches the word in any document body and mislabels unrelated filings as
+    the company's own news, so terms must be as distinctive as a brand name.
+    """
+    generic = {
+        "power", "optical", "memory", "vision", "signal", "sensor", "digital",
+        "mobile", "secure", "access", "network", "energy", "system", "systems",
+        "cloud", "platform", "storage", "control", "wireless", "battery",
+    }
+    for ticker in config.active_tickers:
+        for term in config.ticker(ticker).product_terms:
+            if len(term) < 5:
+                continue  # too short to become a rule anyway
+            assert term.strip().lower() not in generic, (
+                f"{ticker} product term {term!r} is a generic word; it would tag "
+                f"any document containing it as {ticker}'s own news"
+            )
+
+
+def test_every_active_ticker_has_a_tase_issuer_id(config):
+    """The MAYA v2 API keys on issuer number, not the security id in tase_id.
+    A name without one is silently absent from the Israeli disclosure feed."""
+    missing = [
+        t for t in config.active_tickers
+        if not config.ticker(t).raw.get("tase_issuer_id")
+    ]
+    assert missing == [], f"no tase_issuer_id for {missing}"
+
+
 def test_scoring_regexes_all_compile(config):
     assert len(config.scoring.events) >= 20
     for rule in config.scoring.events:
