@@ -29,7 +29,7 @@ are locked at `PEER` — the collector synthesises a headline containing our own
 company name, and without the lock the linker would read that back and call it
 DIRECT.
 
-**`maya_tase`** is the structural edge for this basket. See
+**`maya_tase`** is the structural edge for this basket (20 of 22 dual-listed). See
 [LIMITATIONS §3](LIMITATIONS.md#3-tase--maya--עובד-אבל-על-endpoint-לא-מתועד).
 
 ---

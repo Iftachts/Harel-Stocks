@@ -45,7 +45,7 @@ harel doctor
 ```
 
 מה לחפש:
-- `universe  21 active, 1 unresolved` — ה־unresolved הוא PAMW (ראה שלב 2)
+- `universe  22 active, 0 unresolved` — אם מופיע unresolved, ראה שלב 2
 - `sources   24/28 available` — 4 כבויים כי חסרים מפתחות, זה תקין
 - רשימת "Sources off" — מפתחות שאפשר להוסיף מאוחר יותר
 
@@ -78,39 +78,48 @@ harel probe-maya
 - `records found but fields did not map` → שמות שדות השתנו. הפלט מציג את המפתחות
   האמיתיים; הוסף אותם ל-`TITLE_KEYS` / `DATE_KEYS` ב-`src/harel/collect/maya.py`
 
-זה המקור בעל הערך הגבוה ביותר בסל הזה (20 מ-21 דואליים) — שווה את שתי הדקות.
+זה המקור בעל הערך הגבוה ביותר בסל הזה (20 מ-22 דואליים) — שווה את שתי הדקות.
 
 ---
 
-## שלב 2 — לתקן את PAMW
+## שלב 2 — להוסיף או לשנות שם בסל
 
-`PAMW` לא מתאים לשום נייר ערך רשום. כרגע הוא מסומן `unresolved` ו**לא נאסף עליו כלום**.
-
-ב-`config/universe.yaml`, בסוף הקובץ, החלף את הבלוק `PAMW:` בטיקר האמיתי.
-אם הכוונה הייתה PANW:
+הסל מוגדר כולו ב-`config/universe.yaml`. אין קוד לשנות.
 
 ```yaml
-  PANW:
-    name: Palo Alto Networks Inc
-    aliases: ["Palo Alto Networks", "פאלו אלטו", "Cortex", "Prisma"]
+  TICKER:
+    name: Full Legal Name Inc
+    aliases: ["שם מקוצר", "שם בעברית", "מותג"]
     cik: null                # ייפתר אוטומטית ממפת הטיקרים של ה-SEC
-    tase_id: null
+    tase_id: null            # מזהה נייר ב-TASE, אם דואלי
     exchange: NASDAQ
-    sector: network_security
-    float_class: large
-    ir_feeds:
-      - https://investors.paloaltonetworks.com/rss/news-releases.xml
-    peers: [CRWD, ZS, FTNT, S, CHKP, NET, CSCO]
-    peer_names: ["CrowdStrike", "Zscaler", "Fortinet", "SentinelOne",
-                 "Check Point", "Cloudflare", "Cisco", "Microsoft Defender"]
-    themes:
-      ["SASE", "platformization", "next-gen firewall", "XDR", "SIEM replacement",
-       "billings growth", "federal cyber budget", "AI security"]
-    catalysts: [earnings, ignite_conference]
+    sector: <מפתח מ-sectors.yaml>
+    float_class: micro | small | mid | large
+    ir_feeds: [https://…/rss]
+    peers: [SYM1, SYM2]
+    peer_names: ["Competitor A", "Competitor B"]     # חובה
+    themes: ["theme one", "theme two"]               # חובה
+    products: { BRAND: ["generic name", "alias"] }
+    competitor_products: ["Rival Brand"]
+    peer_events_that_matter: ["Customer capex guidance"]
+    single_points_of_failure: ["תלות בשותף יחיד"]
 ```
 
-`pytest tests/test_config.py -q` יאמת שהבלוק תקין (הבדיקות דורשות `peer_names`
-ו-`themes` לכל שם פעיל — בלעדיהם אין כיסוי עקיף).
+**השדות שקובעים את איכות הכיסוי העקיף** הם `peer_names`, `competitor_products`
+ו-`themes`. בלעדיהם השם ייאסף אבל לא תקבל עליו קריאה צולבת.
+
+אחרי עריכה:
+
+```bash
+pytest tests/test_config.py -q
+```
+
+הבדיקות דורשות `peer_names` ו-`themes` לכל שם פעיל, ומאמתות שה-`sector` קיים —
+כך שרשומה חלקית נופלת בבדיקה במקום לאסוף בשקט חצי מהמידע.
+
+**טיקר שלא נפתר:** אם סימבול הוקפא, נמחק או הוקלד לא נכון, סמן אותו
+`unresolved: true` + `enabled: false` עם `resolution_hint`. הוא יופיע כאזהרה
+בכל תדריך בוקר במקום להיעלם בשקט.
 
 ---
 
@@ -296,7 +305,7 @@ harel --db data/demo.db export demo.html
 ## בדיקות
 
 ```bash
-pytest -q          # 78 בדיקות, רצות בלי רשת מול fixtures מוקלטים
+pytest -q          # 82 בדיקות, רצות בלי רשת מול fixtures מוקלטים
 ```
 
 הרץ אחרי כל שינוי ב-`config/` — הבדיקות תופסות שגיאות תצורה

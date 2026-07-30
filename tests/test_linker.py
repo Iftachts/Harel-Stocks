@@ -106,9 +106,10 @@ def test_regulator_document_links_whole_sector(linker):
     assert {"TSEM", "NVMI", "CAMT"} & semis
 
 
-def test_unresolved_ticker_never_gets_linked(linker):
-    links = linker.link(item("PAMW reports record quarter"))
-    assert rel(links, "PAMW") is None
+def test_unresolved_ticker_never_gets_linked(config_with_unresolved):
+    unresolved_linker = EntityLinker(config_with_unresolved)
+    links = unresolved_linker.link(item("ZZTEST reports record quarter"))
+    assert rel(links, "ZZTEST") is None
 
 
 def test_link_why_is_populated_for_every_link(linker):
@@ -126,3 +127,22 @@ def test_synthetic_tape_alert_does_not_read_across_to_peers(linker):
         source="prices_stooq", seed=["NVMI"], meta={"synthetic": True},
     ))
     assert [l.ticker for l in links] == ["NVMI"]
+
+
+def test_panw_peer_readacross(linker):
+    """Security platforms trade as a cohort: a peer's billings miss de-rates the
+    group, so it must reach PANW as PEER - and must not read as PANW's own news."""
+    links = linker.link(item("CrowdStrike cuts full-year net-new ARR guidance"))
+    assert rel(links, "PANW") == "PEER"
+
+
+def test_panw_direct_on_its_own_metrics(linker):
+    links = linker.link(item("Palo Alto Networks reports NGS ARR growth and raises guidance"))
+    assert rel(links, "PANW") == "DIRECT"
+
+
+def test_check_point_links_to_both_israeli_security_names(linker):
+    """CHKP is a named competitor of both PANW and ALLT."""
+    links = linker.link(item("Check Point raises full-year revenue guidance"))
+    assert rel(links, "PANW") == "PEER"
+    assert rel(links, "ALLT") == "PEER"

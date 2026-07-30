@@ -1,10 +1,10 @@
 # Harel Terminal
 
-מערכת בסגנון בלומברג לסל של 21 מניות ישראליות/ישראליות-במקור, שנבנתה **לסוחר יומי / קצר-טווח**.
+מערכת בסגנון בלומברג לסל של 22 מניות ישראליות/ישראליות-במקור, שנבנתה **לסוחר יומי / קצר-טווח**.
 היא אוספת ידיעות ישירות ועקיפות (כולל רגולציה של מתחרים באותו סקטור), מדרגת אותן לפי
 "כמה זה יכול להזיז את המניה בשעות הקרובות", ומגישה את התוצאה לסוכן LLM.
 
-A Bloomberg-style news terminal for a fixed 21-name basket, built for **short-term
+A Bloomberg-style news terminal for a fixed 22-name basket, built for **short-term
 trading**. It collects direct and indirect news — including regulatory actions on
 sector competitors — ranks everything by "can this move the print in the next few
 hours", and serves the result to an LLM agent.
@@ -20,12 +20,15 @@ hours", and serves the result to an LLM agent.
 | **Defense / aero** | ESLT, TATT | |
 | **Comms / satcom** | GILT, AUDC, ALLT | |
 | **Software** | NICE, LPSN | PERI (adtech), NYAX (payments) |
+| **Cybersecurity** | PANW | |
 | **Energy / chemicals** | ORA, ICL, KEN | |
 
-> **PAMW לא נפתר.** אין נייר ערך כזה בנאסד"ק/NYSE/ת"א. ההשערה הסבירה היא **PANW**
-> (Palo Alto Networks). המערכת מסמנת אותו כ־`unresolved`, **לא אוספת עליו כלום**,
-> ומציפה את זה בכל `morning brief` — כדי שלא תחשוב שאין חדשות כשפשוט אין איסוף.
-> תיקון: `config/universe.yaml` → החלף את המפתח `PAMW` והסר `enabled: false`.
+22 שמות, כולם נאספים. אין טיקר לא פתור.
+
+> **PANW** נכנס כ־`cybersecurity_platform` עם סט העמיתים שלו (CrowdStrike, Zscaler,
+> Fortinet, SentinelOne, Check Point, Wiz) ו־`peer_read_across: 0.80` — פלטפורמות
+> אבטחה נסחרות כקבוצה, ומיס של עמית מוריד את כל הקבוצה תוך שעה. בנוסף יש boost
+> ל־NGS ARR / RPO ולכל תזוזה של מיקרוסופט בבנדלינג.
 
 ---
 
@@ -143,7 +146,7 @@ score = base(סוג האירוע)
 
 ### שתי נקודות שהן היתרון האמיתי של הסל הזה
 
-1. **MAYA/TASE.** 20 מתוך 21 השמות דואליים. דיווח מיידי בעברית ב־10:00 שעון ישראל
+1. **MAYA/TASE.** 20 מתוך 22 השמות דואליים. דיווח מיידי בעברית ב־10:00 שעון ישראל
    הוא מידע שאפשר לסחור עליו בפתיחה של 09:30 ET — שעות לפני שזה מגיע לוויר האמריקאי.
 2. **EDGAR full-text.** מוצא את החברות שלנו בתוך הגשות של **אחרים** — סעיף סיכון אצל
    מתחרה, הזמנה שלקוח גילה. זה בדיוק מה שבלומברג עושה עם גרף הישויות שלה,
@@ -170,7 +173,7 @@ src/harel/
   enrich/     linker (מי) · events (מה) · materiality (כמה חשוב)
   serve/      api (REST) · mcp_server (סוכן) · terminal (HTML)
   pipeline.py db.py  views.py  cli.py
-tests/        78 בדיקות, רצות בלי רשת מול fixtures מוקלטים
+tests/        82 בדיקות, רצות בלי רשת מול fixtures מוקלטים
 ```
 
 ```bash

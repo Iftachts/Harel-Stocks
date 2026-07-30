@@ -25,7 +25,7 @@ from ..db import Database
 from ..views import Views
 
 AGENT_INSTRUCTIONS = """\
-You are reading a news terminal covering a fixed basket of 21 Israeli-linked
+You are reading a news terminal covering a fixed basket of 22 Israeli-linked
 equities, ranked for SHORT-TERM (intraday to a few days) trading.
 
 Non-negotiable rules:

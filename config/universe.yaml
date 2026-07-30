@@ -524,23 +524,44 @@ tickers:
       DIRECT news for KEN even though they carry a different issuer name.
     catalysts: [earnings, pjm_capacity_auction, ercot_seasonal_assessment]
 
-  # ---------------------------------------------------------------------------
-  # UNRESOLVED - see docs/LIMITATIONS.md, section "Ticker resolution"
-  # "PAMW" does not resolve to any listed security on US or Israeli exchanges.
-  # Most likely intended: PANW (Palo Alto Networks) - Israeli-founded, heavy
-  # Israeli R&D, commonly tracked alongside this basket.
-  # Set `enabled: true` (and fix the ticker) once confirmed.
-  # ---------------------------------------------------------------------------
-  PAMW:
-    name: "UNRESOLVED TICKER"
-    enabled: false
-    unresolved: true
-    resolution_hint: "Did you mean PANW (Palo Alto Networks)? Or a TASE-only symbol?"
-    aliases: []
-    cik: null
+  PANW:
+    name: Palo Alto Networks Inc
+    aliases: ["Palo Alto Networks", "פאלו אלטו", "פאלו אלטו נטוורקס", "Palo Alto Networks, Inc."]
+    cik: "0001327567"
     tase_id: null
-    exchange: null
-    sector: unknown
-    float_class: unknown
-    peers: []
-    themes: []
+    exchange: NASDAQ
+    sector: cybersecurity_platform
+    float_class: large
+    ir_feeds:
+      - https://investors.paloaltonetworks.com/rss/news-releases.xml
+    peers: [CRWD, ZS, FTNT, S, CHKP, NET, OKTA, TENB, CYBR, RBRK, MSFT, CSCO]
+    peer_names:
+      ["CrowdStrike", "Zscaler", "Fortinet", "SentinelOne", "Check Point",
+       "Cloudflare", "Okta", "Tenable", "CyberArk", "Rubrik", "Wiz",
+       "Netskope", "Microsoft Defender", "Microsoft Security", "Cisco Security",
+       "Splunk", "Trellix", "Proofpoint"]
+    themes:
+      ["platformization", "SASE", "secure access service edge", "zero trust",
+       "next-generation firewall", "XDR", "SIEM replacement", "CNAPP",
+       "cloud security posture", "NGS ARR", "next-generation security ARR",
+       "remaining performance obligation", "RPO growth", "billings growth",
+       "federal cybersecurity budget", "FedRAMP", "CISA directive",
+       "AI security", "browser security", "security consolidation"]
+    products:
+      STRATA: ["next-generation firewall", "NGFW", "PA-Series", "Panorama", "Strata Cloud Manager"]
+      PRISMA: ["Prisma Access", "Prisma Cloud", "Prisma SASE", "Prisma AIRS"]
+      CORTEX: ["Cortex XSIAM", "Cortex XDR", "Cortex XSOAR", "Cortex Cloud"]
+      UNIT42: ["Unit 42", "incident response retainer"]
+    competitor_products:
+      ["Falcon platform", "Falcon Flex", "Charlotte AI", "Zero Trust Exchange",
+       "FortiGate", "FortiOS", "Singularity Platform", "Microsoft Sentinel",
+       "Microsoft Defender XDR", "Wiz Defend", "Netskope One", "Splunk Enterprise Security"]
+    peer_events_that_matter:
+      ["CrowdStrike guidance", "Zscaler billings", "Fortinet product revenue",
+       "SentinelOne guidance", "Microsoft security bundling", "Wiz acquisition",
+       "Google Cloud security"]
+    single_points_of_failure:
+      ["Microsoft bundling security into E5 / G5 licensing",
+       "Google/Wiz consolidating cloud security"]
+    risk_flags: [high_multiple_derate_risk, platform_transition_optics]
+    catalysts: [earnings, ignite_conference, rsa_conference, black_hat]

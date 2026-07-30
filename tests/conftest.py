@@ -25,6 +25,42 @@ def db(tmp_path):
     database.close()
 
 
+UNRESOLVED_BLOCK = """
+  ZZTEST:
+    name: "UNRESOLVED TICKER"
+    enabled: false
+    unresolved: true
+    resolution_hint: "Fixture-only entry used to test the unresolved-ticker path."
+    aliases: []
+    cik: null
+    tase_id: null
+    exchange: null
+    sector: unknown
+    float_class: unknown
+    peers: []
+    themes: []
+"""
+
+
+@pytest.fixture
+def config_with_unresolved(tmp_path):
+    """The real universe has no unresolved tickers, which is the desired state.
+
+    The machinery that handles one still has to work - a symbol can be mistyped
+    or delisted at any time - so these tests run against a copy of the real
+    config with one synthetic unresolved entry appended.
+    """
+    import shutil
+
+    cdir = tmp_path / "config"
+    shutil.copytree(REPO_ROOT / "config", cdir)
+    universe = cdir / "universe.yaml"
+    universe.write_text(
+        universe.read_text(encoding="utf-8") + UNRESOLVED_BLOCK, encoding="utf-8"
+    )
+    return load_config(cdir)
+
+
 class FakeHttpClient:
     """Serves recorded fixtures by URL substring. Anything unmapped 404s, which
     is what a collector must survive."""

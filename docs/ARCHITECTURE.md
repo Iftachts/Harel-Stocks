@@ -46,7 +46,7 @@ a `reasons` trace.
 
 ### 1. `enrich/linker.py` — who
 
-Builds ~1,000 rules from `universe.yaml`: company names, aliases, symbols, our
+Builds ~1,100 rules from `universe.yaml`: company names, aliases, symbols, our
 products, rival products, competitor names, peer symbols, demand drivers, themes
 and single points of failure. Precedence:
 

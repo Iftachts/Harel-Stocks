@@ -198,3 +198,22 @@ def test_every_score_carries_a_reason_trace(parts):
     assert result.reasons
     assert any("relation" in r for r in result.reasons)
     assert any("event=" in r or "default base" in r for r in result.reasons)
+
+
+def test_panw_ngs_arr_keyword_boost(parts):
+    plain = score(parts, "Palo Alto Networks announces a new product launch")
+    boosted = score(
+        parts, "Palo Alto Networks reports next-generation security ARR above guidance"
+    )
+    assert boosted.per_ticker_score["PANW"] > plain.per_ticker_score["PANW"] + 10
+
+
+def test_microsoft_bundling_is_classified_as_a_competitive_threat(parts):
+    """A platform owner bundling away your product is a first-order event for
+    PANW, AUDC and PERI, and nothing else in the taxonomy catches it."""
+    result = score(
+        parts,
+        "Microsoft says it will bundle Defender for Cloud into E5 licensing at no extra cost",
+    )
+    assert "competitive_threat" in result.events, result.events
+    assert result.per_ticker_score.get("PANW", 0) >= 40, result.reasons

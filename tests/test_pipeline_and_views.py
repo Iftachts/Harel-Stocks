@@ -100,9 +100,16 @@ def test_ticker_brief_separates_direct_from_read_across(ran):
         assert item["relation"] not in ("DIRECT", "SUBSIDIARY")
 
 
-def test_ticker_brief_rejects_an_unresolved_ticker(ran):
+def test_ticker_brief_rejects_a_symbol_outside_the_universe(ran):
     _, views = ran
-    result = views.ticker_brief("PAMW")
+    result = views.ticker_brief("ZZZZ")
+    assert "error" in result
+    assert "TEVA" in result["universe"], "the agent needs to know what IS covered"
+
+
+def test_ticker_brief_rejects_an_unresolved_ticker(db, config_with_unresolved):
+    views = Views(db=db, config=config_with_unresolved)
+    result = views.ticker_brief("ZZTEST")
     assert "error" in result and result["hint"]
 
 
@@ -119,10 +126,18 @@ def test_search_finds_english_content(ran):
 
 
 def test_morning_brief_surfaces_coverage_warnings(ran):
+    """Silence must be distinguishable from blindness: the agent has to be told
+    which sources are off or degraded before it can say "there is no news"."""
     _, views = ran
-    brief = views.morning_brief(hours=LOOKBACK)
-    warnings = " ".join(brief["coverage_warnings"])
-    assert "PAMW" in warnings, "the agent must know a ticker is not being collected"
+    warnings = " ".join(views.morning_brief(hours=LOOKBACK)["coverage_warnings"])
+    assert "maya_tase" in warnings, "the MAYA fallback must be declared"
+    assert "COURTLISTENER_TOKEN" in warnings, "sources off for a missing key must be named"
+
+
+def test_morning_brief_warns_about_uncollected_tickers(db, config_with_unresolved):
+    views = Views(db=db, config=config_with_unresolved)
+    warnings = " ".join(views.morning_brief()["coverage_warnings"])
+    assert "ZZTEST" in warnings, "the agent must know a ticker is not being collected"
 
 
 def test_whats_moving_joins_price_with_news(ran):
@@ -141,11 +156,12 @@ def test_item_detail_exposes_the_full_scoring_trace(ran):
     assert detail["tickers"]
 
 
-def test_health_reports_unresolved_tickers_and_missing_keys(ran):
+def test_health_reports_missing_keys_and_content(ran):
     _, views = ran
     health = views.health()
-    assert any(t["ticker"] == "PAMW" for t in health["unresolved_tickers"])
     assert health["db"]["items"] > 0
+    assert any(k["env_var"] == "COURTLISTENER_TOKEN" for k in health["missing_api_keys"])
+    assert any(k["env_var"] == "TASE_API_KEY" for k in health["running_degraded"])
 
 
 def test_rerunning_the_pipeline_is_idempotent(config, db):

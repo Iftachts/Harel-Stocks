@@ -34,7 +34,7 @@ def create_app(db_path: str | None = None):
         title="Harel Terminal",
         version="1.0.0",
         description=(
-            "News and regulatory terminal for a 21-name Israeli equity basket, "
+            "News and regulatory terminal for a 22-name Israeli equity basket, "
             "ranked for short-term trading. Read /agent/manifest first."
         ),
     )
@@ -107,7 +107,7 @@ def _split(value: str | None) -> list[str] | None:
 
 AGENT_MANIFEST: dict[str, Any] = {
     "purpose": (
-        "Ranked news, regulatory and tape context for a fixed 21-name Israeli "
+        "Ranked news, regulatory and tape context for a fixed 22-name Israeli "
         "equity basket, filtered for what can move a price in the next few hours."
     ),
     "how_to_read_an_item": {

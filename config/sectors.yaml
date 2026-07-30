@@ -166,6 +166,25 @@ sectors:
        "FCC spectrum decision", "peer bankruptcy or restructuring",
        "satellite operator capex"]
 
+  cybersecurity_platform:
+    label: Enterprise cybersecurity platforms
+    regulators: [federal_register, federal_register_public_inspection]
+    fr_agencies: [homeland-security-department, federal-trade-commission,
+                  securities-and-exchange-commission, defense-department]
+    fr_terms:
+      ["cybersecurity incident reporting", "critical infrastructure protection",
+       "FedRAMP", "zero trust architecture", "software bill of materials",
+       "secure software development attestation", "cyber incident disclosure"]
+    read_across: 0.40
+    # Security platforms trade as a group: a peer's billings miss de-rates the
+    # whole cohort within the hour, which is the dominant intraday driver here.
+    peer_read_across: 0.80
+    high_impact_events:
+      ["peer guidance or billings miss (sector de-rate)",
+       "major breach driving security spend", "CISA emergency directive",
+       "federal cyber budget change", "platform consolidation M&A",
+       "Microsoft bundling move"]
+
   network_security:
     label: Network intelligence & security
     regulators: [federal_register]

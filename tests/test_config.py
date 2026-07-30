@@ -2,9 +2,21 @@ from __future__ import annotations
 
 
 def test_universe_loads_and_is_complete(config):
-    assert len(config.active_tickers) == 21
+    assert len(config.active_tickers) == 22
     assert "TEVA" in config.active_tickers
-    assert "PAMW" in config.unresolved_tickers, "PAMW must be flagged, not silently dropped"
+    assert "PANW" in config.active_tickers
+
+
+def test_the_shipped_universe_has_no_unresolved_tickers(config):
+    """A symbol that resolves to nothing collects nothing. Ship none."""
+    assert config.unresolved_tickers == []
+
+
+def test_unresolved_tickers_are_excluded_from_collection(config_with_unresolved):
+    cfg = config_with_unresolved
+    assert "ZZTEST" in cfg.unresolved_tickers
+    assert "ZZTEST" not in cfg.active_tickers
+    assert cfg.universe["ZZTEST"].resolution_hint
 
 
 def test_every_active_ticker_has_a_known_sector(config):

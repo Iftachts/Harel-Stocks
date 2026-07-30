@@ -170,6 +170,21 @@ events:
       - "\\b(initiates?|increases?|raises?|cuts?|suspends?) .{0,15}\\bdividend\\b"
       - "\\bspecial dividend\\b"
 
+  competitive_threat:
+    base: 64
+    label: Competitive / platform threat
+    # A platform owner bundling away your product, or a partner walking, is a
+    # first-order event for several names here: Microsoft Teams for AUDC,
+    # Microsoft Bing for PERI, Microsoft E5 bundling for PANW, AI agents for
+    # NICE/LPSN. Nothing else in the taxonomy catches it.
+    patterns:
+      - "\\b(bundl(e|es|ed|ing))\\b.{0,80}?\\b(licens\\w*|subscription|suite|SKU|tier|at no (extra|additional) (cost|charge)|for free|free of charge)\\b"
+      - "\\b(includ(e|es|ing)|adds?|offers?)\\b.{0,60}?\\b(for free|free of charge|at no (extra|additional) (cost|charge))\\b"
+      - "\\b(price war|undercut(s|ting)?|slashes? prices|aggressive discounting)\\b"
+      - "\\b(rip and replace|displac(e|es|ing)|migrat(e|es|ing) away from)\\b"
+      - "\\b(terminat(es|ed|ion)|ends?|does not renew|non-?renewal)\\b.{0,45}\\b(partnership|agreement|contract|collaboration)\\b"
+      - "\\b(bring(s|ing)?\\b.{0,40}\\bin-?house|insourc\\w+|builds? its own\\b.{0,40}\\b(platform|software|stack|solution|engine|model|tool))"
+
   management_change:
     base: 60
     label: CEO / CFO change
@@ -397,4 +412,13 @@ overrides:
   LPSN:
     keyword_boosts:
       - pattern: "\\b(convertible|exchange offer|debt restructur|going concern)\\b"
+        boost: 18
+  PANW:
+    # The metrics the print actually reacts to are NGS ARR and RPO, not revenue.
+    keyword_boosts:
+      - pattern: "\\b(NGS ARR|next-generation security ARR|remaining performance obligation|RPO)\\b"
+        boost: 14
+      - pattern: "\\bplatformization\\b"
+        boost: 10
+      - pattern: "\\bMicrosoft\\b.{0,60}\\b(bundl|includ|E5|G5|Defender)\\b"
         boost: 18

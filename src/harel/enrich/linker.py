@@ -1,6 +1,6 @@
 """Entity linking - the part that produces "indirect" coverage.
 
-Given one collected item, decide which of our 21 names it touches and *how*.
+Given one collected item, decide which of our 22 names it touches and *how*.
 The `how` is the whole point: a trader reads a TIGIT readout from Roche very
 differently from a Compugen press release, and the LLM agent downstream needs
 that distinction to write a useful note.
@@ -134,8 +134,16 @@ class EntityLinker:
                 ))
 
         # 7. Customers / demand drivers whose capex is our revenue.
+        #    `peer_events_that_matter` mixes two kinds of entity: genuine demand
+        #    drivers (TSMC capex -> CAMT) and competitors whose results de-rate
+        #    the group (CrowdStrike guidance -> PANW). Only the first kind is a
+        #    CUSTOMER; naming a competitor here must not outrank its PEER link,
+        #    because CUSTOMER sits above PEER in the precedence order.
+        peer_name_set = {name.strip().lower() for name in tc.peer_names}
         for driver in tc.peer_events_that_matter:
             for head in _entity_candidates(driver):
+                if head.strip().lower() in peer_name_set:
+                    continue
                 self.rules.append(_Rule(
                     pattern=_word_re(head), ticker=t, relation="CUSTOMER",
                     why=f'demand driver "{head}" ({driver})', base_confidence=0.6,
