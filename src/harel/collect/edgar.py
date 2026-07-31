@@ -19,10 +19,14 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from ..http import HttpError
 from ..models import RawItem
 from .base import Collector, register
+
+# EDGAR reports acceptance times on the Eastern clock. See _parse_edgar_dt.
+EDGAR_TZ = ZoneInfo("America/New_York")
 
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -336,14 +340,28 @@ class EdgarFullTextCollector(Collector):
 
 
 def _parse_edgar_dt(value: str) -> datetime | None:
+    """Parse an EDGAR timestamp to UTC.
+
+    ``acceptanceDateTime`` ends in "Z" but the clock is **Eastern**, not UTC -
+    the filing window is 06:00-22:00 ET and the raw values sit squarely inside
+    it. Reading them as UTC moved every filing 4-5 hours earlier, which pushed
+    after-close filings back into the trading session: a Form 4 accepted at
+    16:13 ET was stored as 12:13 ET and could then be read as the cause of that
+    day's move. It also made every filing look hours fresher than it was, which
+    inflates the recency decay and the intraday timing boosts.
+
+    A date-only ``filingDate`` is anchored to Eastern midnight so the calendar
+    date stays the one EDGAR means.
+    """
     if not value:
         return None
     value = value.strip()
     for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):
         try:
-            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+            naive = datetime.strptime(value, fmt)
         except ValueError:
             continue
+        return naive.replace(tzinfo=EDGAR_TZ).astimezone(timezone.utc)
     return None
 
 

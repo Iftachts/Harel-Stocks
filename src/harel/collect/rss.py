@@ -25,6 +25,11 @@ from .base import Collector, register
 # Google News dedupes poorly across near-identical queries, so we keep the
 # theme queries deliberately few and high-signal.
 MAX_THEME_QUERIES_PER_SECTOR = 3
+# Rival-product terms are specific enough to query directly ("Genesys Cloud CX",
+# "NeuroStar", "Hughes JUPITER"). Bare peer *company* names are not - querying
+# "Microsoft" or "Salesforce" for NICE would bury the feed - so peers stay on
+# the existing match-in-collected-content path.
+MAX_RIVAL_TERMS_PER_QUERY = 6
 
 
 @register("rss")
@@ -60,6 +65,16 @@ class RssCollector(Collector):
 
         return plan
 
+    def _required_terms(self, seed_tickers: list[str], seed_relation: str) -> list[str]:
+        """Terms a rival-product result must actually contain to keep its tag."""
+        if seed_relation != "PRODUCT_RIVAL" or len(seed_tickers) != 1:
+            return []
+        tc = self.cfg.ticker(seed_tickers[0])
+        if not tc:
+            return []
+        return [r.lower() for r in tc.competitor_products
+                if len(r) >= 5][:MAX_RIVAL_TERMS_PER_QUERY]
+
     def _query_plan(self, base: str) -> list[tuple[str, list[str], str, str]]:
         hebrew = "hl=iw" in base or self.source.key.endswith("_he")
         out: list[tuple[str, list[str], str, str]] = []
@@ -84,6 +99,19 @@ class RssCollector(Collector):
                 query = " OR ".join(terms)
             out.append((base.replace("{q}", quote_plus(query)), [ticker], "DIRECT",
                         f"{ticker} news"))
+
+            # Cross-read needs competitor CONTENT, not just competitor rules.
+            # Every other query here is seeded from our own names, so the only
+            # rival stories we ever saw were ones that already mentioned us -
+            # which is why PRODUCT_RIVAL stayed empty for every name whose
+            # rivals do not file with the SEC or register trials.
+            if not hebrew:
+                rivals = [r for r in tc.competitor_products
+                          if len(r) >= 5][:MAX_RIVAL_TERMS_PER_QUERY]
+                if rivals:
+                    rival_q = " OR ".join(f'"{r}"' for r in rivals)
+                    out.append((base.replace("{q}", quote_plus(rival_q)), [ticker],
+                                "PRODUCT_RIVAL", f"{ticker} rival products"))
 
         if not hebrew:
             for sector_key in {self.cfg.ticker(t).sector for t in self.active_tickers
@@ -128,6 +156,12 @@ class RssCollector(Collector):
             self.warn(f"{label}: unparseable feed ({parsed.get('bozo_exception')})")
             return
 
+        # Google News answers an OR query loosely, so a rival-product search
+        # returns plenty of stories that mention none of the terms. Tagging
+        # those PRODUCT_RIVAL would assert a competitor link that does not
+        # exist, so require the term to actually appear.
+        required = self._required_terms(seed_tickers, seed_relation)
+
         count = 0
         for entry in parsed.entries:
             try:
@@ -137,6 +171,10 @@ class RssCollector(Collector):
                 continue
             if item is None or item.published_at < self.ctx.since:
                 continue
+            if required:
+                haystack = f"{item.title} {item.summary}".lower()
+                if not any(term in haystack for term in required):
+                    continue
             count += 1
             yield item
 

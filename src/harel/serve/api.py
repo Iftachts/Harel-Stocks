@@ -129,7 +129,12 @@ AGENT_MANIFEST: dict[str, Any] = {
     "rules_for_the_agent": [
         "Never state that a PEER or SECTOR_* item is news about our company.",
         "Always cite `url` and `source`; never paraphrase a headline as fact.",
-        "Prefer items with corroboration >= 2 when a single low-trust source claims something big.",
+        "`corroboration` counts INDEPENDENT SOURCES, not documents. Prefer items "
+        "with corroboration >= 2 when a single low-trust source claims something big.",
+        "In /api/moving, `drivers` are stories that predate the closing bell and "
+        "could have caused the move. `after_the_bell` published after the close - "
+        "never present those as the cause of that day's move; they are the next "
+        "session's catalyst.",
         "Check `coverage_warnings` in /api/morning before claiming 'no news'.",
         "An item with meta.kind == 'unexplained_move' means the tape moved and we "
         "found NO story - say so explicitly rather than inventing a cause.",

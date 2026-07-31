@@ -17,11 +17,44 @@ surfaces cannot drift apart.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
+from zoneinfo import ZoneInfo
 
 from .config import Config, get_config
 from .db import Database
+
+MARKET_TZ = ZoneInfo("America/New_York")
+MARKET_CLOSE_HOUR = 16
+
+
+def last_session_close(now: datetime | None = None) -> datetime:
+    """The most recent US equity close at or before ``now``, in UTC.
+
+    Used to decide whether a story could have moved today's print. Mid-session
+    this returns yesterday's close, so everything published today is eligible;
+    after the bell it returns today's close, so a filing accepted at 16:13 ET
+    is not offered as the explanation for a move that finished at 16:00.
+    """
+    now = now or datetime.now(timezone.utc)
+    et = now.astimezone(MARKET_TZ)
+    close = et.replace(hour=MARKET_CLOSE_HOUR, minute=0, second=0, microsecond=0)
+    if et < close:
+        close -= timedelta(days=1)
+    while close.weekday() >= 5:          # roll back over Sat/Sun
+        close -= timedelta(days=1)
+    return close.astimezone(timezone.utc)
+
+
+def _published_utc(row: dict[str, Any]) -> datetime | None:
+    raw = row.get("published_at")
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 MAX_SUMMARY_CHARS = 420
 
@@ -55,7 +88,12 @@ def _compact(row: dict[str, Any], include_reasons: bool = False) -> dict[str, An
             out.setdefault("meta", {})[key] = meta[key]
     also = row.get("also") or []
     if also:
-        out["corroboration"] = len(also) + 1
+        # Count independent SOURCES, not cluster members. Twelve Form 4s filed
+        # the same afternoon are one source saying one thing twelve times, not
+        # twelve confirmations - and the agent manifest tells the model to trust
+        # this number when a single low-trust source claims something big.
+        sources = {row.get("source")} | {a.get("source") for a in also}
+        out["corroboration"] = len({s for s in sources if s})
         out["also"] = [{"source": a["source"], "url": a["url"]} for a in also[:5]]
     if include_reasons:
         out["reasons"] = row.get("reasons") or []
@@ -151,21 +189,37 @@ class Views:
     def whats_moving(self, min_abs_pct: float = 2.0) -> dict[str, Any]:
         """Price movers joined with their best explanation."""
         movers = []
+        cutoff = last_session_close()
         for ticker in self.config.active_tickers:
             price = self.db.latest_price(ticker)
             if not price or price.get("change_pct") is None:
                 continue
             if abs(price["change_pct"]) < min_abs_pct:
                 continue
-            top = self.db.feed(tickers=[ticker], min_score=30, since_hours=30, limit=3)
+            candidates = [
+                r for r in self.db.feed(tickers=[ticker], min_score=30,
+                                        since_hours=30, limit=8)
+                # Our own "the tape moved and we found nothing" marker is not a
+                # story. Offering it as the driver of the move it describes is
+                # circular, and it is not an after-hours catalyst either.
+                if (r.get("meta") or {}).get("kind") != "unexplained_move"
+            ]
+            # A story published after the closing bell cannot have caused the
+            # move that bell ended. Keep it - it is tomorrow's catalyst - but
+            # never offer it as this move's explanation.
+            drivers = [r for r in candidates
+                       if (p := _published_utc(r)) is None or p <= cutoff]
+            after_bell = [r for r in candidates
+                          if (p := _published_utc(r)) is not None and p > cutoff]
             movers.append({
                 "ticker": ticker,
                 "change_pct": round(price["change_pct"], 2),
                 "volume_multiple": (round(price["vol_mult"], 2)
                                     if price.get("vol_mult") else None),
                 "session": price.get("session"),
-                "explained": bool(top),
-                "drivers": [_compact(r) for r in top],
+                "explained": bool(drivers),
+                "drivers": [_compact(r) for r in drivers[:3]],
+                "after_the_bell": [_compact(r) for r in after_bell[:3]],
             })
         movers.sort(key=lambda m: abs(m["change_pct"]), reverse=True)
         return {"asof": datetime.now(timezone.utc).isoformat(), "movers": movers}

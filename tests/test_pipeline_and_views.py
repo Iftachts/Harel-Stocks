@@ -42,6 +42,61 @@ def ran(config, db):
     return report, Views(db=db, config=config)
 
 
+def test_last_session_close_tracks_the_bell_and_skips_weekends():
+    from harel.views import MARKET_TZ, last_session_close
+
+    def et(y, m, d, hh, mm=0):
+        return datetime(y, m, d, hh, mm, tzinfo=MARKET_TZ)
+
+    # Mid-session: the relevant close is yesterday's, so today's news counts.
+    assert last_session_close(et(2026, 7, 30, 11)).astimezone(MARKET_TZ).day == 29
+    # After the bell: today's close, so post-close filings are excluded.
+    assert last_session_close(et(2026, 7, 30, 17)).astimezone(MARKET_TZ).day == 30
+    # Sunday rolls back to Friday, not Saturday.
+    sunday = last_session_close(et(2026, 8, 2, 12)).astimezone(MARKET_TZ)
+    assert sunday.weekday() == 4 and sunday.day == 31
+
+
+def test_a_story_published_after_the_bell_is_not_offered_as_the_cause(ran):
+    """A Form 4 accepted at 16:13 ET cannot have moved a print that finished at
+    16:00. Keep it visible as the next session's setup, but never as a driver.
+    """
+    report, views = ran
+    from harel.views import last_session_close
+
+    cutoff = last_session_close()
+    moving = views.whats_moving(min_abs_pct=0.0)
+    def when(row):
+        return datetime.fromisoformat(str(row["t"]).replace("Z", "+00:00"))
+
+    checked = 0
+    for mover in moving["movers"]:
+        for driver in mover["drivers"]:
+            assert when(driver) <= cutoff, (
+                f"{mover['ticker']}: driver {driver['title'][:60]!r} was published "
+                f"after the close and cannot explain the move"
+            )
+            checked += 1
+        for late in mover.get("after_the_bell", []):
+            assert when(late) > cutoff
+    assert checked or moving["movers"], "the fixture must produce movers to check"
+
+
+def test_corroboration_counts_independent_sources_not_documents(ran):
+    """Twelve Form 4s filed the same afternoon are one source repeating itself.
+    The agent manifest tells the model to trust this number."""
+    report, views = ran
+    for item in views.feed(min_score=0, hours=LOOKBACK, limit=200)["items"]:
+        corr = item.get("corroboration")
+        if not corr:
+            continue
+        sources = {item["source"]} | {a["source"] for a in item.get("also", [])}
+        assert corr <= len(sources), (
+            f"{item['title'][:60]!r} claims corroboration={corr} from "
+            f"{len(sources)} distinct source(s)"
+        )
+
+
 def test_pipeline_stores_items_from_every_working_source(ran):
     report, _ = ran
     assert report.stored > 0

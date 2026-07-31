@@ -422,6 +422,30 @@ def test_federal_register_searches_the_phrase_not_the_loose_words(config, db):
             f"multi-word term {term!r} must be phrase-quoted"
 
 
+def test_edgar_acceptance_time_is_eastern_not_utc():
+    """EDGAR stamps acceptanceDateTime with a trailing Z but the clock is
+    Eastern. Reading it as UTC moved every filing 4-5 hours earlier, which put
+    after-close filings back inside the session and let a Form 4 accepted at
+    16:13 ET be read as the cause of that day's move."""
+    from harel.collect.edgar import _parse_edgar_dt
+
+    summer = _parse_edgar_dt("2026-07-30T16:13:33.000Z")      # EDT, UTC-4
+    winter = _parse_edgar_dt("2026-01-15T16:13:33.000Z")      # EST, UTC-5
+    assert summer.isoformat() == "2026-07-30T20:13:33+00:00"
+    assert winter.isoformat() == "2026-01-15T21:13:33+00:00"
+
+    # ...and that puts it after the 16:00 ET bell, where it belongs.
+    from harel.views import last_session_close
+    assert summer > last_session_close(summer)
+
+
+def test_edgar_filing_date_keeps_its_eastern_calendar_day():
+    from harel.collect.edgar import _parse_edgar_dt
+
+    dt = _parse_edgar_dt("2026-07-30")
+    assert dt.isoformat() == "2026-07-30T04:00:00+00:00", "ET midnight, not UTC midnight"
+
+
 def test_edgar_full_text_link_cannot_be_upgraded_to_direct(config, db):
     """The synthesised headline contains our own name; the linker must not read
     it back out and call a competitor's filing our news."""

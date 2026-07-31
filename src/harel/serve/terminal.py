@@ -164,6 +164,14 @@ def _movers_section(movers: list[dict[str, Any]]) -> str:
                       f"rel='noreferrer'>{html.escape(top['title'])[:150]}</a>")
         else:
             driver = "<span class='muted'>no matching news - flow, technical, or a gap in coverage</span>"
+        # Published after the bell: cannot explain today's move, but it is the
+        # next session's setup, so show it rather than dropping it.
+        for late in (m.get("after_the_bell") or [])[:1]:
+            driver += (
+                f"<div class='why'>after the bell &middot; not a cause of this move: "
+                f"<a href='{html.escape(late.get('url') or '#')}' target='_blank' "
+                f"rel='noreferrer'>{html.escape(late['title'])[:120]}</a></div>"
+            )
         rows.append(
             f"<tr class='item'><td class='tkr'>{html.escape(m['ticker'])}</td>"
             f"<td class='score {cls}'>{m['change_pct']:+.1f}%</td>"

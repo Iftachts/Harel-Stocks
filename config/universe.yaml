@@ -82,6 +82,10 @@ tickers:
        "power management IC", "SiGe", "CMOS image sensor", "300mm capacity",
        "foundry utilization", "wafer pricing", "CHIPS Act", "export controls",
        "semiconductor tariffs", "Section 232 semiconductors"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["GlobalFoundries 22FDX", "UMC RF-SOI", "X-FAB SiC", "SkyWater foundry",
+       "Vanguard International Semiconductor", "TSMC specialty", "Samsung Foundry 8LPP"]
     products:
       SIPHO: ["silicon photonics", "800G", "1.6T optical", "co-packaged optics"]
       RF: ["RF SOI", "5G front end module", "antenna tuner"]
@@ -110,6 +114,15 @@ tickers:
        "process control", "gate-all-around", "GAA", "high-NA EUV", "HBM",
        "advanced packaging", "China semiconductor export controls", "entity list",
        "SEMI billings", "foundry capex", "memory capex"]
+    products:
+      VERAFLEX: ["VeraFlex"]
+      METRION: ["Nova Metrion"]
+      PRISM_OCD: ["Nova PRISM", "optical CD metrology"]
+      ELIPSON: ["Nova Elipson"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["KLA SpectraFilm", "KLA Aleris", "Onto Innovation Atlas", "Hitachi High-Tech CD-SEM",
+       "Bruker metrology", "Screen Holdings metrology"]
     peer_events_that_matter:
       ["TSMC capex guidance", "Samsung capex", "Intel capex cut", "Micron capex",
        "SK Hynix capex", "ASML bookings", "Applied Materials guidance",
@@ -134,6 +147,14 @@ tickers:
       ["advanced packaging inspection", "HBM", "high bandwidth memory",
        "CoWoS", "hybrid bonding", "2.5D packaging", "3D packaging", "panel level packaging",
        "chiplet", "OSAT capex", "bumping inspection", "AI accelerator packaging"]
+    products:
+      EAGLE_INSPECTION: ["Camtek Eagle", "Eagle inspection"]
+      HAWK_INSPECTION: ["Camtek Hawk", "Hawk inspection"]
+      GOLDEN_EYE: ["Golden Eye inspection"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Onto Innovation Dragonfly", "KLA ICOS", "Rudolph Technologies", "Cohu inspection",
+       "Nordson test", "Toray inspection"]
     peer_events_that_matter:
       ["TSMC CoWoS capacity expansion", "SK Hynix HBM capacity", "Micron HBM",
        "Samsung HBM qualification", "Nvidia supply chain", "Amkor capex", "ASE capex"]
@@ -158,6 +179,15 @@ tickers:
       ["contact center as a service", "CCaaS", "agentic AI", "AI agents replacing seats",
        "conversational AI", "seat-based pricing disruption", "financial crime compliance",
        "AML software", "workforce engagement management"]
+    products:
+      CXONE: ["CXone", "NICE CXone"]
+      ACTIMIZE: ["Actimize", "financial crime detection"]
+      ENLIGHTEN_AI: ["Enlighten AI", "Enlighten Copilot"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Genesys Cloud CX", "Five9 Intelligent CX", "Verint Da Vinci", "Twilio Flex",
+       "Amazon Connect", "Salesforce Service Cloud", "Zoom Contact Center",
+       "Pegasystems Customer Service"]
     peer_events_that_matter:
       ["Salesforce Agentforce", "Five9 guidance cut", "Genesys IPO",
        "Twilio AI", "OpenAI voice agents", "Sierra AI funding"]
@@ -180,6 +210,13 @@ tickers:
       ["conversational AI", "chatbot", "convertible notes", "debt exchange",
        "going concern", "Nasdaq minimum bid price", "reverse stock split",
        "customer churn", "restructuring", "activist investor"]
+    products:
+      CONVERSATIONAL_CLOUD: ["Conversational Cloud", "LiveEngage"]
+      LIVEPERSON_AI: ["LivePerson AI", "conversational AI platform"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Intercom Fin", "Zendesk AI", "Salesforce Einstein", "Genesys Cloud CX", "Twilio Flex",
+       "Sprinklr Service", "Kore.ai", "Verint Da Vinci"]
     risk_flags: [dilution_risk, delisting_risk, high_short_interest]
     catalysts: [earnings]
 
@@ -203,6 +240,14 @@ tickers:
        "cookie deprecation", "privacy sandbox", "retail media", "CTV advertising",
        "programmatic ad spend", "Google antitrust remedies", "ad tech divestiture",
        "AI search disruption", "SGE", "generative search"]
+    products:
+      PERION_WILDFIRE: ["Perion Wildfire"]
+      UNDERTONE: ["Undertone", "high impact advertising"]
+      PERION_SORT: ["Perion SORT", "cookieless targeting"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Taboola Realize", "Outbrain Onyx", "Criteo Commerce Media", "Magnite ClearLine",
+       "PubMatic Connect", "The Trade Desk Kokai", "Microsoft Advertising"]
     risk_flags: [single_partner_concentration]
     single_points_of_failure:
       ["Microsoft Bing search monetization terms", "Google ad policy change"]
@@ -227,6 +272,14 @@ tickers:
        "interchange fees", "card scheme fees", "payment facilitator regulation",
        "PSD3", "EU interchange regulation", "take rate compression",
        "merchant acquiring", "cashless vending mandate"]
+    products:
+      VPOS_TOUCH: ["VPOS Touch", "Nayax VPOS"]
+      MONYX_WALLET: ["Monyx Wallet"]
+      NAYAX_CORE: ["Nayax Core", "unattended payment terminal"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Cantaloupe ePort", "PayRange", "USA Technologies", "Ingenico terminal",
+       "Worldline terminal", "Adyen unattended", "Crane Payment Innovations"]
     catalysts: [earnings, nama_show, eu_vending]
 
   ORA:
@@ -249,6 +302,14 @@ tickers:
        "tax credit transferability", "FERC", "interconnection queue",
        "data center power demand", "behind the meter", "baseload clean power",
        "BLM geothermal leasing", "categorical exclusion geothermal"]
+    products:
+      ORMAT_ENERGY_CONVERTER: ["Ormat Energy Converter", "OEC unit"]
+      GEOTHERMAL_PLANT: ["binary geothermal", "geothermal power plant"]
+      RECOVERED_ENERGY: ["recovered energy generation"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Calpine geothermal", "Enel Green Power geothermal", "Fervo Energy", "Eavor Loop",
+       "Tesla Megapack", "Fluence storage", "Turboden ORC"]
     geographies: ["Nevada", "Hawaii", "Puna", "Kenya", "Olkaria", "Indonesia", "Guatemala", "Honduras", "New Zealand"]
     catalysts: [earnings, analyst_day, ferc_orders]
 
@@ -273,6 +334,14 @@ tickers:
        "LFP battery materials", "Dead Sea concession", "royalty", "Sheshinski",
        "REACH bromine restriction", "flame retardant regulation", "fertilizer export tariff",
        "Belarus sanctions potash", "Russia fertilizer sanctions", "food security"]
+    products:
+      POTASH_ICL: ["muriate of potash", "potash contract"]
+      BROMINE_ICL: ["elemental bromine", "flame retardant"]
+      SPECIALTY_PHOSPHATES: ["specialty phosphates", "phosphate fertilizer"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Nutrien potash", "Mosaic phosphate", "K+S potash", "Uralkali potash", "Belaruskali",
+       "Albemarle bromine", "Lanxess bromine", "OCP phosphate", "Compass Minerals"]
     commodity_watch: [potash, bromine, phosphate, sulphur, ammonia]
     catalysts: [earnings, china_potash_contract, indian_potash_contract]
 
@@ -298,6 +367,15 @@ tickers:
        "drone procurement", "air defense order", "foreign military sale",
        "DSCA notification", "arms export license", "arms embargo Israel",
        "ITAR", "offset obligations", "backlog record"]
+    products:
+      IRON_FIST: ["Iron Fist", "active protection system"]
+      HERMES_UAV: ["Hermes 900", "Hermes 450", "Hermes 650"]
+      PULS_LAUNCHER: ["PULS rocket", "Precise Universal Launching System"]
+      JMUSIC_DIRCM: ["J-MUSIC", "DIRCM", "infrared countermeasures"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Rafael Trophy", "Trophy APS", "Rheinmetall StrikeShield", "Leonardo Falco",
+       "Thales Watchkeeper", "Bayraktar TB2", "General Atomics MQ-9", "Anduril Ghost"]
     geographies: ["Israel", "United States", "Germany", "Netherlands", "UK", "Romania", "Sweden", "Australia", "India"]
     risk_flags: [export_license_risk, geopolitical_headline_risk]
     catalysts: [earnings, dsei, eurosatory, ila_berlin, dod_contract_daily]
@@ -321,6 +399,14 @@ tickers:
        "PMA parts", "FAA airworthiness directive", "aircraft utilization",
        "air traffic growth", "engine shop visits", "GTF powder metal", "aging fleet",
        "Boeing production rate", "Airbus delivery rate", "aerospace supply chain"]
+    products:
+      AVIATION_HEAT_TRANSFER: ["aircraft heat exchanger", "aviation heat transfer"]
+      APU_OVERHAUL: ["APU overhaul", "auxiliary power unit"]
+      LANDING_GEAR_MRO: ["landing gear overhaul"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Honeywell APU", "Pratt Whitney APU", "Liebherr heat exchanger", "Collins Aerospace",
+       "AAR Corp", "HEICO parts", "Triumph Group"]
     catalysts: [earnings, mro_americas, paris_air_show, farnborough]
 
   GILT:
@@ -343,6 +429,14 @@ tickers:
        "LEO constellation", "multi-orbit", "defense satcom", "SATCOM as a service",
        "military satellite communications", "FCC license", "spectrum allocation",
        "ground segment", "gateway order", "direct to device"]
+    products:
+      SKYEDGE: ["SkyEdge", "SkyEdge IV", "SkyEdge II-c"]
+      TAURUS_MODEM: ["Taurus modem"]
+      GILAT_ESA: ["electronically steered antenna", "ESA terminal"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Hughes JUPITER", "Viasat terminal", "ST Engineering iDirect", "Comtech modem",
+       "Kratos OpenSpace", "Starlink terminal", "OneWeb terminal", "Kymeta antenna"]
     catalysts: [earnings, satellite_conference, aix]
 
   ALLT:
@@ -363,6 +457,14 @@ tickers:
       ["deep packet inspection", "DPI", "network intelligence", "security as a service",
        "SECaaS", "telco security", "carrier capex", "5G core", "ARR growth",
        "convertible loan", "Nasdaq listing compliance", "operator contract win"]
+    products:
+      NETWORKSECURE: ["NetworkSecure", "network-based security", "clean pipe security"]
+      DDOS_SECURE: ["DDoS Secure", "DDoS mitigation"]
+      ALLOT_SMART: ["Allot Smart", "deep packet inspection", "traffic management"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Sandvine ActiveLogic", "Nokia Deepfield", "Cisco Ultra Traffic", "Radware DefensePro",
+       "NetScout Arbor", "Procera PacketLogic", "Radcom ACE", "Huawei SmartCare"]
     risk_flags: [dilution_risk, delisting_risk, customer_concentration]
     catalysts: [earnings, mwc_barcelona]
 
@@ -385,6 +487,14 @@ tickers:
        "Operator Connect", "Teams Direct Routing", "UCaaS", "voice AI agents",
        "conversational AI for contact center", "Microsoft licensing change",
        "share buyback", "dividend"]
+    products:
+      MEDIANT_SBC: ["Mediant SBC", "session border controller"]
+      VOCA_CIC: ["Voca CIC", "conversational IVR"]
+      LIVE_FOR_TEAMS: ["Live for Teams", "Teams Direct Routing", "Operator Connect"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Ribbon SBC", "Oracle Acme Packet", "Cisco CUBE", "Sangoma SBC", "Metaswitch Perimeta",
+       "Avaya Aura", "Anywhere365"]
     single_points_of_failure:
       ["Microsoft Teams certification/partner program change",
        "Microsoft bundling native voice"]
@@ -436,6 +546,13 @@ tickers:
        "protein oral delivery", "POD technology", "type 2 diabetes",
        "NASH MASH", "cash runway", "at-the-market offering", "ATM program",
        "reverse stock split", "Nasdaq minimum bid", "net cash vs market cap"]
+    products:
+      ORMD_0801: ["ORMD-0801", "oral insulin"]
+      ORMD_0901: ["ORMD-0901", "oral GLP-1"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Rybelsus", "oral semaglutide", "Afrezza", "inhaled insulin", "Mounjaro", "Ozempic",
+       "Tresiba", "Toujeo", "insulin icodec", "Awiqli"]
     risk_flags: [dilution_risk, binary_readout_risk, cash_shell_dynamics]
     catalysts: [earnings, ada_scientific_sessions, easd, fda_meeting]
 
@@ -493,7 +610,11 @@ tickers:
       GS4224: ["Gilead PD-L1 small molecule"]
     competitor_products:
       ["tiragolumab", "vibostolimab", "domvanalimab", "belrestotug",
-       "ociperlimab", "SKYSCRAPER", "STAR-221", "GALAXIES"]
+       # Trial programme names must carry their number. Bare "SKYSCRAPER" and
+       # "GALAXIES" are ordinary English words and matched building and
+       # astronomy stories as competitor readouts.
+       "ociperlimab", "SKYSCRAPER-01", "SKYSCRAPER-05", "SKYSCRAPER-06",
+       "STAR-221", "GALAXIES Lung-301"]
     read_across_note: >
       Any large-pharma TIGIT-class readout (Roche tiragolumab, Merck vibostolimab,
       Arcus/Gilead domvanalimab, GSK/iTeos belrestotug) moves CGEN hard in both
@@ -521,6 +642,13 @@ tickers:
        "treatment resistant depression", "OCD indication", "smoking cessation",
        "adolescent depression", "installed base", "recurring revenue per system",
        "accelerated TMS protocol", "SAINT protocol"]
+    products:
+      DEEP_TMS: ["Deep TMS", "dTMS", "H-coil", "H1 coil"]
+      BRAINSWAY_360: ["BrainsWay 360"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["NeuroStar", "Neuronetics", "MagVenture", "Magstim", "Nexstim", "SAINT neuromodulation",
+       "Magnus Medical", "Spravato", "esketamine"]
     catalysts: [earnings, apa_annual, clinical_tms_society]
 
   KEN:
@@ -542,6 +670,13 @@ tickers:
        "independent power producer", "gas-fired generation", "special dividend",
        "sum of the parts discount", "asset sale", "buyback",
        "Israeli electricity tariff", "IPP tender", "container freight rate"]
+    products:
+      OPC_ENERGY: ["OPC Energy", "OPC Rotem", "OPC Hadera"]
+      CPV_GROUP: ["CPV Group", "Competitive Power Ventures"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Talen Energy", "Vistra Energy", "NRG Energy", "Constellation Energy",
+       "Israel Electric Corporation"]
     structure_note: >
       Holding company: value driven by OPC Energy (TASE: OPCE) and CPV.
       OPC's TASE disclosures and PJM/ERCOT auction results are effectively

@@ -34,6 +34,18 @@ def test_every_active_ticker_has_peers_and_themes(config):
         assert tc.themes, f"{ticker} has no themes"
 
 
+def test_every_active_ticker_can_do_cross_read(config):
+    """The RUNBOOK is explicit: peer_names, competitor_products and themes are
+    what decide indirect coverage - "בלעדיהם השם ייאסף אבל לא תקבל עליו קריאה
+    צולבת". peer_names and themes were already enforced; competitor_products was
+    not, and 17 of 22 names shipped without it, which made PRODUCT_RIVAL
+    read-across impossible for them by construction.
+    """
+    missing = [t for t in config.active_tickers
+               if not config.ticker(t).competitor_products]
+    assert missing == [], f"no competitor_products for {missing} - no cross-read possible"
+
+
 def test_no_product_term_is_a_generic_english_word(config):
     """Product terms become DIRECT match rules - the relation the MCP server
     tells the agent to treat as fact about the issuer. A term like "POWER"
@@ -44,14 +56,27 @@ def test_no_product_term_is_a_generic_english_word(config):
         "power", "optical", "memory", "vision", "signal", "sensor", "digital",
         "mobile", "secure", "access", "network", "energy", "system", "systems",
         "cloud", "platform", "storage", "control", "wireless", "battery",
+        # Real trial-programme names that are also everyday words. Bare
+        # "SKYSCRAPER" (Roche TIGIT) matched building stories; "GALAXIES" (GSK)
+        # matched astronomy. Programme names must carry their number.
+        "skyscraper", "galaxies", "horizon", "beacon", "compass", "summit",
     }
     for ticker in config.active_tickers:
-        for term in config.ticker(ticker).product_terms:
+        tc = config.ticker(ticker)
+        for term in tc.product_terms:
             if len(term) < 5:
                 continue  # too short to become a rule anyway
             assert term.strip().lower() not in generic, (
                 f"{ticker} product term {term!r} is a generic word; it would tag "
                 f"any document containing it as {ticker}'s own news"
+            )
+        # Rival products become PRODUCT_RIVAL rules on the same machinery, so a
+        # generic word there mislabels unrelated news as a competitor's move.
+        for term in tc.competitor_products:
+            if len(term) < 5:
+                continue
+            assert term.strip().lower() not in generic, (
+                f"{ticker} competitor product {term!r} is a generic word"
             )
 
 
