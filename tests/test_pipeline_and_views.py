@@ -42,6 +42,19 @@ def ran(config, db):
     return report, Views(db=db, config=config)
 
 
+def test_the_json_api_declares_utf8(tmp_path):
+    """Bare `application/json` leaves the encoding unstated, and a client that
+    falls back to ISO-8859-1 turns every Hebrew headline into mojibake - which
+    is half of what this basket is for. The HTML terminal only looked fine
+    because it carries its own <meta charset>."""
+    pytest.importorskip("fastapi")
+    from harel.serve.api import create_app
+
+    app = create_app(str(tmp_path / "t.db"))
+    media = app.router.default_response_class.media_type
+    assert "charset=utf-8" in media.lower(), media
+
+
 def test_a_source_switched_off_in_config_is_still_reported(ran):
     """A disabled source used to vanish from the coverage panel entirely, so
     "24/29 sources live" could not be reconciled with what was on screen. Off

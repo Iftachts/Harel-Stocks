@@ -19,11 +19,21 @@ from ..views import Views
 def create_app(db_path: str | None = None):
     try:
         from fastapi import FastAPI, Query
-        from fastapi.responses import HTMLResponse
+        from fastapi.responses import HTMLResponse, JSONResponse
     except ImportError as exc:  # pragma: no cover
         raise SystemExit(
             "FastAPI is not installed. Run: pip install 'harel-terminal[serve]'"
         ) from exc
+
+    class Utf8JSONResponse(JSONResponse):
+        """Say the encoding out loud.
+
+        The default is bare `application/json`, and a client that falls back to
+        ISO-8859-1 when no charset is declared turns every Hebrew headline into
+        mojibake - which is half of what this basket is for. The HTML terminal
+        was fine only because it carries its own <meta charset>.
+        """
+        media_type = "application/json; charset=utf-8"
 
     from .terminal import render_terminal
 
@@ -37,6 +47,7 @@ def create_app(db_path: str | None = None):
             "News and regulatory terminal for a 22-name Israeli equity basket, "
             "ranked for short-term trading. Read /agent/manifest first."
         ),
+        default_response_class=Utf8JSONResponse,
     )
 
     @app.get("/", response_class=HTMLResponse)
