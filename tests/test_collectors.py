@@ -451,6 +451,34 @@ def test_federal_register_searches_the_phrase_not_the_loose_words(config, db):
             f"multi-word term {term!r} must be phrase-quoted"
 
 
+def test_form4_separates_a_grant_from_an_open_market_trade(config, db):
+    """Nothing parsed Form 4 transaction codes, so an RSU award to an SVP and an
+    executive buying on the open market scored identically off the form type -
+    and the awards, being far more numerous, took the top of the feed above real
+    earnings. Codes P/S are the signal; A/M/F/G are compensation plumbing."""
+    from harel.collect.edgar import EdgarSubmissionsCollector, ROUTINE_FORM4
+
+    url = "https://www.sec.gov/Archives/edgar/data/1/000/xslF345X05/doc.xml"
+    cases = {
+        "form4_grant.xml": (ROUTINE_FORM4, False, "grant/award"),
+        "form4_open_market.xml": ("4", True, "open-market SELL"),
+    }
+    for fixture, (want_form, want_signal, want_label) in cases.items():
+        collector = EdgarSubmissionsCollector(
+            config.sources["sec_edgar_submissions"],
+            ctx(config, db, {"doc.xml": fixture_text(fixture)}),
+        )
+        detail = collector._form4_detail("4", url)
+        assert detail is not None, f"{fixture} did not parse"
+        assert detail["form_type"] == want_form
+        assert detail["open_market"] is want_signal
+        assert want_label in detail["label"]
+
+    # The routine form_type must carry a hard cap, or the split changes nothing.
+    assert ROUTINE_FORM4 in config.scoring.noise_form_types
+    assert config.scoring.noise_form_types[ROUTINE_FORM4] <= 20
+
+
 def test_fulltext_query_keeps_the_suffix_when_the_name_is_a_common_word(config):
     """Dropping the legal suffix is right for a distinctive name, but "NICE Ltd"
     became "NICE" and "Allot Ltd" became "Allot", so any filing using the word

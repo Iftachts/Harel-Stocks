@@ -110,6 +110,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="e.g. DIRECT  or  PRODUCT_RIVAL,PEER")
     f.add_argument("--events", default=None)
     f.add_argument("--why", action="store_true", help="show the scoring trace")
+    f.add_argument("--tape", action="store_true",
+                   help="include [TAPE] unexplained-move markers (see `harel moving`)")
     f.set_defaults(handler=cmd_feed)
 
     b = sub.add_parser("brief", help="one name in full")
@@ -286,6 +288,7 @@ def cmd_feed(args) -> int:
         tickers=_split(args.tickers), min_score=args.min_score, hours=args.hours,
         limit=args.limit, relations=_split(args.relations),
         events=_split(args.events), include_reasons=args.why,
+        include_tape=args.tape,
     )
     if _emit(args, result):
         return 0

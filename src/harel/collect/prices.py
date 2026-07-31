@@ -108,8 +108,60 @@ class PriceCollector(Collector):
             session="closed",
         )
 
+    def _yahoo_backfill_bars(self, ticker: str) -> None:
+        """Keep a daily bar history so ADV20 - and therefore relative volume -
+        actually exists.
+
+        `_adv_from_bars` reads the `bars` table, which only the Stooq collector
+        ever wrote, and Stooq has been returning nothing. So adv20 was None for
+        every name, `volume_multiple` was None with it, and the movers board
+        showed "vol -" for everything. The scoring formula in the README claims
+        a tape-confirmation bonus on volume > 2x ADV; that half has never once
+        fired. Yahoo returns ~60 daily bars with volume in one call, so the data
+        was there all along.
+
+        Refetched at most once a day per name: 3 months of daily bars do not
+        change between two five-minute passes.
+        """
+        existing = self.db.recent_bars(ticker, 1)
+        today = datetime.now(timezone.utc).date().isoformat()
+        if existing and str(existing[-1].get("date", ""))[:10] >= today:
+            return
+
+        resp = self.client.get(
+            YAHOO_URL.format(symbol=ticker),
+            params={"range": "3mo", "interval": "1d"},
+            allow_status=(404, 401, 403, 429),
+        )
+        if resp.status >= 400:
+            return
+        result = ((resp.json() or {}).get("chart") or {}).get("result") or []
+        if not result:
+            return
+        stamps = result[0].get("timestamp") or []
+        quote = ((result[0].get("indicators") or {}).get("quote") or [{}])[0]
+
+        bars = []
+        for i, ts in enumerate(stamps):
+            def at(key: str) -> float | None:
+                series = quote.get(key) or []
+                return series[i] if i < len(series) else None
+
+            close = at("close")
+            if close is None:
+                continue          # Yahoo pads holidays with nulls
+            bars.append({
+                "date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
+                "open": at("open") or close, "high": at("high") or close,
+                "low": at("low") or close, "close": close,
+                "volume": at("volume") or 0,
+            })
+        if bars:
+            self.db.save_bars(ticker, bars)
+
     # -- Yahoo: including pre/post market ----------------------------------- #
     def _yahoo_snapshot(self, ticker: str) -> PriceSnapshot | None:
+        self._yahoo_backfill_bars(ticker)
         resp = self.client.get(
             YAHOO_URL.format(symbol=ticker),
             params={"range": "5d", "interval": "5m", "includePrePost": "true"},

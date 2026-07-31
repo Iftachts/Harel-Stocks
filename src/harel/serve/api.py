@@ -57,10 +57,13 @@ def create_app(db_path: str | None = None):
         relations: str | None = None,
         events: str | None = None,
         reasons: bool = False,
+        include_tape: bool = Query(
+            False, description="include [TAPE] unexplained-move markers (see /api/moving)"),
     ) -> dict[str, Any]:
         return views.feed(
             tickers=_split(tickers), min_score=min_score, hours=hours, limit=limit,
             relations=_split(relations), events=_split(events), include_reasons=reasons,
+            include_tape=include_tape,
         )
 
     @app.get("/api/brief/{ticker}")

@@ -116,12 +116,22 @@ class Views:
         relations: Sequence[str] | None = None,
         events: Sequence[str] | None = None,
         include_reasons: bool = False,
+        include_tape: bool = False,
     ) -> dict[str, Any]:
         """The main ranked feed. Defaults are tuned for a day trader: last 24h,
-        material items only."""
+        material items only.
+
+        Tape markers are excluded by default. "[TAPE] X up 7% with no matching
+        news" is the *absence* of a story, carrying a forced score of 70, so on
+        a busy tape six of them outranked every real headline - the Teva
+        earnings story sat at 30 underneath them. They are not news and they
+        already have a home in `whats_moving`, which is the view built to answer
+        "what moved and why". Pass include_tape=True to see them here anyway.
+        """
         rows = self.db.feed(
             tickers=tickers, min_score=min_score, since_hours=hours,
             limit=limit, relations=relations, events=events,
+            include_tape=include_tape,
         )
         return {
             "asof": datetime.now(timezone.utc).isoformat(),

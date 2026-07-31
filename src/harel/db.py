@@ -296,10 +296,17 @@ class Database:
         relations: Sequence[str] | None = None,
         events: Sequence[str] | None = None,
         collapse_clusters: bool = True,
+        include_tape: bool = True,
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
         where = ["i.published_at >= ?", "it.score >= ?"]
         params: list[Any] = [since, min_score]
+
+        if not include_tape:
+            # Excluded in SQL rather than after the fetch: these carry a forced
+            # score of 70, so on a busy tape they occupy every top slot and a
+            # post-filter would return an empty page for any small limit.
+            where.append("i.external_id NOT LIKE 'unexplained:%'")
 
         if tickers:
             where.append(f"it.ticker IN ({','.join('?' * len(tickers))})")
@@ -356,6 +363,15 @@ class Database:
             d["tickers"] = self.tickers_for(d["uid"])
             out.append(d)
         return out
+
+    def has_external_id(self, source: str, external_id: str) -> bool:
+        """Have we already stored this exact filing? Lets a collector skip an
+        expensive detail fetch for something it has seen on a previous pass."""
+        row = self.conn.execute(
+            "SELECT 1 FROM items WHERE source = ? AND external_id = ? LIMIT 1",
+            (source, external_id),
+        ).fetchone()
+        return row is not None
 
     def item(self, uid: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM items WHERE uid = ?", (uid,)).fetchone()

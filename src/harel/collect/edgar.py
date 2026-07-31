@@ -17,8 +17,10 @@ Two distinct channels:
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..http import HttpError
@@ -171,6 +173,65 @@ class EdgarSubmissionsCollector(Collector):
             consecutive_failures=0, items_last_run=count,
         )
 
+    def _form4_detail(self, form: str, url: str) -> dict[str, Any] | None:
+        """Read the transaction codes out of a Form 4 so a grant stops looking
+        like a purchase.
+
+        Nothing parsed the codes, so every Form 4 scored identically off its
+        form type alone. A routine RSU award to an SVP and an executive buying
+        on the open market are opposite signals, and the awards - which are far
+        more numerous - were taking the top of the feed above real earnings.
+
+        Only fetched for filings we have not stored yet: the collector re-emits
+        the same filings every pass, and the codes never change.
+        """
+        raw_url = re.sub(r"/xslF345X0\d/", "/", url)
+        if raw_url == url or not raw_url.endswith(".xml"):
+            return None
+        try:
+            resp = self.client.get(raw_url, allow_status=(403, 404))
+            if resp.status >= 400:
+                return None
+            body = resp.text
+        except Exception:
+            return None       # never lose the filing over a missing detail
+
+        codes = re.findall(_TAG.format("transactionCode"), body)
+        if not codes:
+            return None
+        shares = re.findall(_TAG.format("transactionShares"), body)
+        titles = re.findall(_TAG.format("officerTitle"), body)
+        owners = re.findall(_TAG.format("rptOwnerName"), body)
+
+        labels = [FORM4_CODES.get(c, (c, False))[0] for c in codes]
+        signal = any(FORM4_CODES.get(c, (c, False))[1] for c in codes)
+
+        def total(values: list[str]) -> float:
+            out = 0.0
+            for v in values:
+                try:
+                    out += float(v)
+                except ValueError:
+                    continue
+            return out
+
+        qty = total(shares)
+        who = (titles or owners or [""])[0]
+        label = " / ".join(dict.fromkeys(labels))
+        if qty:
+            label += f" {qty:,.0f} sh"
+        if who:
+            label += f" - {who}"
+
+        return {
+            "form_type": form if signal else ROUTINE_FORM4,
+            "codes": sorted(set(codes)),
+            "open_market": signal,
+            "shares": qty or None,
+            "who": who or None,
+            "label": label,
+        }
+
     def _filing_to_item(self, ticker: str, company: str, cik_int: str,
                         recent: dict, i: int) -> RawItem | None:
         def get(field: str) -> str:
@@ -207,8 +268,20 @@ class EdgarSubmissionsCollector(Collector):
         elif description:
             title_bits.append(f"- {description}")
 
+        external_id = f"{accession}:{doc or 'index'}"
+        # The submissions feed re-emits the same filings every pass, so only pay
+        # for the detail fetch on something we have not stored yet.
+        insider = (
+            self._form4_detail(form, url)
+            if form in ("4", "4/A")
+            and not self.db.has_external_id(self.source.key, external_id)
+            else None
+        )
+        if insider:
+            title_bits = [f"[{form}]", company, "-", insider["label"]]
+
         return self.make_item(
-            external_id=f"{accession}:{doc or 'index'}",
+            external_id=external_id,
             title=" ".join(title_bits),
             url=url,
             summary=(
@@ -221,10 +294,14 @@ class EdgarSubmissionsCollector(Collector):
             seed_tickers=[ticker],
             seed_relation="DIRECT",
             meta={
-                "form_type": form,
+                # A grant-only Form 4 is routine paperwork. Left as plain "4" it
+                # scored like an open-market purchase and took the top of the
+                # feed; ROUTINE_FORM4 carries a hard cap in scoring.yaml.
+                "form_type": (insider["form_type"] if insider else form),
                 "accession": accession,
                 "cik": cik_int,
                 "items": item_codes,
+                **({"insider": insider} if insider else {}),
                 "item_labels": item_labels,
                 "item_severity": max(severities, key=_severity_rank) if severities else None,
                 "is_loud_form": form in LOUD_FORMS,
@@ -335,6 +412,24 @@ class EdgarFullTextCollector(Collector):
                 "lock_seed_relation": True,
             },
         )
+
+
+ROUTINE_FORM4 = "4-ROUTINE"
+
+# Form 4 Table I transaction codes. Only open-market buying and selling carries
+# a signal; the rest is compensation plumbing.
+FORM4_CODES = {
+    "P": ("open-market BUY", True),
+    "S": ("open-market SELL", True),
+    "A": ("grant/award", False),
+    "M": ("option exercise", False),
+    "F": ("tax withholding", False),
+    "G": ("gift", False),
+    "D": ("disposition to issuer", False),
+    "C": ("conversion", False),
+    "X": ("option exercise", False),
+}
+_TAG = r"<{0}>\s*(?:<value>)?\s*([^<\s][^<]*?)\s*(?:</value>)?\s*</{0}>"
 
 
 def _fulltext_name(name: str) -> str:

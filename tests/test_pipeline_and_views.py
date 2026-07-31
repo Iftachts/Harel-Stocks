@@ -69,6 +69,28 @@ def test_stale_failure_counters_do_not_warn_for_feeds_we_no_longer_poll(ran, db)
     assert "has failed 42 times" not in warnings
 
 
+def test_tape_markers_do_not_crowd_real_news_out_of_the_feed(ran):
+    """"[TAPE] X up 7% with no matching news" is the absence of a story and
+    carries a forced score of 70, so six of them outranked every real headline -
+    the Teva earnings story sat underneath at 30. They belong in whats_moving.
+
+    Also guards the limit: excluding them must not shrink the page, which a
+    post-fetch filter did (limit=1 fetched only tape and returned nothing)."""
+    report, views = ran
+
+    default = views.feed(min_score=0, hours=LOOKBACK, limit=40)
+    assert default["items"], "the default feed must not be empty"
+    assert not any(i["title"].startswith("[TAPE]") for i in default["items"])
+
+    for limit in (1, 3, 5):
+        page = views.feed(min_score=0, hours=LOOKBACK, limit=limit)
+        assert page["items"], f"limit={limit} returned nothing"
+        assert len(page["items"]) <= limit
+
+    with_tape = views.feed(min_score=0, hours=LOOKBACK, limit=40, include_tape=True)
+    assert len(with_tape["items"]) >= len(default["items"])
+
+
 def test_last_session_close_tracks_the_bell_and_skips_weekends():
     from harel.views import MARKET_TZ, last_session_close
 

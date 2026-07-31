@@ -275,6 +275,11 @@ noise:
     # for the `calendar` table; capping it keeps it out of the ranked feed while
     # the source still shows a live item count.
     "MAYA-SCHEDULE": 6
+    # A Form 4 whose only transaction codes are grants, option exercises, tax
+    # withholding or gifts is compensation plumbing, not a trade. Left as plain
+    # "4" these outranked real earnings at the top of the feed. Open-market
+    # buys and sells (codes P/S) keep form_type "4" and are not capped.
+    "4-ROUTINE": 12
     # Routine SEC/TASE paperwork with ~zero intraday information content
     "S-8": 8
     "424B3": 10          # resale prospectus - already-issued shares
