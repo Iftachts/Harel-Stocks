@@ -249,9 +249,7 @@ class EdgarFullTextCollector(Collector):
             tc = self.cfg.ticker(ticker)
             if not tc:
                 continue
-            # Search on the distinctive name, not the ticker: "ICL" or "ORA"
-            # inside a filing is almost always something else.
-            query = f'"{tc.name.split(" Ltd")[0].split(" Inc")[0].strip()}"'
+            query = f'"{_fulltext_name(tc.name)}"'
             try:
                 yield from self._search(query, ticker, tc.cik10, start, end)
             except HttpError as exc:
@@ -337,6 +335,31 @@ class EdgarFullTextCollector(Collector):
                 "lock_seed_relation": True,
             },
         )
+
+
+def _fulltext_name(name: str) -> str:
+    """The phrase to search for inside *other* issuers' filings.
+
+    Dropping the legal suffix keeps the search on the distinctive name rather
+    than the ticker - "ICL" or "ORA" inside a filing is almost always something
+    else. But when the suffix is all that separates the name from an ordinary
+    English word, dropping it creates exactly the problem it was avoiding:
+    "NICE Ltd" became "NICE" and "Allot Ltd" became "Allot", so any filing
+    using the word "nice" or "allotment" was collected as a peer mention. That
+    was 110 of ALLT's links and 19 of NICE's, including sovereign bond
+    prospectuses and a mortgage trust.
+
+    A single bare token is the risky shape, so those keep their suffix.
+    """
+    stripped = name
+    for suffix in (" Ltd", " Ltd.", " Inc", " Inc.", " Corp", " Corp.", " plc", " N.V."):
+        if stripped.endswith(suffix):
+            stripped = stripped[: -len(suffix)]
+            break
+    stripped = stripped.strip().rstrip(",")
+    if len(stripped.split()) < 2:
+        return name.strip()
+    return stripped
 
 
 def _parse_edgar_dt(value: str) -> datetime | None:

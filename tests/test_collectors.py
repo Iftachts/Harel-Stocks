@@ -451,6 +451,26 @@ def test_federal_register_searches_the_phrase_not_the_loose_words(config, db):
             f"multi-word term {term!r} must be phrase-quoted"
 
 
+def test_fulltext_query_keeps_the_suffix_when_the_name_is_a_common_word(config):
+    """Dropping the legal suffix is right for a distinctive name, but "NICE Ltd"
+    became "NICE" and "Allot Ltd" became "Allot", so any filing using the word
+    "nice" or "allotment" was collected as a peer mention - 110 of ALLT's links
+    came from sovereign bond prospectuses."""
+    from harel.collect.edgar import _fulltext_name
+
+    assert _fulltext_name("NICE Ltd") == "NICE Ltd"
+    assert _fulltext_name("Allot Ltd") == "Allot Ltd"
+    assert _fulltext_name("Nova Ltd") == "Nova Ltd"
+    # Multi-token names stay stripped - the phrase is distinctive without it.
+    assert _fulltext_name("Teva Pharmaceutical Industries Ltd") == "Teva Pharmaceutical Industries"
+    assert _fulltext_name("Palo Alto Networks Inc") == "Palo Alto Networks"
+
+    # No active name may reduce to a single bare token.
+    for ticker in config.active_tickers:
+        q = _fulltext_name(config.ticker(ticker).name)
+        assert len(q.split()) >= 2, f"{ticker} full-text query {q!r} is one bare token"
+
+
 def test_edgar_acceptance_time_is_eastern_not_utc():
     """EDGAR stamps acceptanceDateTime with a trailing Z but the clock is
     Eastern. Reading it as UTC moved every filing 4-5 hours earlier, which put
