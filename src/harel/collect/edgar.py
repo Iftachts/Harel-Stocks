@@ -20,6 +20,7 @@ import json
 import re
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from html import unescape
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -207,6 +208,12 @@ class EdgarSubmissionsCollector(Collector):
         shares = re.findall(_TAG.format("transactionShares"), body)
         titles = re.findall(_TAG.format("officerTitle"), body)
         owners = re.findall(_TAG.format("rptOwnerName"), body)
+
+        # The filing is XML, so the officer title arrives escaped: a title of
+        # "Policy & General Counsel" reaches us as "Policy &amp; General
+        # Counsel" and would be shown that way in the feed.
+        titles = [unescape(t) for t in titles]
+        owners = [unescape(o) for o in owners]
 
         labels = [FORM4_CODES.get(c, (c, False))[0] for c in codes]
         signal = any(FORM4_CODES.get(c, (c, False))[1] for c in codes)

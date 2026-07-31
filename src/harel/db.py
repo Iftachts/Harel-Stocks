@@ -297,6 +297,7 @@ class Database:
         events: Sequence[str] | None = None,
         collapse_clusters: bool = True,
         include_tape: bool = True,
+        max_per_ticker: int | None = None,
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
         where = ["i.published_at >= ?", "it.score >= ?"]
@@ -332,6 +333,8 @@ class Database:
 
         if collapse_clusters:
             rows = _collapse(rows)
+        if max_per_ticker:
+            rows = _cap_per_ticker(rows, max_per_ticker)
         return rows[:limit]
 
     def search(self, query: str, limit: int = 40, since_hours: float | None = None,
@@ -463,6 +466,31 @@ class Database:
         d["events"] = json.loads(d.pop("events_json", None) or "[]")
         d["reasons"] = json.loads(d.pop("reasons_json", None) or "[]")
         return d
+
+
+def _cap_per_ticker(rows: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:
+    """Stop one busy name owning the whole page.
+
+    Clustering is SimHash over titles, which catches a syndicated copy but not
+    the same event told five different ways: "Teva Delivers Strong Q2 Results",
+    "Teva Lifts UZEDY Outlook", "Branded drugs boost Teva revenue" and the 8-K
+    behind all of them landed in four separate clusters, and on results day Teva
+    held five of the top twelve slots while eleven other names showed nothing.
+
+    Rows arrive already ranked, so this keeps each name's best and drops its
+    tail. Nothing is lost that the reader cannot reach: `harel brief TEVA` and a
+    ticker-filtered feed both bypass the cap.
+    """
+    seen: dict[str, int] = {}
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        key = str(row.get("ticker") or "")
+        if key:
+            if seen.get(key, 0) >= cap:
+                continue
+            seen[key] = seen.get(key, 0) + 1
+        out.append(row)
+    return out
 
 
 def _collapse(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

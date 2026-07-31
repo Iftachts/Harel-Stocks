@@ -117,6 +117,7 @@ class Views:
         events: Sequence[str] | None = None,
         include_reasons: bool = False,
         include_tape: bool = False,
+        max_per_ticker: int | None = 3,
     ) -> dict[str, Any]:
         """The main ranked feed. Defaults are tuned for a day trader: last 24h,
         material items only.
@@ -132,6 +133,9 @@ class Views:
             tickers=tickers, min_score=min_score, since_hours=hours,
             limit=limit, relations=relations, events=events,
             include_tape=include_tape,
+            # Only when scanning the whole basket. Asking for one name means you
+            # want everything on it.
+            max_per_ticker=None if tickers else max_per_ticker,
         )
         return {
             "asof": datetime.now(timezone.utc).isoformat(),

@@ -325,6 +325,25 @@ noise:
       cap: 12
     - pattern: "\\b(price target)\\b.{0,20}\\b(maintained|reiterat)"
       cap: 20
+    # 13F holdings filler. Automated "Fund X Buys N Shares of Y" pieces are
+    # generated in bulk from quarterly filings that are up to 45 days stale, and
+    # they were ranking third in the feed - above Teva's own earnings release.
+    # An institution rebalancing tells a day trader nothing.
+    - pattern: "\\b(buys?|sold|sells?|acquires?|purchases?)\\s+[\\d,\\.]+\\s+shares\\b"
+      cap: 10
+    - pattern: "\\b(raises|lowers|boosts|trims|reduces|increases|decreases|cuts)\\s+(its\\s+)?(stock\\s+)?(position|stake|holdings?)\\b"
+      cap: 10
+    - pattern: "\\bhas\\s+\\$[\\d,\\.]+\\s+(million|billion)\\s+(stock\\s+)?(position|holdings?|stake)\\b"
+      cap: 10
+    - pattern: "\\b(takes|acquires|makes)\\s+(a\\s+)?(new\\s+)?(position|stake)\\s+in\\b"
+      cap: 10
+    - pattern: "\\b(13F|institutional (investors?|holdings?|ownership))\\b"
+      cap: 12
+    # SEC rule-filing housekeeping by an exchange. Reaches us because the
+    # Federal Register is a sector regulator channel, but a Nasdaq listing-rule
+    # amendment is not a pharma or semiconductor event.
+    - pattern: "\\bSelf-Regulatory Organizations\\b"
+      cap: 10
 
   # Aggregator-only, low-trust items never reach ALERT without corroboration
   require_corroboration_below_trust: 0.7

@@ -46,6 +46,33 @@ def test_every_active_ticker_can_do_cross_read(config):
     assert missing == [], f"no competitor_products for {missing} - no cross-read possible"
 
 
+def test_holdings_filler_is_noise_but_real_news_is_not(config):
+    """Automated "Fund X Buys N Shares of Y" pieces are generated in bulk from
+    13F filings up to 45 days stale, and they were ranking third in the feed,
+    above Teva's own earnings release. The patterns have to catch them without
+    catching "Raises Outlook", which is a real guidance change."""
+    noise = [
+        "Arrowstreet Capital Limited Partnership Buys 44,869 Shares of Kenon Holdings",
+        "Arkadios Wealth Advisors Raises Stock Position in Palo Alto Networks",
+        "Sei Investments Co. Has $26.63 Million Stock Position in Nova Ltd.",
+        "[FR] Self-Regulatory Organizations; The Nasdaq Stock Market LLC",
+    ]
+    real = [
+        "Teva Delivers Strong Q2 Results and Raises Outlook for All Three Key Brands",
+        "[4] LIVEPERSON INC - open-market SELL - CFO and COO",
+        "Fortinet introduces the FortiGate 1200G with FortiSASE Outpost",
+        "Teva (TEVA) Lifts UZEDY Outlook After Record Sales",
+    ]
+    def caps(title):
+        return [n.cap for n in config.scoring.noise_title_patterns if n.pattern.search(title)]
+
+    for title in noise:
+        assert caps(title), f"should be capped as noise: {title!r}"
+        assert min(caps(title)) <= 15
+    for title in real:
+        assert not caps(title), f"real news wrongly capped: {title!r}"
+
+
 def test_no_product_term_is_a_generic_english_word(config):
     """Product terms become DIRECT match rules - the relation the MCP server
     tells the agent to treat as fact about the issuer. A term like "POWER"
