@@ -147,13 +147,17 @@ harel feed --limit 20 # הפיד המדורג
 ### הרצה רציפה
 
 ```bash
-harel watch --interval 120 --hours 12
+harel watch --interval 300 --hours 12
 ```
 
-מעבר איסוף כל שתי דקות, חלון מבט של 12 שעות. משאיר את המסד עדכני.
+מעבר איסוף כל חמש דקות, חלון מבט של 12 שעות. משאיר את המסד עדכני.
 הדפסה של התראות חדשות בכל מעבר.
 
-**כשירות (מומלץ):**
+> **אל תקטין את `--interval` מתחת ל-250 שניות.** מעבר מלא נמדד ב-~250 שניות
+> (כ-100 שאילתות Google News ועוד EDGAR, כולן מוגבלות-קצב בכוונה). אינטרוול קצר
+> מזמן המעבר פירושו שהלולאה לא ישנה כלל אלא רצה ברצף ומציפה את המקורות.
+
+**כשירות על לינוקס:**
 
 ```bash
 sudo cp scripts/harel-terminal.service /etc/systemd/system/harel-collect.service
@@ -162,6 +166,21 @@ sudo cp scripts/harel-web.service /etc/systemd/system/harel-terminal.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now harel-collect harel-terminal
 ```
+
+**על Windows** (אין systemd) — `scripts/harel-windows.ps1` מריץ את שני
+התהליכים יחד, טוען את `.env` לסביבה, וכותב ללוגים תחת `logs/`:
+
+```powershell
+# בחזית, בסשן הנוכחי - Ctrl-C עוצר את שניהם
+.\scripts\harel-windows.ps1
+
+# שורד logoff/reboot דרך Task Scheduler (פעם אחת)
+.\scripts\harel-windows.ps1 -Install
+Start-ScheduledTask -TaskName HarelTerminal
+```
+
+הסקריפט טוען את `.env` בעצמו מפני שהאפליקציה קוראת `os.environ` ישירות ואינה
+מפרסרת `.env`. בלי `SEC_CONTACT_EMAIL` ה-SEC מחזירה 403 ו-EDGAR שותק.
 
 ### הטרמינל
 

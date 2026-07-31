@@ -12,3 +12,4 @@ data/*.db-wal
 data/*.db-shm
 *.html
 !docs/*.html
+logs/

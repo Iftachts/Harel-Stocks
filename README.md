@@ -52,7 +52,7 @@ harel verify-feeds            # אילו פידי RSS באמת חיים
 harel probe-maya              # אימות הערוץ הישראלי
 harel collect --hours 336     # איסוף ראשון, שבועיים אחורה
 harel morning                 # תדריך בוקר
-harel watch --interval 120    # לולאת איסוף רציפה
+harel watch --interval 300    # לולאת איסוף רציפה (מעבר מלא ~250 שניות)
 harel serve                   # http://127.0.0.1:8787  ← הטרמינל
 ```
 
