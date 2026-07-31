@@ -369,7 +369,10 @@ def cmd_serve(args) -> int:  # pragma: no cover
         return 1
     from .serve.api import create_app
 
-    print(f"{C.AMBER}Harel Terminal{C.RESET} http://{args.host}:{args.port}")
+    # Same reason as cmd_watch: under a service manager stdout is a pipe, and
+    # without a flush this banner sits in the buffer - so a log tail shows an
+    # empty file whether the server is starting, up, or wedged.
+    print(f"{C.AMBER}Harel Terminal{C.RESET} http://{args.host}:{args.port}", flush=True)
     uvicorn.run(create_app(args.db), host=args.host, port=args.port, log_level="warning")
     return 0
 
