@@ -39,6 +39,12 @@ HOST_RATE_LIMITS = {
 }
 DEFAULT_RATE = 2.0
 
+# Used for every host except sec.gov - see HttpClient._ua_for.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
+
 
 class _RateLimiter:
     """Simple per-host spacing. Threadsafe; good enough for a single-user box."""
@@ -92,6 +98,7 @@ class HttpClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.backoff_base = backoff_base
+        self.user_agent = user_agent
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -100,6 +107,22 @@ class HttpClient:
                 "Connection": "keep-alive",
             }
         )
+
+    def _ua_for(self, host: str) -> str:
+        """The SEC *mandates* a contact-bearing User-Agent and will ban clients
+        without one, so sec.gov always gets ours.
+
+        The IR platforms are the opposite problem: several of them (Q4 Inc hosts
+        such as ir.liveperson.com and investors.paloaltonetworks.com) do not
+        reject an unfamiliar agent, they simply never answer - each one burned
+        ~90s per pass in read timeouts and three retries while returning 200 in
+        1.5s to an ordinary browser string. These are public press-release feeds
+        published for syndication; the request is the same, only the header
+        differs.
+        """
+        if host.endswith("sec.gov"):
+            return self.user_agent
+        return BROWSER_UA
 
     def get(
         self,
@@ -113,6 +136,7 @@ class HttpClient:
     ) -> Response:
         host = urlsplit(url).netloc
         req_headers = dict(headers or {})
+        req_headers.setdefault("User-Agent", self._ua_for(host))
         if etag:
             req_headers["If-None-Match"] = etag
         if last_modified:

@@ -38,7 +38,7 @@ tickers:
     sector: pharma_generics_branded
     float_class: large
     ir_feeds:
-      - https://www.tevapharm.com/news-and-media/latest-news/rss
+      - https://ir.tevapharm.com/rss/pressrelease.aspx
     peers: [VTRS, AMRX, PRGO, RDY, OGN, HIK.L, SDZ.SW, LLY, ABBV, PFE, ALKS, BIIB, NVO]
     peer_names:
       ["Viatris", "Sandoz", "Amneal", "Dr. Reddy's", "Sun Pharma", "Hikma",
@@ -170,7 +170,6 @@ tickers:
     sector: enterprise_software_cx
     float_class: large
     ir_feeds:
-      - https://www.nice.com/rss/press-releases.xml
     peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, LPSN, PEGA]
     peer_names: ["Genesys", "Five9", "Verint", "Twilio", "Salesforce", "Zoom",
                  "8x8", "Amazon Connect", "Microsoft Dynamics", "Pegasystems",
@@ -203,7 +202,7 @@ tickers:
     sector: enterprise_software_cx
     float_class: micro
     ir_feeds:
-      - https://ir.liveperson.com/rss/pressrelease.aspx
+      - https://ir.liveperson.com/rss/news-releases.xml
     peers: [NICE, VRNT, TWLO, ZM, EGHT]
     peer_names: ["NICE", "Verint", "Twilio", "Genesys", "Intercom", "Zendesk", "Ada", "Sierra AI"]
     themes:
@@ -230,7 +229,7 @@ tickers:
     sector: adtech
     float_class: small
     ir_feeds:
-      - https://investors.perion.com/rss/pressrelease.aspx
+      - https://perion.com/feed/
     peers: [TBLA, OB, CRTO, MGNI, PUBM, TTD, DV, IAS, APPS, ZETA, GOOGL, META]
     peer_names: ["Taboola", "Outbrain", "Teads", "Criteo", "Magnite", "PubMatic",
                  "The Trade Desk", "DoubleVerify", "Integral Ad Science",
@@ -263,7 +262,6 @@ tickers:
     sector: fintech_payments
     float_class: small
     ir_feeds:
-      - https://investors.nayax.com/rss/pressrelease.aspx
     peers: [CTLP, FOUR, PYPL, ADYEN.AS, GPN, TOST, WLN.PA, MARA]
     peer_names: ["Cantaloupe", "Shift4", "PayPal", "Adyen", "Global Payments",
                  "Toast", "Worldline", "Nuvei", "SumUp", "Verifone", "Ingenico"]
@@ -510,7 +508,6 @@ tickers:
     sector: diagnostics_pharma
     float_class: small
     ir_feeds:
-      - https://www.opko.com/feed/
     peers: [LH, DGX, ASND, PFE, NVO, MRK, EXAS, NTRA]
     peer_names: ["Labcorp", "Quest Diagnostics", "Ascendis Pharma", "Pfizer",
                  "Novo Nordisk", "Merck", "Exact Sciences", "Natera", "Guardant"]
@@ -661,7 +658,6 @@ tickers:
     sector: power_holding
     float_class: micro
     ir_feeds:
-      - https://www.kenon-holdings.com/feed/
     peers: [VST, CEG, NRG, TLN, ZIM]
     peer_names: ["Vistra", "Constellation Energy", "NRG Energy", "Talen Energy",
                  "OPC Energy", "ZIM Integrated Shipping", "Calpine"]
