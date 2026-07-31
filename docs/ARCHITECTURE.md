@@ -124,6 +124,41 @@ agent is told to weigh.
 
 ---
 
+## Language
+
+The HTML terminal is **Hebrew, right-to-left**. The REST API, the MCP tools and
+everything stored in SQLite stay English, because English is what the downstream
+agent is instructed in - so `serve/hebrew.py` is a presentation layer, never a
+translation of the data model.
+
+Two kinds of pipeline string arrive in English and have to be spoken Hebrew on
+screen: link explanations (`why`) and scoring-trace steps. Both are generated
+from a small, stable set of shapes, so they are rewritten by an ordered pattern
+table rather than translated as prose. The tables were written against the
+strings actually in the database - which is how the `in headline` / `in body`
+suffix, the space-bearing form types (`DEF 14A`) and the compound base reasons
+were found. Coverage is 100% of both corpora; anything unmatched falls through
+unchanged into an LTR island, because a legible English fragment beats a wrong
+Hebrew one.
+
+**Bidi is the hard part**, and it is a correctness problem, not a cosmetic one:
+
+- Cells keep the *page* direction so their content hugs the reading edge. Putting
+  `direction: ltr` on the cell aligned every number to the far side of its
+  column, which glued `TATT` to `רגולציה` and `19` to `TATT`.
+- Latin and numeric fields are wrapped in `<span class='ltr'>` - an isolate.
+  Without it `+4.8%` renders as `%4.8+`.
+- A unit belongs *inside* the island with its number. `NORMAL {island} · HIGH
+  {island}` left the labels outside and the algorithm reordered the run into
+  `75 NORMAL 35 · HIGH 55 · ALERT`.
+- Two adjacent islands swap places, so a pair like `ITA +0.6%` is one island.
+- Headlines carry `dir="auto"`: they can be either language, so the browser
+  decides per string.
+- The stylesheet uses only logical properties (`border-inline-start`,
+  `padding-inline`, `text-align: start`). A test rejects physical ones.
+
+---
+
 ## The audit surface
 
 `views.explain(uid)` is the one place that reassembles everything known about an

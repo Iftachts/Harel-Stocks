@@ -1,8 +1,20 @@
-"""The terminal view.
+"""The terminal view - Hebrew, right-to-left.
 
 Deliberately dense and keyboard-oriented: amber on black, monospace, no images,
 no framework. A trader scans this, they do not browse it. Everything is rendered
 server-side from the same :class:`Views` object the API and MCP server use.
+
+The page is Hebrew; the REST API and the MCP tools stay English because that is
+what the downstream agent is instructed in. Hebrew phrasing lives in
+:mod:`hebrew`, and nothing here changes what is stored or scored.
+
+Bidirectionality is the whole difficulty. The page direction is RTL, but most of
+its content is not: symbols, prices, timestamps, source keys, URLs and roughly
+half the headlines are Latin. Left to itself the bidi algorithm reorders them -
+"+4.8%" renders as "%4.8+", and a headline ending in a bracket puts the bracket
+on the wrong side. So every Latin or numeric field is wrapped in an explicit LTR
+island, and headlines - which can be either language - carry dir="auto" so the
+browser decides per string.
 """
 
 from __future__ import annotations
@@ -12,7 +24,9 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from ..views import Views
+from ..views import (PROVIDER_MEANING_HE, RELATION_LABEL_HE, RELATION_MEANING_HE,
+                     SESSION_LABEL_HE, TRUST_MEANING_HE, Views)
+from . import hebrew as he
 
 TIER_COLOR = {
     "ALERT": "#ff4d4d",
@@ -32,82 +46,127 @@ RELATION_COLOR = {
     "MACRO": "#909090",
 }
 
-CSS = """
-:root { color-scheme: dark; }
-* { box-sizing: border-box; }
-body {
+# Monospace fonts carry no Hebrew glyphs, so the browser falls back per glyph.
+# Naming the Hebrew faces explicitly keeps that fallback consistent instead of
+# leaving it to whatever the system happens to pick.
+FONT_STACK = ('"SF Mono", "Cascadia Mono", Menlo, Consolas, '
+              '"Segoe UI", "Arial Hebrew", "Noto Sans Hebrew", sans-serif')
+
+CSS = f"""
+:root {{ color-scheme: dark; }}
+* {{ box-sizing: border-box; }}
+body {{
   margin: 0; background: #000; color: #d9d9d9;
-  font: 13px/1.45 "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-}
-header {
+  font: 13px/1.55 {FONT_STACK};
+}}
+header {{
   position: sticky; top: 0; z-index: 5; background: #0a0a0a;
   border-bottom: 1px solid #333; padding: 8px 14px;
   display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap;
-}
-h1 { font-size: 14px; margin: 0; color: #ffb000; letter-spacing: 1px; }
-.muted { color: #7a7a7a; }
-main { padding: 12px 14px 60px; }
-section { margin-bottom: 26px; }
-h2 {
-  font-size: 12px; color: #ffb000; text-transform: uppercase;
-  letter-spacing: 1.5px; border-bottom: 1px solid #2a2a2a;
-  padding-bottom: 4px; margin: 0 0 8px;
-}
-table { width: 100%; border-collapse: collapse; }
-td, th { padding: 3px 8px 3px 0; vertical-align: top; text-align: left; }
-th { color: #7a7a7a; font-weight: normal; font-size: 11px; }
-tr.item:hover { background: #111; }
-a { color: inherit; text-decoration: none; }
-a:hover { text-decoration: underline; }
-.score { font-weight: bold; text-align: right; width: 42px; }
-.chg { font-weight: bold; text-align: right; width: 118px; }
-.tkr { color: #ffb000; font-weight: bold; width: 56px; }
-.rel { font-size: 10px; width: 108px; }
-.tm { color: #6b6b6b; width: 118px; white-space: nowrap; }
-.src { color: #6b6b6b; font-size: 11px; width: 150px; }
-.why { color: #6b6b6b; font-size: 11px; }
-.up { color: #4ade80; } .dn { color: #ff6b6b; }
-.pill {
+}}
+h1 {{ font-size: 14px; margin: 0; color: #ffb000; letter-spacing: 0.5px; }}
+.muted {{ color: #7a7a7a; }}
+main {{ padding: 12px 14px 60px; }}
+section {{ margin-bottom: 26px; }}
+h2 {{
+  font-size: 12px; color: #ffb000; letter-spacing: 0.5px;
+  border-bottom: 1px solid #2a2a2a; padding-bottom: 4px; margin: 0 0 8px;
+}}
+table {{ width: 100%; border-collapse: collapse; }}
+/* Logical properties throughout: the padding has to mirror with the page. */
+td, th {{
+  padding-block: 3px; padding-inline: 0 8px;
+  vertical-align: top; text-align: start;
+}}
+th {{ color: #7a7a7a; font-weight: normal; font-size: 11px; }}
+tr.item:hover {{ background: #111; }}
+a {{ color: inherit; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+
+/* An LTR island. Latin text and numbers inside an RTL page reorder without it:
+   "+4.8%" becomes "%4.8+", "(NASDAQ:TSEM)" loses its brackets to the far side. */
+.ltr {{ direction: ltr; unicode-bidi: isolate; text-align: right; }}
+.ltr-start {{ direction: ltr; unicode-bidi: isolate; text-align: left; }}
+
+/* Cells keep the PAGE direction so their content hugs the reading edge - only
+   the content inside is an LTR island. Putting direction:ltr on the cell itself
+   aligned every number and symbol to the far side of its column, which glued
+   "TATT" to "רגולציה" and "19" to "TATT". */
+.score {{ font-weight: bold; width: 46px; white-space: nowrap; }}
+.chg {{ font-weight: bold; width: 122px; white-space: nowrap; }}
+.tkr {{ color: #ffb000; font-weight: bold; width: 64px; white-space: nowrap; }}
+.rel {{ font-size: 11px; width: 108px; }}
+.tm {{ color: #6b6b6b; width: 120px; }}
+.src {{ color: #6b6b6b; font-size: 11px; width: 160px; }}
+.why {{ color: #6b6b6b; font-size: 11px; }}
+.up {{ color: #4ade80; }} .dn {{ color: #ff6b6b; }}
+.pill {{
   display: inline-block; border: 1px solid #333; border-radius: 2px;
-  padding: 0 5px; margin-right: 4px; font-size: 10px; color: #9a9a9a;
-}
-.warn {
-  border-left: 3px solid #ffa500; background: #140f00;
+  padding: 0 5px; margin-inline-end: 4px; font-size: 10px; color: #9a9a9a;
+}}
+.warn {{
+  border-inline-start: 3px solid #ffa500; background: #140f00;
   padding: 6px 10px; margin-bottom: 6px; color: #ffcf7a; font-size: 12px;
-}
-.empty { color: #6b6b6b; font-style: italic; padding: 6px 0; }
-.tape {
-  border-left: 3px solid #ff4d4d; background: #170a0a;
+}}
+.empty {{ color: #6b6b6b; font-style: italic; padding: 6px 0; }}
+.tape {{
+  border-inline-start: 3px solid #ff4d4d; background: #170a0a;
   padding: 6px 10px; margin-bottom: 6px; color: #ffb3b3; font-size: 12px;
-}
-.dig {
+}}
+.dig {{
   color: #5fd7ff; font-size: 10px; border: 1px solid #24404a;
-  border-radius: 2px; padding: 0 4px; margin-left: 6px; white-space: nowrap;
-}
-.dig:hover { background: #0d2028; text-decoration: none; }
-nav a { color: #7a7a7a; margin-right: 12px; }
-nav a:hover { color: #ffb000; }
+  border-radius: 2px; padding: 0 4px; margin-inline-start: 6px;
+  white-space: nowrap; unicode-bidi: isolate;
+}}
+.dig:hover {{ background: #0d2028; text-decoration: none; }}
+nav a {{ color: #7a7a7a; margin-inline-end: 12px; }}
+nav a:hover {{ color: #ffb000; }}
 
 /* --- drill-down ------------------------------------------------------- */
-.kv { width: 100%; margin-bottom: 4px; }
-.kv td { padding: 2px 10px 2px 0; }
-.kv td.k { color: #7a7a7a; width: 150px; white-space: nowrap; vertical-align: top; }
-.big { font-size: 15px; color: #e8e8e8; margin: 4px 0 2px; }
-.trace td { padding: 1px 10px 1px 0; }
-.trace td.op { width: 26px; text-align: right; color: #7a7a7a; }
-.op-base { color: #ffb000; } .op-add { color: #4ade80; } .op-cap { color: #ff6b6b; }
-.total { color: #ffb000; font-weight: bold; }
-.note { color: #6b6b6b; font-size: 11px; margin: 4px 0 0; }
-pre.raw {
+.kv {{ width: 100%; margin-bottom: 4px; }}
+.kv td {{ padding-block: 2px; padding-inline: 0 10px; }}
+.kv td.k {{ color: #7a7a7a; width: 160px; white-space: nowrap; vertical-align: top; }}
+.big {{ font-size: 15px; color: #e8e8e8; margin: 4px 0 2px; }}
+.trace td {{ padding-block: 1px; padding-inline: 0 10px; }}
+.trace td.op {{
+  width: 26px; color: #7a7a7a; direction: ltr; unicode-bidi: isolate;
+  text-align: center;
+}}
+.op-base {{ color: #ffb000; }} .op-add {{ color: #4ade80; }} .op-cap {{ color: #ff6b6b; }}
+.total {{ color: #ffb000; font-weight: bold; }}
+.note {{ color: #6b6b6b; font-size: 11px; margin: 4px 0 0; }}
+pre.raw {{
   white-space: pre-wrap; word-break: break-word; color: #9a9a9a;
   background: #0a0a0a; border: 1px solid #1e1e1e; padding: 8px;
   max-height: 320px; overflow: auto; margin: 0 0 8px;
-}
-.check td { padding: 3px 10px 3px 0; }
-.ok { color: #4ade80; } .bad { color: #ff6b6b; } .off { color: #6b6b6b; }
+  direction: ltr; text-align: left; unicode-bidi: isolate;
+}}
+.check td {{ padding-block: 3px; padding-inline: 0 10px; }}
+.ok {{ color: #4ade80; }} .bad {{ color: #ff6b6b; }} .off {{ color: #6b6b6b; }}
 """
 
 
+# --------------------------------------------------------------------------- #
+# Bidi helpers. Everything Latin or numeric goes through one of these.
+# --------------------------------------------------------------------------- #
+def _ltr(text: Any) -> str:
+    """An escaped LTR island - symbols, numbers, keys, timestamps."""
+    return f"<span class='ltr'>{html.escape(str(text))}</span>"
+
+
+def _auto(text: str, cut: int | None = None) -> str:
+    """Text that may be Hebrew or Latin: let the browser decide per string."""
+    value = html.escape(text or "")
+    if cut:
+        value = value[:cut]
+    return f"<span dir='auto'>{value}</span>"
+
+
+def _pct(value: float, digits: int = 1, suffix: str = "%") -> str:
+    return f"<span class='ltr'>{value:+.{digits}f}{suffix}</span>"
+
+
+# --------------------------------------------------------------------------- #
 def render_terminal(views: Views) -> str:
     brief = views.morning_brief(hours=24)
     # 40 was reachable only because the [TAPE] markers carried a forced 70 and
@@ -115,38 +174,25 @@ def render_terminal(views: Views) -> str:
     # genuine news peaks in the low 30s once recency decay has run for a few
     # hours - so a threshold of 40 renders an empty panel on any day that is not
     # breaking live, which is exactly when you would distrust the whole tool.
-    # 20 matches the RUNBOOK's own advice for a quiet tape.
     feed = views.feed(min_score=20, hours=24, limit=60)
     moving = views.whats_moving(min_abs_pct=1.5)
     health = views.health()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    parts = [
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>",
-        "<title>HAREL TERMINAL</title>",
-        f"<style>{CSS}</style></head><body>",
-        "<header>",
-        "<h1>HAREL&nbsp;TERMINAL</h1>",
-        f"<span class='muted'>{now}</span>",
-        f"<span class='muted'>{health['db']['items']} items &middot; "
-        f"{health['db']['alerts_24h']} alerts/24h &middot; "
-        f"{health['sources_available']}/{health['sources_configured']} sources live</span>",
-        "<nav><a href='/sources'>sources</a>"
-        "<a href='/agent/manifest'>manifest</a>"
-        "<a href='/api/morning'>json</a></nav>",
-        "</header><main>",
-    ]
+    header = (
+        f"<span class='muted'>{_ltr(now)}</span>"
+        f"<span class='muted'>{_ltr(health['db']['items'])} {he.UI['items']} "
+        f"&middot; {_ltr(health['db']['alerts_24h'])} {he.UI['alerts_24h']} &middot; "
+        f"{_ltr(str(health['sources_available']) + '/' + str(health['sources_configured']))} "
+        f"{he.UI['sources_live']}</span>"
+    )
+    parts: list[str] = []
 
-    warnings = brief.get("coverage_warnings") or []
-    if warnings:
-        parts.append("<section><h2>Coverage warnings</h2>")
-        # The "why" behind a disabled source is a paragraph, and eight of them
-        # pushed the actual news below the fold. Keep the headline reason here;
-        # the full note lives in config/sources.yaml and /api/health.
-        for w in warnings:
-            short = w if len(w) <= 120 else w[:117].rstrip(" ,.;-") + "..."
-            parts.append(f"<div class='warn'>{html.escape(short)}</div>")
+    entries = views.coverage_warning_entries()
+    if entries:
+        parts.append(f"<section><h2>{he.UI['coverage_warnings']}</h2>")
+        for entry in entries:
+            parts.append(f"<div class='warn'>{_coverage_warning_he(entry)}</div>")
         parts.append("</section>")
 
     # Tape alerts come first. A move that outran its sector with nothing behind
@@ -154,68 +200,94 @@ def render_terminal(views: Views) -> str:
     # story - and a news feed, by construction, could never raise it.
     parts.append(_unexplained_section(brief.get("unexplained_moves") or []))
 
-    empty_alerts = (
-        "no news alerts in the last 24h"
-        if health["db"]["items"] else "database is empty - run `harel collect`"
-    )
-    parts.append(_section("News alerts (last 24h)", brief["alerts"], empty=empty_alerts))
+    parts.append(_section(
+        he.UI["news_alerts"], brief["alerts"],
+        empty=he.UI["no_alerts"] if health["db"]["items"] else he.UI["db_empty"],
+    ))
     parts.append(_movers_section(moving["movers"]))
+
     if feed["items"]:
-        parts.append(_section("Feed", feed["items"]))
+        parts.append(_section(he.UI["feed"], feed["items"]))
     else:
         # An empty panel is the one thing this page must never be. "Nothing
-        # above score 20" reads as a threshold artefact and leaves the trader
-        # unable to tell a quiet tape from a broken pipeline - which is the
-        # distinction the whole page exists to make. On a Friday evening after
-        # the close, with every recap and chart-generated piece correctly capped
-        # in the teens, the top of the basket genuinely sits below 20.
-        # Uncapped for the count: the feed keeps at most three per name, so the
-        # capped length understates how much actually came in - and this number
-        # is the whole point of the panel.
+        # above 20" reads as a threshold artefact and leaves the trader unable
+        # to tell a quiet tape from a broken pipeline - the distinction the
+        # whole page exists to make. Uncapped for the count: the feed keeps at
+        # most three per name, and that number is the point of the panel.
         background = views.feed(min_score=0, hours=24, limit=400, max_per_ticker=None)
         parts.append(_background_section(background["items"], health))
+
     if brief.get("tase_overnight"):
-        parts.append(_section("TASE / MAYA overnight", brief["tase_overnight"]))
+        parts.append(_section(he.UI["tase_overnight"], brief["tase_overnight"]))
     parts.append(_calendar_section(brief.get("calendar_next_7d") or []))
 
-    parts.append("</main></body></html>")
-    return "".join(parts)
+    return _document(he.UI["brand"], header, "".join(parts))
+
+
+def _coverage_warning_he(entry: dict[str, Any]) -> str:
+    """Composed from the structured entry, never translated from the sentence -
+    prose drifts, data does not."""
+    kind = entry["kind"]
+    if kind == "missing_key":
+        return (f"המקור {_ltr(entry['source'])} כבוי: "
+                f"{_ltr(entry['env'])} לא מוגדר")
+    if kind == "degraded":
+        return (f"המקור {_ltr(entry['source'])} רץ על endpoint חלופי לא רשמי "
+                f"מפני ש-{_ltr(entry['env'])} לא מוגדר — הוא עלול להישבר בלי התראה")
+    if kind == "unresolved_ticker":
+        return (f"הטיקר {_ltr(entry['ticker'])} לא נפתר ו<b>אינו נאסף</b> — "
+                f"{_auto(entry.get('hint') or '', 140)}")
+    if kind == "disabled":
+        reason = (entry.get("reason") or "").strip()
+        tail = f": {_auto(reason, 150)}" if reason else ""
+        return f"המקור {_ltr(entry['source'])} מושבת בקונפיג{tail}"
+    if kind == "failing":
+        return (f"המקור {_ltr(entry['source'])} נכשל "
+                f"{_ltr(entry['count'])} פעמים: {_auto(str(entry.get('error') or ''), 90)}")
+    return _auto(str(entry))
 
 
 def _section(title: str, items: list[dict[str, Any]], empty: str | None = None) -> str:
     if not items:
-        # "run `harel collect`" was printed whenever a panel was empty, so a
+        # "run harel collect" was printed whenever a panel was empty, so a
         # working system with a quiet tape accused itself of never having
         # collected. Distinguishing the two is the entire point of this page.
         return (f"<section><h2>{html.escape(title)}</h2>"
-                f"<div class='empty'>{html.escape(empty or 'nothing to show')}"
+                f"<div class='empty'>{html.escape(empty or he.UI['nothing_to_show'])}"
                 f"</div></section>")
 
-    rows = ["<table><tr><th class='score'>SC</th><th class='tkr'>SYM</th>"
-            "<th class='rel'>REL</th><th class='tm'>TIME</th>"
-            "<th>HEADLINE</th><th class='src'>SOURCE</th></tr>"]
+    rows = [f"<table><tr><th class='score'>{he.UI['col_score']}</th>"
+            f"<th class='tkr'>{he.UI['col_symbol']}</th>"
+            f"<th class='rel'>{he.UI['col_relation']}</th>"
+            f"<th class='tm'>{he.UI['col_time']}</th>"
+            f"<th>{he.UI['col_headline']}</th>"
+            f"<th class='src'>{he.UI['col_source']}</th></tr>"]
     for it in items:
         tier_color = TIER_COLOR.get(it.get("tier", "NORMAL"), "#d9d9d9")
         rel = it.get("relation", "")
         rel_color = RELATION_COLOR.get(rel, "#909090")
         url = it.get("url") or "#"
-        title_html = html.escape(it["title"])[:190]
         events = "".join(
-            f"<span class='pill'>{html.escape(e)}</span>" for e in (it.get("events") or [])[:3]
+            f"<span class='pill'>{html.escape(he.event_label(e))}</span>"
+            for e in (it.get("events") or [])[:3]
         )
         corr = it.get("corroboration")
-        corr_html = f"<span class='pill'>x{corr}</span>" if corr else ""
-        why = html.escape(it.get("why") or "")
+        corr_html = f"<span class='pill ltr'>x{corr}</span>" if corr else ""
+        why_he, _ = he.why(it.get("why") or "")
+        score_cell = _ltr(f"{it['score']:.0f}")
         rows.append(
             f"<tr class='item'>"
-            f"<td class='score' style='color:{tier_color}'>{it['score']:.0f}</td>"
-            f"<td class='tkr'>{html.escape(it.get('ticker', ''))}</td>"
-            f"<td class='rel' style='color:{rel_color}'>{html.escape(rel)}</td>"
+            f"<td class='score' style='color:{tier_color}'>"
+            f"{score_cell}</td>"
+            f"<td class='tkr'>{_ltr(it.get('ticker', ''))}</td>"
+            f"<td class='rel' style='color:{rel_color}'>"
+            f"{html.escape(RELATION_LABEL_HE.get(rel, rel))}</td>"
             f"<td class='tm'>{_time_cell(it)}</td>"
-            f"<td><a href='{html.escape(url)}' target='_blank' rel='noreferrer'>"
-            f"{title_html}</a> {events}{corr_html}{_dig(it.get('uid'))}"
-            f"<div class='why'>{why}</div></td>"
-            f"<td class='src'>{html.escape(it['source'])}</td></tr>"
+            f"<td><a href='{html.escape(url)}' target='_blank' rel='noreferrer' "
+            f"dir='auto'>{html.escape(it['title'])[:190]}</a> "
+            f"{events}{corr_html}{_dig(it.get('uid'))}"
+            f"<div class='why' dir='auto'>{why_he}</div></td>"
+            f"<td class='src'>{_ltr(it['source'])}</td></tr>"
         )
     rows.append("</table>")
     return f"<section><h2>{html.escape(title)}</h2>{''.join(rows)}</section>"
@@ -226,19 +298,16 @@ def _background_section(items: list[dict[str, Any]], health: dict[str, Any]) -> 
     is underneath it."""
     if not items:
         return _section(
-            "Feed", [],
-            empty=("nothing collected in the last 24h at all - check the sources "
-                   "page before assuming the market was quiet"
-                   if health["db"]["items"] else
-                   "database is empty - run `harel collect`"),
+            he.UI["feed"], [],
+            empty=(he.UI["nothing_collected"] if health["db"]["items"]
+                   else he.UI["db_empty"]),
         )
     top = items[0]["score"]
     note = (
-        f"<div class='warn'>Nothing scored above 20 in the last 24h - the best is "
-        f"{top:.1f}. This is a <b>quiet tape, not a blind one</b>: "
-        f"{len(items)} items were collected and linked in that window. "
-        f"The highest-scoring are below as background; none of them is a reason "
-        f"to act.</div>"
+        f"<div class='warn'>שום פריט לא עבר ציון {_ltr(20)} ב-24 השעות האחרונות — "
+        f"הגבוה ביותר הוא {_ltr(f'{top:.1f}')}. זה <b>סל שקט, לא מערכת עיוורת</b>: "
+        f"{_ltr(len(items))} פריטים נאספו וקושרו בחלון הזה. "
+        f"הגבוהים ביותר מוצגים למטה כרקע; אף אחד מהם אינו סיבה לפעולה.</div>"
     )
     # One per name here: a dozen rows from one busy ticker would misrepresent a
     # quiet basket as a busy one.
@@ -250,7 +319,7 @@ def _background_section(items: list[dict[str, Any]], health: dict[str, Any]) -> 
             continue
         seen.add(key)
         shown.append(item)
-    return note + _section("Feed (below threshold)", shown[:12])
+    return note + _section(he.UI["feed_below"], shown[:12])
 
 
 def _unexplained_section(alerts: list[dict[str, Any]]) -> str:
@@ -259,104 +328,120 @@ def _unexplained_section(alerts: list[dict[str, Any]]) -> str:
         return ""
     rows = []
     for a in alerts:
+        bits = [f"{_ltr(a['ticker'])} {_pct(a['change_pct'])}"]
+        if a.get("relative_pct") is not None:
+            bench = f"{_ltr(a['benchmark'])} ({_pct(a.get('benchmark_pct') or 0)})"
+            bits.append(f"{_pct(a['relative_pct'], suffix='pp')} מול {bench}")
+        if a.get("volume_multiple"):
+            bits.append("מחזור " + _ltr(f"{a['volume_multiple']:.1f}x"))
+        headline = "תנועה חריגה ללא הסבר — " + " | ".join(bits)
+
+        tail = ["לא נמצא קטליזטור שקדם לתנועה מעל ציון 20 ב-30 השעות האחרונות"]
+        if a.get("post_move_commentary"):
+            tail.append("(פרשנויות מחיר סוננו כתגובתיות)")
+        detail = " ".join(tail)
+
         catalyst = a.get("next_catalyst")
-        tail = html.escape(a["checked"])
         if catalyst and catalyst.get("strength") == "company":
-            tail += (f"<br>next known catalyst: <b>{html.escape(catalyst['date'])}</b> "
-                     f"{html.escape(catalyst['label'][:70])} &mdash; positioning ahead "
-                     f"of it is possible but unverified")
+            detail += (f"<br>התאריך הידוע הבא: <b>{_ltr(catalyst['date'])}</b> "
+                       f"{_auto(he.calendar_label(catalyst['label']), 70)} — "
+                       f"מיצוב לקראתו אפשרי, אך לא מאומת")
         elif catalyst:
-            tail += (f"<br>{html.escape(catalyst.get('caveat', 'weak link'))}: "
-                     f"{html.escape(catalyst['date'])} "
-                     f"{html.escape(catalyst['label'][:70])}")
-        rows.append(
-            f"<div class='tape'><b>{html.escape(a['headline'])}</b>"
-            f"<div class='why'>{tail.lstrip(' &middot;')}</div></div>"
-        )
-    return ("<section><h2>Unexplained moves</h2>" + "".join(rows)
-            + "<p class='note'>These are questions, not findings. The tape moved "
-              "clear of its sector and nothing we read explains it: check the "
-              "order book, options flow and any pending catalyst before "
-              "assuming there is news we missed.</p></section>")
+            detail += (f"<br>קישור חלש: תאריך בסקטור, לא של החברה הזאת — "
+                       f"{_ltr(catalyst['date'])} "
+                       f"{_auto(he.calendar_label(catalyst['label']), 70)}")
+        rows.append(f"<div class='tape'><b>{headline}</b>"
+                    f"<div class='why'>{detail}</div></div>")
+    return (f"<section><h2>{he.UI['unexplained']}</h2>" + "".join(rows)
+            + "<p class='note'>אלה שאלות, לא ממצאים. התנועה ברחה מהסקטור שלה "
+              "ושום דבר שקראנו לא מסביר אותה: בדוק את ספר הפקודות, זרימת "
+              "האופציות וכל קטליזטור ממתין לפני שתניח שפספסנו ידיעה.</p></section>")
 
 
 def _movers_section(movers: list[dict[str, Any]]) -> str:
     if not movers:
         return ""
-    rows = ["<table><tr><th class='tkr'>SYM</th><th class='chg'>CHG</th>"
-            "<th class='rel'>VOL</th><th class='rel'>vs SECTOR</th>"
-            "<th>DRIVER</th></tr>"]
+    rows = [f"<table><tr><th class='tkr'>{he.UI['col_symbol']}</th>"
+            f"<th class='chg'>{he.UI['col_change']}</th>"
+            f"<th class='rel'>{he.UI['col_volume']}</th>"
+            f"<th class='rel'>{he.UI['col_vs_sector']}</th>"
+            f"<th>{he.UI['col_driver']}</th></tr>"]
     for m in movers:
         cls = "up" if m["change_pct"] >= 0 else "dn"
-        vol = f"{m['volume_multiple']:.1f}x" if m.get("volume_multiple") else "-"
+        vol = (f"<span class='ltr'>{m['volume_multiple']:.1f}x</span>"
+               if m.get("volume_multiple") else "-")
         # Where the percentage came from. A trader reconciling against their own
         # screen needs to know it is a delayed Yahoo print, not a live quote.
-        provenance = f"<div class='why'>{html.escape(_quote_label(m.get('quote')))}</div>"
+        provenance = f"<div class='why'>{_quote_label(m.get('quote'))}</div>"
 
         rel_pct = m.get("relative_pct")
         if rel_pct is None:
             rel_cell = "<span class='muted'>-</span>"
         else:
             rel_cls = "up" if rel_pct >= 0 else "dn"
-            rel_cell = (f"<span class='{rel_cls}'>{rel_pct:+.1f}pp</span>"
-                        f"<div class='why'>{html.escape(str(m.get('benchmark') or ''))} "
-                        f"{m.get('benchmark_pct', 0):+.1f}%</div>")
+            # One island for the pair: two adjacent islands swap places in
+            # RTL, so "ITA +0.6%" came out as "+0.6% ITA".
+            bench = f"{m.get('benchmark') or ''} {(m.get('benchmark_pct') or 0):+.1f}%"
+            rel_cell = (f"<span class='{rel_cls} ltr'>{rel_pct:+.1f}pp</span>"
+                        f"<div class='why'>{_ltr(bench)}</div>")
 
         if m["drivers"]:
             top = m["drivers"][0]
             driver = (f"<a href='{html.escape(top.get('url') or '#')}' target='_blank' "
-                      f"rel='noreferrer'>{html.escape(top['title'])[:150]}</a>"
+                      f"rel='noreferrer' dir='auto'>{html.escape(top['title'])[:150]}</a>"
                       f"{_dig(top.get('uid'))}")
         elif rel_pct is not None and abs(rel_pct) < 2.0:
             # Most of the move is the group. Saying "no matching news" here
             # invites you to hunt for a company story that does not exist.
-            driver = ("<span class='muted'>tracks its sector - "
-                      f"{html.escape(str(m.get('benchmark') or ''))} "
-                      f"{m.get('benchmark_pct', 0):+.1f}%, no stock-specific news"
-                      "</span>")
+            bench = f"{m.get('benchmark') or ''} {(m.get('benchmark_pct') or 0):+.1f}%"
+            driver = (f"<span class='muted'>עוקב אחרי הסקטור — {_ltr(bench)}, "
+                      f"אין חדשות ספציפיות למניה</span>")
         else:
-            driver = "<span class='muted'>no matching news - flow, technical, or a gap in coverage</span>"
+            driver = ("<span class='muted'>אין חדשות תואמות — זרימת הזמנות, "
+                      "טכני, או פער בכיסוי</span>")
         # Published after the bell: cannot explain today's move, but it is the
         # next session's setup, so show it rather than dropping it.
         for late in (m.get("after_the_bell") or [])[:1]:
             driver += (
-                f"<div class='why'>after the bell &middot; not a cause of this move: "
+                f"<div class='why'>אחרי הפעמון &middot; לא הגורם לתנועה הזאת: "
                 f"<a href='{html.escape(late.get('url') or '#')}' target='_blank' "
-                f"rel='noreferrer'>{html.escape(late['title'])[:120]}</a></div>"
+                f"rel='noreferrer' dir='auto'>{html.escape(late['title'])[:120]}</a></div>"
             )
         # Written because the price moved. Shown, because a trader will find it
         # anyway and needs to know we classified it rather than missed it.
         for recap in (m.get("post_move_commentary") or [])[:1]:
             driver += (
-                f"<div class='why'>post-move commentary &middot; reactive, not a catalyst: "
+                f"<div class='why'>פרשנות שלאחר התנועה &middot; תגובה, לא קטליזטור: "
                 f"<a href='{html.escape(recap.get('url') or '#')}' target='_blank' "
-                f"rel='noreferrer'>{html.escape(recap['title'])[:120]}</a>"
+                f"rel='noreferrer' dir='auto'>{html.escape(recap['title'])[:120]}</a>"
                 f"{_dig(recap.get('uid'))}</div>"
             )
         rows.append(
-            f"<tr class='item'><td class='tkr'>{html.escape(m['ticker'])}</td>"
-            f"<td class='chg {cls}'>{m['change_pct']:+.1f}%{provenance}</td>"
+            f"<tr class='item'><td class='tkr'>{_ltr(m['ticker'])}</td>"
+            f"<td class='chg {cls}'>{_pct(m['change_pct'])}{provenance}</td>"
             f"<td class='rel'>{vol}</td><td class='rel'>{rel_cell}</td>"
             f"<td>{driver}</td></tr>"
         )
     rows.append("</table>")
-    return f"<section><h2>Movers</h2>{''.join(rows)}</section>"
+    return f"<section><h2>{he.UI['movers']}</h2>{''.join(rows)}</section>"
 
 
 def _calendar_section(entries: list[dict[str, Any]]) -> str:
     if not entries:
         return ""
-    rows = ["<table><tr><th class='tm'>DATE</th><th class='tkr'>SYM</th>"
-            "<th class='rel'>KIND</th><th>EVENT</th></tr>"]
+    rows = [f"<table><tr><th class='tm'>{he.UI['col_date']}</th>"
+            f"<th class='tkr'>{he.UI['col_symbol']}</th>"
+            f"<th class='rel'>{he.UI['col_kind']}</th>"
+            f"<th>{he.UI['col_event']}</th></tr>"]
     for e in entries:
         rows.append(
-            f"<tr class='item'><td class='tm'>{html.escape(e['date'])}</td>"
-            f"<td class='tkr'>{html.escape(e['ticker'])}</td>"
-            f"<td class='rel'>{html.escape(e['kind'])}</td>"
-            f"<td>{html.escape(e['label'])}</td></tr>"
+            f"<tr class='item'><td class='tm'>{_ltr(e['date'])}</td>"
+            f"<td class='tkr'>{_ltr(e['ticker'])}</td>"
+            f"<td class='rel'>{html.escape(he.event_label(e['kind']))}</td>"
+            f"<td>{_auto(he.calendar_label(e['label']))}</td></tr>"
         )
     rows.append("</table>")
-    return f"<section><h2>Calendar (next 7 days)</h2>{''.join(rows)}</section>"
+    return f"<section><h2>{he.UI['calendar']}</h2>{''.join(rows)}</section>"
 
 
 # --------------------------------------------------------------------------- #
@@ -371,10 +456,11 @@ def _calendar_section(entries: list[dict[str, Any]]) -> str:
 def render_item(views: Views, uid: str) -> str:
     data = views.explain(uid)
     if data.get("error"):
-        return _document("NOT FOUND", "", (
-            f"<section><h2>Not found</h2><div class='empty'>"
-            f"{html.escape(data['error'])}</div>"
-            f"<p class='note'>{html.escape(data.get('hint', ''))}</p></section>"
+        return _document("לא נמצא", "", (
+            f"<section><h2>לא נמצא</h2>"
+            f"<div class='empty' dir='auto'>{html.escape(data['error'])}</div>"
+            f"<p class='note'>מזהים הם sha1; קידומת ייחודית של 8 תווים ומעלה "
+            f"מספיקה.</p></section>"
         ))
 
     origin = data["where_it_came_from"]
@@ -385,58 +471,87 @@ def render_item(views: Views, uid: str) -> str:
     url = data.get("url") or "#"
     parts.append(
         f"<section><div class='big'><a href='{html.escape(url)}' target='_blank' "
-        f"rel='noreferrer'>{html.escape(data['title'])}</a></div>"
-        f"<div class='muted'>{html.escape(data['uid'])}</div></section>"
+        f"rel='noreferrer' dir='auto'>{html.escape(data['title'])}</a></div>"
+        f"<div class='muted'>{_ltr(data['uid'])}</div></section>"
     )
 
     trust = origin.get("trust")
-    parts.append(_kv("Where it came from", [
-        ("source", f"{html.escape(origin['source'])} &middot; "
-                   f"{html.escape(origin.get('source_label') or '')}"),
-        ("trust", f"{trust if trust is not None else '?'} &mdash; "
-                  f"<span class='muted'>{html.escape(origin.get('trust_means') or '')}</span>"),
-        ("found by", html.escape(str(origin.get("found_by") or "-"))),
-        ("feed / query", _link(origin.get("feed_url"), 110)),
-        ("publisher", html.escape(str(origin.get("publisher") or "-"))),
-        ("collector", html.escape(str(origin.get("collector") or "-"))),
-        ("id at source", f"<span class='muted'>"
-                         f"{html.escape(str(origin.get('id_at_source') or '-'))[:90]}</span>"),
+    parts.append(_kv("מאיפה זה הגיע", [
+        ("מקור", f"{_ltr(origin['source'])} &middot; "
+                 f"{_auto(origin.get('source_label') or '')}"),
+        ("אמון", f"{_ltr(trust if trust is not None else '?')} &mdash; "
+                 f"<span class='muted'>{html.escape(_trust_he(trust))}</span>"),
+        ("נמצא על ידי", _auto(str(origin.get("found_by") or "-"))),
+        ("פיד / שאילתה", _link(origin.get("feed_url"), 110)),
+        ("מפרסם", _auto(str(origin.get("publisher") or "-"))),
+        ("אספן", _ltr(origin.get("collector") or "-")),
+        ("מזהה במקור", f"<span class='muted ltr'>"
+                       f"{html.escape(str(origin.get('id_at_source') or '-'))[:90]}</span>"),
     ]))
 
     lag = when.get("detection_lag_minutes")
-    lag_html = "-" if lag is None else (
-        f"{lag} min after publication"
-        + ("" if lag < 30 else " <span class='bad'>&mdash; late</span>")
-    )
-    parts.append(_kv("When", [
-        ("publication date", html.escape(str(when.get("publication_date") or "-"))),
-        ("published", f"{html.escape(str(when.get('published_utc') or 'unknown'))[:16]} UTC "
-                      f"&middot; {html.escape(str(when.get('published_et') or ''))} "
-                      f"&middot; {html.escape(str(when.get('published_israel') or ''))}"),
-        ("age", f"{when.get('age_hours', '?')}h"),
-        ("session", html.escape(str(when.get("session_at_publication") or "-"))),
-        ("vs the bell", html.escape(str(when.get("vs_last_close") or "-"))),
-        ("we first saw it", f"{html.escape(str(when.get('first_seen_by_us_utc') or ''))[:16]} UTC"),
-        ("detection lag", lag_html),
+    if lag is None:
+        lag_html = "-"
+    else:
+        late = "" if lag < 30 else " <span class='bad'>&mdash; באיחור</span>"
+        lag_html = f"{_ltr(lag)} דקות אחרי הפרסום{late}"
+
+    if when.get("undated"):
+        pub_date = ("לא ידוע — הפיד לא נשא תאריך, ולכן החותמת למטה היא מתי "
+                    "מצאנו אותו, לא מתי הוא פורסם")
+    else:
+        pub_date = "כפי שפורסם"
+
+    if when.get("undated"):
+        bell = "-"
+    elif when.get("before_last_close"):
+        bell = (f"פורסם לפני נעילת {_ltr((when.get('last_close_et') or '') + ' ET')} — "
+                f"יכול להיות גורם לתנועה של אותו סשן")
+    else:
+        bell = (f"פורסם אחרי נעילת {_ltr((when.get('last_close_et') or '') + ' ET')} — "
+                f"זה הסטאפ של הסשן הבא, ולא יכול להיות הגורם לתנועה ההיא")
+
+    parts.append(_kv("מתי", [
+        ("תאריך הפרסום", pub_date),
+        ("פורסם", f"{_ltr(str(when.get('published_utc') or 'לא ידוע')[:16] + ' UTC')} "
+                  f"&middot; {_ltr(when.get('published_et') or '')} "
+                  f"&middot; {_ltr(when.get('published_israel') or '')}"),
+        ("גיל", f"{_ltr(when.get('age_hours', '?'))} שעות"),
+        ("סשן", html.escape(SESSION_LABEL_HE.get(
+            str(when.get("session_at_publication") or ""),
+            str(when.get("session_at_publication") or "-")))),
+        ("מול הפעמון", bell),
+        ("ראינו לראשונה",
+         _ltr(str(when.get('first_seen_by_us_utc') or '')[:16] + " UTC")),
+        ("פיגור זיהוי", lag_html),
     ]))
 
     link_rows = []
     for link in data["who_it_is_about"]:
-        colour = RELATION_COLOR.get(link["relation"], "#909090")
+        rel = link["relation"]
+        colour = RELATION_COLOR.get(rel, "#909090")
+        why_he, _ = he.why(link.get("why") or "")
+        confidence = _ltr(f"{link['confidence']:.2f}")
+        link_score = _ltr(f"{link['score']:.0f}")
         link_rows.append(
-            f"<tr class='item'><td class='tkr'>{html.escape(link['ticker'])}</td>"
-            f"<td class='rel' style='color:{colour}'>{html.escape(link['relation'])}</td>"
-            f"<td class='rel'>conf {link['confidence']:.2f}</td>"
+            f"<tr class='item'><td class='tkr'>{_ltr(link['ticker'])}</td>"
+            f"<td class='rel' style='color:{colour}'>"
+            f"{html.escape(RELATION_LABEL_HE.get(rel, rel))}</td>"
+            f"<td class='rel'>{confidence}</td>"
             f"<td class='score' style='color:"
-            f"{TIER_COLOR.get(link['tier'], '#d9d9d9')}'>{link['score']:.0f}</td>"
-            f"<td>{html.escape(link.get('why') or '')}"
-            f"<div class='why'>{html.escape(link['relation'])} means: "
-            f"{html.escape(link.get('relation_means') or '')}</div></td></tr>"
+            f"{TIER_COLOR.get(link['tier'], '#d9d9d9')}'>"
+            f"{link_score}</td>"
+            f"<td dir='auto'>{why_he}"
+            f"<div class='why'>{html.escape(RELATION_LABEL_HE.get(rel, rel))} = "
+            f"{html.escape(RELATION_MEANING_HE.get(rel, ''))}</div></td></tr>"
         )
     parts.append(
-        "<section><h2>Who it is about</h2><table>"
-        "<tr><th class='tkr'>SYM</th><th class='rel'>REL</th><th class='rel'>LINK</th>"
-        "<th class='score'>SC</th><th>WHY THIS SYMBOL</th></tr>"
+        f"<section><h2>על מי זה</h2><table>"
+        f"<tr><th class='tkr'>{he.UI['col_symbol']}</th>"
+        f"<th class='rel'>{he.UI['col_relation']}</th>"
+        f"<th class='rel'>{he.UI['col_link']}</th>"
+        f"<th class='score'>{he.UI['col_score']}</th>"
+        f"<th>{he.UI['col_why_symbol']}</th></tr>"
         + "".join(link_rows) + "</table></section>"
     )
 
@@ -444,93 +559,102 @@ def render_item(views: Views, uid: str) -> str:
     trace_rows = [_trace_row(s) for s in scored["trace"]["item"]]
     for ticker, steps in scored["trace"]["per_ticker"].items():
         trace_rows.append(f"<tr><td class='op'></td><td class='tkr'>"
-                          f"{html.escape(ticker)}</td></tr>")
+                          f"{_ltr(ticker)}</td></tr>")
         trace_rows.extend(_trace_row(s) for s in steps)
+    events_he = ", ".join(he.event_label(e) for e in scored["events"]) or "לא נמצאה התאמה"
+    # One island for the whole run. Emitting "NORMAL {island} · HIGH {island}"
+    # left the bare labels outside the isolates, so the bidi algorithm merged
+    # them with their neighbours and reordered the lot: "75 NORMAL 35 · HIGH 55
+    # · ALERT".
+    tiers = _ltr(" · ".join(f"{name} {thresholds[name]:.0f}"
+                            for name in ("NORMAL", "HIGH", "ALERT")))
     parts.append(
-        f"<section><h2>How the score was built</h2>"
-        f"<div class='big'><span class='total'>{scored['score']:.1f}</span> "
+        f"<section><h2>איך נבנה הציון</h2>"
+        f"<div class='big'><span class='total ltr'>{scored['score']:.1f}</span> "
         f"<span style='color:{TIER_COLOR.get(scored['tier'], '#d9d9d9')}'>"
-        f"{html.escape(str(scored['tier']))}</span> "
-        f"<span class='muted'>&nbsp;NORMAL {thresholds['NORMAL']:.0f} &middot; "
-        f"HIGH {thresholds['HIGH']:.0f} &middot; ALERT {thresholds['ALERT']:.0f}</span></div>"
-        f"<div class='why'>events: "
-        f"{html.escape(', '.join(scored['events']) or 'none matched')}</div>"
+        f"{_ltr(scored['tier'])}</span> "
+        f"<span class='muted'>&nbsp;{tiers}</span></div>"
+        f"<div class='why'>אירועים: {html.escape(events_he)}</div>"
         f"<table class='trace'>{''.join(trace_rows)}</table>"
-        f"<p class='note'>{html.escape(scored['note'])}</p></section>"
+        f"<p class='note'>העקבות כפי שנשמרו, לפי הסדר. המכפילים מצטברים; שורות "
+        f"עם + מתווספות אחריהם; תקרה גוברת על הכול.</p></section>"
     )
 
     carried = data["who_else_carried_it"]
     if carried["members"]:
         member_rows = "".join(
-            f"<tr class='item'><td class='src'>{html.escape(m['source'])}</td>"
-            f"<td class='tm'>{html.escape(str(m.get('published_at') or ''))[:16]}</td>"
+            f"<tr class='item'><td class='src'>{_ltr(m['source'])}</td>"
+            f"<td class='tm'>{_ltr(str(m.get('published_at') or '')[:16])}</td>"
             f"<td><a href='{html.escape(m.get('url') or '#')}' target='_blank' "
-            f"rel='noreferrer'>{html.escape(m['title'])[:150]}</a>"
+            f"rel='noreferrer' dir='auto'>{html.escape(m['title'])[:150]}</a>"
             f"{_dig(m.get('uid'))}</td></tr>"
             for m in carried["members"]
         )
         body = f"<table>{member_rows}</table>"
     else:
-        body = ("<div class='empty'>single-sourced &mdash; nobody else we read "
-                "has carried this story</div>")
+        body = ("<div class='empty'>מקור יחיד — אף אחד אחר שאנחנו קוראים "
+                "לא נשא את הסיפור הזה</div>")
     parts.append(
-        f"<section><h2>Who else carried it "
-        f"<span class='muted'>x{carried['corroboration']} "
-        f"({html.escape(carried['counts'])})</span></h2>{body}</section>"
+        f"<section><h2>מי עוד נשא את זה "
+        f"<span class='muted'>{_ltr('x' + str(carried['corroboration']))} "
+        f"(מקורות נבדלים, לא מסמכים)</span></h2>{body}</section>"
     )
 
     tape_rows = []
     for q in data["what_the_tape_did"]:
         cls = "up" if (q.get("change_pct") or 0) >= 0 else "dn"
         change = q.get("change_pct")
-        vol = f"{q['volume_multiple']:.1f}x" if q.get("volume_multiple") else "-"
-        chg_cell = (f"<td class='chg {cls}'>{change:+.2f}%</td>"
+        vol = (f"<span class='ltr'>{q['volume_multiple']:.1f}x</span>"
+               if q.get("volume_multiple") else "-")
+        chg_cell = (f"<td class='chg {cls}'>{_pct(change, 2)}</td>"
                     if change is not None else "<td class='chg'>-</td>")
         tape_rows.append(
-            f"<tr class='item'><td class='tkr'>{html.escape(q['ticker'])}</td>"
+            f"<tr class='item'><td class='tkr'>{_ltr(q['ticker'])}</td>"
             f"{chg_cell}"
             f"<td class='rel'>{vol}</td>"
-            f"<td>{html.escape(str(q.get('math') or '-'))}"
-            f"<div class='why'>{html.escape(q.get('provider') or '?')} &middot; "
-            f"{html.escape(q.get('provider_note') or '')} &middot; "
-            f"{html.escape(q.get('freshness') or '')}</div></td></tr>"
+            f"<td>{_ltr(q.get('math') or '-')}"
+            f"<div class='why'>{_ltr(q.get('provider') or '?')} &middot; "
+            f"{html.escape(_provider_he(q.get('provider')))} &middot; "
+            f"{_freshness_he(q)}</div></td></tr>"
         )
     if tape_rows:
         parts.append(
-            "<section><h2>What the tape did</h2><table>"
-            "<tr><th class='tkr'>SYM</th><th class='chg'>CHG</th>"
-            "<th class='rel'>VOL</th><th>THE ARITHMETIC, AND WHERE IT CAME FROM</th></tr>"
+            f"<section><h2>מה עשה הטייפ</h2><table>"
+            f"<tr><th class='tkr'>{he.UI['col_symbol']}</th>"
+            f"<th class='chg'>{he.UI['col_change']}</th>"
+            f"<th class='rel'>{he.UI['col_volume']}</th>"
+            f"<th>{he.UI['col_arithmetic']}</th></tr>"
             + "".join(tape_rows) + "</table></section>"
         )
 
     check_rows = "".join(
         f"<tr class='item'><td><a href='{html.escape(c['url'])}' target='_blank' "
-        f"rel='noreferrer'>{html.escape(c['label'])}</a></td>"
-        f"<td class='why'>{html.escape(c['checks'])}</td></tr>"
+        f"rel='noreferrer'>{html.escape(c.get('label_he') or c['label'])}</a></td>"
+        f"<td class='why'>{html.escape(c.get('checks_he') or c['checks'])}</td></tr>"
         for c in data["check_it_yourself"]
     )
     parts.append(
-        f"<section><h2>Check it yourself</h2><table class='check'>{check_rows}</table>"
-        f"<p class='note'>None of these are us. If the original says something "
-        f"different from the line above, trust the original and tell the system "
-        f"it was wrong.</p></section>"
+        f"<section><h2>תבדוק בעצמך</h2><table class='check'>{check_rows}</table>"
+        f"<p class='note'>אף אחד מהקישורים האלה הוא לא אנחנו. אם המקור אומר משהו "
+        f"אחר מהשורה שלמעלה — המקור צודק, ותגיד למערכת שהיא טעתה.</p></section>"
     )
 
     raw = data["raw"]
     raw_parts = []
     if raw.get("summary"):
-        raw_parts.append(f"<pre class='raw'>{html.escape(raw['summary'])}</pre>")
+        raw_parts.append(f"<pre class='raw' dir='auto'>{html.escape(raw['summary'])}</pre>")
     if raw.get("body_excerpt"):
-        raw_parts.append(f"<pre class='raw'>{html.escape(raw['body_excerpt'])}</pre>")
+        raw_parts.append(
+            f"<pre class='raw' dir='auto'>{html.escape(raw['body_excerpt'])}</pre>")
     raw_parts.append(
         f"<pre class='raw'>{html.escape(json.dumps(raw.get('meta') or {}, ensure_ascii=False, indent=1, default=str))}</pre>"
     )
-    parts.append(f"<section><h2>Raw record</h2>{''.join(raw_parts)}"
-                 f"<p class='note'>Same record as "
-                 f"<a href='/api/explain/{html.escape(data['uid'])}'>"
+    parts.append(f"<section><h2>הרשומה הגולמית</h2>{''.join(raw_parts)}"
+                 f"<p class='note'>אותה רשומה, ב-JSON: "
+                 f"<a href='/api/explain/{html.escape(data['uid'])}' class='ltr'>"
                  f"/api/explain/{html.escape(data['uid'][:12])}</a></p></section>")
 
-    return _document(f"{data['uid'][:8]} &middot; HAREL", "", "".join(parts))
+    return _document(f"{data['uid'][:8]} · {he.UI['brand']}", "", "".join(parts))
 
 
 # --------------------------------------------------------------------------- #
@@ -541,71 +665,105 @@ def render_sources(views: Views) -> str:
     rows = []
     for s in report["sources"]:
         if not s["enabled"]:
-            status, cls = "off", "off"
+            status, cls = "כבוי", "off"
         elif not s["available"]:
-            status, cls = f"no {s['requires_key']}", "bad"
+            status, cls = f"חסר {s['requires_key']}", "bad"
         elif s["failing_endpoints"]:
-            status, cls = f"{s['failing_endpoints']} failing", "bad"
+            status, cls = f"{s['failing_endpoints']} נכשלים", "bad"
         elif s["degraded"]:
-            status, cls = "degraded", "bad"
+            status, cls = "מוגבל", "bad"
         else:
-            status, cls = "live", "ok"
+            status, cls = "פעיל", "ok"
         lag = s.get("median_lag_minutes")
         if lag is None:
             lag_cell = "<span class='muted'>-</span>"
         else:
             lag_cls = "ok" if lag <= 20 else ("bad" if lag >= 90 else "")
-            lag_cell = (f"<span class='{lag_cls}'>{lag:.0f}m</span>"
-                        f"<div class='why'>p90 {s.get('p90_lag_minutes', 0):.0f}m "
+            lag_cell = (f"<span class='{lag_cls} ltr'>{lag:.0f}m</span>"
+                        f"<div class='why ltr'>p90 {s.get('p90_lag_minutes', 0):.0f}m "
                         f"&middot; n={s.get('lag_sample', 0)}</div>")
+        trust_cell = _ltr(f"{s['trust']:.2f}")
         rows.append(
-            f"<tr class='item'><td class='tkr'>{html.escape(s['source'])}</td>"
+            f"<tr class='item'><td class='tkr'>{_ltr(s['source'])}</td>"
             f"<td class='rel {cls}'>{html.escape(status)}</td>"
-            f"<td class='rel'>{s['trust']:.2f}</td>"
-            f"<td class='rel'>{s['items_last_run'] or '-'}</td>"
+            f"<td class='rel'>{trust_cell}</td>"
+            f"<td class='rel'>{_ltr(s['items_last_run'] or '-')}</td>"
             f"<td class='rel'>{lag_cell}</td>"
-            f"<td class='tm'>{html.escape(str(s['last_ok_at'] or '-'))[:16]}</td>"
-            f"<td>{html.escape(s['label'])}"
-            f"<div class='why'>{html.escape(s['trust_means'])} &middot; "
-            f"latency {html.escape(str(s['latency']))}"
-            + (f"<br>{html.escape(s['last_error'] or '')}" if s['last_error'] else "")
-            + (f"<br>{html.escape(s['note'][:200])}" if s["note"] else "")
+            f"<td class='tm'>{_ltr(str(s['last_ok_at'] or '-')[:16])}</td>"
+            f"<td>{_auto(s['label'])}"
+            f"<div class='why'>{html.escape(_trust_he(s['trust']))} &middot; "
+            f"השהיה {_ltr(s['latency'])}"
+            + (f"<br>{_auto(s['last_error'] or '', 160)}" if s["last_error"] else "")
+            + (f"<br>{_auto(s['note'][:200])}" if s["note"] else "")
             + "</div></td></tr>"
         )
     warn_html = "".join(
-        f"<div class='warn'>{html.escape(w)}</div>" for w in report["warnings"])
+        f"<div class='warn'>{_coverage_warning_he(e)}</div>"
+        for e in views.coverage_warning_entries())
     body = (
-        f"<section><h2>Coverage warnings</h2>"
-        f"{warn_html or '<div class=empty>none</div>'}</section>"
-        "<section><h2>Every source</h2><table>"
-        "<tr><th class='tkr'>KEY</th><th class='rel'>STATUS</th><th class='rel'>TRUST</th>"
-        "<th class='rel'>ITEMS</th><th class='rel'>LAG</th><th class='tm'>LAST OK</th>"
-        "<th>WHAT IT IS</th></tr>"
+        f"<section><h2>{he.UI['coverage_warnings']}</h2>"
+        f"{warn_html or '<div class=empty>אין</div>'}</section>"
+        f"<section><h2>{he.UI['all_sources']}</h2><table>"
+        f"<tr><th class='tkr'>{he.UI['col_source']}</th>"
+        f"<th class='rel'>{he.UI['col_status']}</th>"
+        f"<th class='rel'>{he.UI['col_trust']}</th>"
+        f"<th class='rel'>{he.UI['col_items']}</th>"
+        f"<th class='rel'>{he.UI['col_lag']}</th>"
+        f"<th class='tm'>{he.UI['col_last_ok']}</th>"
+        f"<th>{he.UI['col_what']}</th></tr>"
         + "".join(rows) + "</table>"
-        "<p class='note'>ITEMS is what the last pass returned, per source. A live "
-        "source returning 0 for days is not the same as a quiet market &mdash; check "
-        "LAST OK before you conclude there is no news.<br>"
-        "LAG is the median delay between something being published and this "
-        "system seeing it, over everything published in the last 24 hours. It is "
-        "the number that decides whether a source is tradeable or merely "
-        "informative: at 5 minutes you can act on it, at 90 you are reading "
-        "history. Right after a first backfill it reads high for a day, because "
-        "the backlog really was seen late.</p></section>"
+        "<p class='note'>עמודת <b>פריטים</b> היא מה שהמעבר האחרון החזיר, לכל מקור. "
+        "מקור פעיל שמחזיר 0 במשך ימים אינו אותו דבר כמו שוק שקט — תבדוק את "
+        "<b>הצלחה אחרונה</b> לפני שתסיק שאין חדשות.<br>"
+        "עמודת <b>פיגור</b> היא החציון של הזמן בין הפרסום לבין הרגע שבו המערכת "
+        "ראתה את הפריט, על כל מה שפורסם ב-6 השעות האחרונות. זה המספר שקובע אם "
+        "אפשר לסחור על מקור או רק להתעדכן ממנו: ב-5 דקות אפשר לפעול, ב-90 אתה "
+        "קורא היסטוריה. מיד אחרי איסוף ראשוני הוא נראה גבוה ליום, כי הפריטים "
+        "באמת נראו באיחור.</p></section>"
     )
-    return _document("SOURCES &middot; HAREL", "", body)
+    return _document(f"{he.UI['nav_sources']} · {he.UI['brand']}", "", body)
 
 
 # --------------------------------------------------------------------------- #
 def _document(title: str, header_extra: str, body: str) -> str:
+    """The RTL shell. `dir='rtl'` on <html> is what makes every logical CSS
+    property in the sheet above resolve the right way round."""
     return (
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<!doctype html><html lang='he' dir='rtl'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>{title}</title><style>{CSS}</style></head><body>"
-        "<header><h1><a href='/'>HAREL&nbsp;TERMINAL</a></h1>"
+        f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>"
+        f"<header><h1><a href='/'>{he.UI['brand']}</a></h1>"
         f"{header_extra}"
-        "<nav><a href='/'>terminal</a><a href='/sources'>sources</a></nav>"
+        f"<nav><a href='/'>{he.UI['nav_terminal']}</a>"
+        f"<a href='/sources'>{he.UI['nav_sources']}</a>"
+        f"<a href='/agent/manifest'>{he.UI['nav_manifest']}</a>"
+        f"<a href='/api/morning'>{he.UI['nav_json']}</a></nav>"
         f"</header><main>{body}</main></body></html>"
     )
+
+
+def _trust_he(trust: float | None) -> str:
+    if trust is None:
+        return "מקור לא מוכר - אינו ב-config/sources.yaml"
+    for floor, meaning in TRUST_MEANING_HE:
+        if trust >= floor:
+            return meaning
+    return ""
+
+
+def _provider_he(provider: str | None) -> str:
+    return PROVIDER_MEANING_HE.get(
+        provider or "", "הספק לא נרשם (ההדפסה קודמת למעקב מקור)")
+
+
+def _freshness_he(quote: dict[str, Any]) -> str:
+    provider = quote.get("provider") or ""
+    if provider == "stooq":
+        return f"נר סוף-יום ל-{_ltr(str(quote.get('asof') or '')[:10])} — לא מחיר תוך-יומי"
+    age = quote.get("age_minutes")
+    if age is None:
+        return "זמן הלכידה לא ידוע"
+    return f"נלכד לפני {_ltr(age)} דקות; הפיד עצמו מושהה מעבר לזה"
 
 
 def _kv(title: str, pairs: list[tuple[str, str]]) -> str:
@@ -617,8 +775,9 @@ def _kv(title: str, pairs: list[tuple[str, str]]) -> str:
 def _link(url: str | None, cut: int = 80) -> str:
     if not url:
         return "-"
-    return (f"<a href='{html.escape(url)}' target='_blank' rel='noreferrer'>"
-            f"{html.escape(url[:cut])}{'&hellip;' if len(url) > cut else ''}</a>")
+    return (f"<a href='{html.escape(url)}' target='_blank' rel='noreferrer' "
+            f"class='ltr'>{html.escape(url[:cut])}"
+            f"{'&hellip;' if len(url) > cut else ''}</a>")
 
 
 _OP = {"base": ("=", "op-base"), "multiply": ("&times;", ""),
@@ -631,8 +790,9 @@ def _trace_row(step: dict[str, str]) -> str:
     # The sign is in the symbol column; leaving it in the text too reads as "++4".
     if step["kind"] == "add" and text.startswith("+"):
         text = text[1:]
+    hebrew, _ = he.trace_step(text)
     return (f"<tr><td class='op {cls}'>{symbol}</td>"
-            f"<td colspan='2' class='{cls}'>{html.escape(text)}</td></tr>")
+            f"<td colspan='2' class='{cls}' dir='auto'>{html.escape(hebrew)}</td></tr>")
 
 
 def _dig(uid: str | None) -> str:
@@ -640,40 +800,26 @@ def _dig(uid: str | None) -> str:
     if not uid:
         return ""
     return (f"<a class='dig' href='/item/{html.escape(uid)}' "
-            f"title='where this came from and how it scored'>why?</a>")
+            f"title='{he.UI['why_link_title']}'>{he.UI['why_link']}</a>")
 
 
 def _quote_label(quote: dict[str, Any] | None) -> str:
     """One-line price provenance for a dense table."""
     if not quote:
-        return "no quote stored"
-    provider = quote.get("provider") or "unknown"
+        return "אין ציטוט שמור"
+    provider = quote.get("provider") or "לא ידוע"
     if provider == "stooq":
-        return f"stooq EOD {str(quote.get('asof') or '')[:10]}"
+        return f"{_ltr('stooq')} סוף-יום {_ltr(str(quote.get('asof') or '')[:10])}"
     age = quote.get("age_minutes")
     if age is None:
-        return f"{provider}, capture time unknown"
-    return f"{provider} · {age}m old, delayed"
+        return f"{_ltr(provider)}, זמן הלכידה לא ידוע"
+    return f"{_ltr(provider)} &middot; בן {_ltr(age)} דק׳, מושהה"
 
 
 def _time_cell(item: dict[str, Any]) -> str:
     """When it was published - or, honestly, when we merely found it."""
     if item.get("published_unknown"):
-        seen = _fmt_time(item.get("discovered_at") or item["t"])
-        return (f"<span class='muted'>date unknown</span>"
-                f"<div class='why'>seen {html.escape(seen)}</div>")
-    return html.escape(_fmt_time(item["t"]))
-
-
-def _fmt_time(iso: str) -> str:
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    except ValueError:
-        return iso[:16]
-    delta = datetime.now(timezone.utc) - dt
-    hours = delta.total_seconds() / 3600
-    if hours < 1:
-        return f"{int(delta.total_seconds() // 60)}m ago"
-    if hours < 24:
-        return f"{int(hours)}h ago"
-    return dt.strftime("%m-%d %H:%M")
+        seen = he.ago(item.get("discovered_at") or item["t"])
+        return (f"<span class='muted'>תאריך לא ידוע</span>"
+                f"<div class='why'>נראה {html.escape(seen)}</div>")
+    return html.escape(he.ago(item["t"]))

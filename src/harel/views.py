@@ -60,6 +60,62 @@ PROVIDER_MEANING = {
     "stooq": "Stooq daily bar - end-of-day only, never intraday",
 }
 
+# ---------------------------------------------------------------- Hebrew ---- #
+# The HTML terminal is Hebrew and right-to-left; the REST/MCP contract stays
+# English because that is what the agent is instructed in. These are the
+# parallel glossaries, kept next to their English twins so a new relation or
+# provider cannot be added to one and forgotten in the other - a test asserts
+# the key sets match.
+RELATION_MEANING_HE = {
+    "DIRECT": "החדשות של החברה עצמה - עובדה על המנפיק",
+    "SUBSIDIARY": "ישות מוחזקת; כלכלית אותו מנפיק",
+    "PRODUCT_RIVAL": "אותה מולקולה / אותו מנגנון / אותו סוקט - קריאה צולבת",
+    "CUSTOMER": "הוצאה של לקוח, שהיא ההכנסה שלנו",
+    "PEER": "חדשות של מתחרה בשמו - סנטימנט סקטוריאלי, לא עובדה עלינו",
+    "SUPPLIER": "תשומה שאנחנו תלויים בה",
+    "SECTOR_REG": "רגולטור שפועל על הסקטור שלנו",
+    "SECTOR_THEME": "סיפור תמטי שנוגע לסקטור",
+    "MACRO": "תנאי שוק רחב, לא עובדה על החברה",
+}
+
+# Short labels for the dense table column.
+RELATION_LABEL_HE = {
+    "DIRECT": "ישיר",
+    "SUBSIDIARY": "חברה־בת",
+    "PRODUCT_RIVAL": "מוצר מתחרה",
+    "CUSTOMER": "לקוח",
+    "PEER": "מתחרה",
+    "SUPPLIER": "ספק",
+    "SECTOR_REG": "רגולציה",
+    "SECTOR_THEME": "תמה",
+    "MACRO": "מאקרו",
+}
+
+TRUST_MEANING_HE = [
+    (0.95, "מסמך ראשוני - המנפיק או הרגולטור עצמו"),
+    (0.85, "מכלי ראשון, אך לא מפי המנפיק"),
+    (0.70, "דיווח משני אמין"),
+    (0.00, "אגרגטור - דיווח של מישהו אחר, בכתיבה מחדש"),
+]
+
+PROVIDER_MEANING_HE = {
+    "yahoo": "endpoint הגרפים של Yahoo - לא רשמי ומושהה (כ-15 דק׳), "
+             "כולל הדפסות טרום/אחרי המסחר",
+    "stooq": "נר יומי של Stooq - סוף יום בלבד, אף פעם לא תוך-יומי",
+}
+
+SESSION_LABEL_HE = {
+    "pre-market": "טרום-מסחר",
+    "regular session": "מסחר רגיל",
+    "after hours": "אחרי המסחר",
+    "overnight": "לילה",
+    "weekend": "סוף שבוע",
+    "premarket": "טרום-מסחר",
+    "regular": "מסחר רגיל",
+    "afterhours": "אחרי המסחר",
+    "closed": "סגור",
+}
+
 
 def last_session_close(now: datetime | None = None) -> datetime:
     """The most recent US equity close at or before ``now``, in UTC.
@@ -399,6 +455,10 @@ class Views:
                 "headline": "UNEXPLAINED RELATIVE MOVE - " + " | ".join(bits),
                 "change_pct": mover["change_pct"],
                 "relative_pct": relative,
+                # Named the benchmark in the English sentence but never returned
+                # it, so a second language had nothing to put after "vs".
+                "benchmark": mover.get("benchmark"),
+                "benchmark_pct": mover.get("benchmark_pct"),
                 "volume_multiple": mover.get("volume_multiple"),
                 "session": mover.get("session"),
                 # Say what we looked at and did not find, so this reads as a
@@ -526,6 +586,11 @@ class Views:
             "publication_date": "unknown - the feed carried no date, so the "
                                 "timestamp below is when we found it, not when "
                                 "it was published" if undated else "as published",
+            # Structured twins of the sentences below, so a second language can
+            # compose its own prose instead of translating ours.
+            "undated": undated,
+            "before_last_close": bool(pub and pub <= close),
+            "last_close_et": close.astimezone(MARKET_TZ).strftime("%Y-%m-%d %H:%M"),
         }
         if pub:
             timing.update({
@@ -657,35 +722,45 @@ class Views:
         if row.get("url"):
             out.append({
                 "label": "the original document",
+                "label_he": "המסמך המקורי",
                 "url": row["url"],
                 "checks": "that it says what our headline says it says",
+                "checks_he": "שהוא אומר את מה שהכותרת שלנו אומרת שהוא אומר",
             })
         title = (row.get("title") or "")[:120]
         if title:
             out.append({
                 "label": "this headline on Google News",
+                "label_he": "הכותרת הזאת ב-Google News",
                 "url": f"https://news.google.com/search?q={quote_plus(title)}",
                 "checks": "who else is carrying it, and who had it first",
+                "checks_he": "מי עוד נושא אותה, ומי היה ראשון",
             })
         for ticker in dict.fromkeys(tickers):
             tc = self.config.ticker(ticker)
             if tc and tc.cik10:
                 out.append({
                     "label": f"{ticker} filings on SEC EDGAR",
+                    "label_he": f"הגשות {ticker} ב-SEC EDGAR",
                     "url": ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
                             f"&CIK={tc.cik10}&type=&dateb=&owner=include&count=40"),
                     "checks": "whether there is a filing behind the story, and its exact time",
+                    "checks_he": "האם יש הגשה מאחורי הסיפור, ומה השעה המדויקת שלה",
                 })
             if tc and tc.tase_id:
                 out.append({
                     "label": f"{ticker} immediate reports on MAYA (TASE)",
+                    "label_he": f"דיווחים מיידיים של {ticker} במאיה",
                     "url": f"https://maya.tase.co.il/company/{tc.tase_id}?view=reports",
                     "checks": "the Hebrew disclosure, which is often hours ahead of the US wire",
+                    "checks_he": "הדיווח בעברית, שלרוב מקדים את הוויר האמריקאי בשעות",
                 })
             out.append({
                 "label": f"{ticker} quote",
+                "label_he": f"ציטוט {ticker}",
                 "url": f"https://finance.yahoo.com/quote/{ticker}",
                 "checks": "our price and volume numbers against a second screen",
+                "checks_he": "מספרי המחיר והמחזור שלנו מול מסך שני",
             })
         return out
 
@@ -811,19 +886,44 @@ class Views:
 
     # --------------------------------------------------------- internal ---- #
     def _coverage_warnings(self) -> list[str]:
-        warnings: list[str] = []
+        """The English sentences. `coverage_warning_entries` holds the same facts
+        structured, which is what the Hebrew terminal renders from - translating
+        prose would drift, composing from data cannot."""
+        out = []
+        for entry in self.coverage_warning_entries():
+            kind = entry["kind"]
+            if kind == "missing_key":
+                out.append(f"source '{entry['source']}' is off: "
+                           f"{entry['env']} is not set")
+            elif kind == "degraded":
+                out.append(
+                    f"source '{entry['source']}' is running on an unofficial "
+                    f"fallback endpoint because {entry['env']} is not set - it "
+                    f"may break without notice")
+            elif kind == "unresolved_ticker":
+                out.append(
+                    f"ticker '{entry['ticker']}' is unresolved and is NOT being "
+                    f"collected - {entry['hint']}")
+            elif kind == "disabled":
+                out.append(f"source '{entry['source']}' is disabled in config"
+                           + (f": {entry['reason'][:180]}" if entry["reason"] else ""))
+            elif kind == "failing":
+                out.append(f"source '{entry['source']}' has failed "
+                           f"{entry['count']} times: {entry['error']}")
+        return out
+
+    def coverage_warning_entries(self) -> list[dict[str, Any]]:
+        """Everything wrong with coverage, as data rather than sentences."""
+        warnings: list[dict[str, Any]] = []
         for key, env in self.config.missing_keys():
-            warnings.append(f"source '{key}' is off: {env} is not set")
+            warnings.append({"kind": "missing_key", "source": key, "env": env})
         for key, env in self.config.degraded_sources():
-            warnings.append(
-                f"source '{key}' is running on an unofficial fallback endpoint "
-                f"because {env} is not set - it may break without notice"
-            )
+            warnings.append({"kind": "degraded", "source": key, "env": env})
         for ticker in self.config.unresolved_tickers:
-            warnings.append(
-                f"ticker '{ticker}' is unresolved and is NOT being collected - "
-                f"{self.config.universe[ticker].resolution_hint}"
-            )
+            warnings.append({
+                "kind": "unresolved_ticker", "ticker": ticker,
+                "hint": self.config.universe[ticker].resolution_hint,
+            })
         # A source switched off in config disappeared from this panel entirely,
         # so "24/29 sources live" could not be reconciled with what was on
         # screen. A source that is off on purpose still has to be visible - the
@@ -833,10 +933,8 @@ class Views:
                 continue
             note = " ".join((source.raw.get("notes") or "").split())
             reason = note.split("OFF:", 1)[-1].strip() if "OFF:" in note else note
-            warnings.append(
-                f"source '{source.key}' is disabled in config"
-                + (f": {reason[:180]}" if reason else "")
-            )
+            warnings.append({"kind": "disabled", "source": source.key,
+                             "reason": reason})
         # Failure counters are keyed "<source>:<url>" and survive a config edit,
         # so a feed we have since fixed or switched off keeps reporting its old
         # failures for ever. A warning nobody can act on trains you to ignore
@@ -855,10 +953,9 @@ class Views:
                 continue                      # gone or already reported as disabled
             if url and url not in live_urls:
                 continue                      # this URL is no longer configured
-            warnings.append(
-                f"source '{key}' has failed "
-                f"{state['consecutive_failures']} times: {state.get('last_error')}"
-            )
+            warnings.append({"kind": "failing", "source": key,
+                             "count": state["consecutive_failures"],
+                             "error": state.get("last_error")})
         return warnings
 
 

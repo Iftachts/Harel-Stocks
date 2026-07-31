@@ -332,7 +332,7 @@ def test_terminal_renders_without_error(ran):
     _, views = ran
     html = render_terminal(views)
     assert html.startswith("<!doctype html>")
-    assert "HAREL" in html
+    assert "טרמינל הראל" in html
     assert "<script" not in html.lower(), "the terminal must stay script-free"
 
 
@@ -467,8 +467,8 @@ def test_the_drill_down_page_renders_and_points_outward(ran):
     page = render_item(views, uid)
     assert page.startswith("<!doctype html>")
     assert "<script" not in page.lower()
-    assert "Check it yourself" in page
-    assert "How the score was built" in page
+    assert "תבדוק בעצמך" in page
+    assert "איך נבנה הציון" in page
     assert "news.google.com/search" in page, "no outside verification link"
 
     # Every headline the terminal prints has to reach its own evidence. The
@@ -480,7 +480,7 @@ def test_the_drill_down_page_renders_and_points_outward(ran):
     assert f"/item/{uid}" in rows, "the feed must link to the evidence"
     assert render_terminal(views).startswith("<!doctype html>")
 
-    assert "Every source" in render_sources(views)
+    assert "כל המקורות" in render_sources(views)
 
 
 def test_detection_lag_measures_speed_not_the_backfill(db):
@@ -768,7 +768,7 @@ def test_an_undated_item_reports_discovery_time_as_discovery_time(ran, db):
                 if i["uid"] == "nodate")
     assert item["published_unknown"] is True
     assert item["discovered_at"]
-    assert "date unknown" in _time_cell(item)
+    assert "תאריך לא ידוע" in _time_cell(item)
 
     explained = views.explain("nodate")
     assert explained["when"]["published_utc"] is None
@@ -894,6 +894,154 @@ def test_a_quiet_tape_never_renders_an_empty_feed_panel(ran, db):
 
     assert not views.feed(min_score=20, hours=24, limit=60)["items"]
     page = render_terminal(views)
-    assert "quiet tape, not a blind one" in page
-    assert "Feed (below threshold)" in page
-    assert "items were collected and linked" in page
+    assert "סל שקט, לא מערכת עיוורת" in page
+    assert "פיד (מתחת לסף)" in page
+    assert "פריטים נאספו וקושרו בחלון הזה" in page
+
+
+# --------------------------------------------------------------------------- #
+# Hebrew / RTL. The page direction is right-to-left but most of its content -
+# symbols, prices, timestamps, source keys, half the headlines - is not, and an
+# unmarked "+4.8%" renders as "%4.8+" inside an RTL block.
+# --------------------------------------------------------------------------- #
+def test_every_page_declares_hebrew_and_rtl(ran, db):
+    from harel.serve.terminal import render_item, render_sources, render_terminal
+
+    _, views = ran
+    uid = _any_uid(views)
+    for page in (render_terminal(views), render_sources(views),
+                 render_item(views, uid)):
+        assert "<html lang='he' dir='rtl'>" in page
+        assert "charset='utf-8'" in page
+
+
+def test_the_stylesheet_mirrors_instead_of_hard_coding_a_side(ran):
+    """Physical properties do not flip with the page: a border-left accent
+    lands on the wrong edge in RTL, and padding-right pushes text away from the
+    margin it should hug."""
+    from harel.serve.terminal import CSS
+
+    for physical in ("border-left:", "border-right:", "margin-left:",
+                     "margin-right:", "padding-left:", "padding-right:"):
+        assert physical not in CSS.replace(" ", ""), physical
+    assert "border-inline-start" in CSS
+    assert "margin-inline-end" in CSS
+    assert "text-align: start" in CSS
+
+
+def test_numbers_and_symbols_are_isolated_from_the_bidi_algorithm(ran, db):
+    """A percentage, a ticker and a timestamp are Latin runs inside Hebrew
+    paragraphs. Without an isolate they reorder against neighbouring text."""
+    from harel.models import PriceSnapshot
+    from harel.serve.terminal import _ltr, _pct, render_terminal
+
+    _, views = ran
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="SOXX", asof=now, last=100.0, prev_close=99.0,
+                                change_pct=1.0, session="regular", provider="yahoo"))
+    db.save_price(PriceSnapshot(ticker="TSEM", asof=now, last=100.0, prev_close=94.0,
+                                change_pct=6.4, volume_multiple=0.8,
+                                session="regular", provider="yahoo"))
+    db.conn.commit()
+
+    assert _pct(4.8) == "<span class='ltr'>+4.8%</span>"
+    assert _ltr("TSEM") == "<span class='ltr'>TSEM</span>"
+
+    page = render_terminal(views)
+    assert "class='ltr'" in page
+    # The isolate has to be real CSS, not just a class name.
+    assert "unicode-bidi: isolate" in page
+    # Headlines can be either language, so the browser decides per string.
+    assert "dir='auto'" in page
+
+
+def test_the_hebrew_glossaries_cover_everything_the_linker_emits():
+    """A relation with no Hebrew label reaches the screen as a bare English
+    token, which is exactly the drift a second language invites."""
+    from harel.enrich.linker import RELATION_RANK
+    from harel.views import (RELATION_LABEL_HE, RELATION_MEANING_HE,
+                             RELATION_MEANING)
+
+    assert set(RELATION_MEANING) == set(RELATION_MEANING_HE)
+    assert set(RELATION_RANK) <= set(RELATION_LABEL_HE), (
+        set(RELATION_RANK) - set(RELATION_LABEL_HE))
+
+
+def test_english_pipeline_strings_are_spoken_hebrew_on_screen():
+    """`why` and the scoring trace arrive in English from the linker and the
+    scorer. Both are generated from a small set of stable shapes, so they are
+    rewritten rather than left as English islands in a Hebrew page."""
+    from harel.serve import hebrew as he
+
+    rendered, hit = he.why('names "Teva" in headline')
+    assert hit and rendered == 'מזכיר "Teva" בכותרת'
+
+    rendered, hit = he.why('competitor "Viatris" in body')
+    assert hit and "מתחרה" in rendered and "בגוף הידיעה" in rendered
+
+    # Multi-part reasons are joined with "; " and rewritten part by part.
+    rendered, hit = he.why('found by our "TEVA news" search; names "Teva" in headline')
+    assert hit and rendered.count(";") == 1
+
+    rendered, hit = he.trace_step("source trust x0.60 (google_news)")
+    assert hit and rendered == "אמון המקור ×0.60 (google_news)"
+
+    # This one contains an arrow of its own; splitting on it first broke every
+    # recency step in the corpus.
+    rendered, hit = he.trace_step("age 81.1h -> recency x0.25")
+    assert hit and "דעיכת זמן" in rendered
+
+    # An unknown shape must survive legibly rather than be mangled.
+    rendered, hit = he.why("something we have never seen")
+    assert not hit and rendered == "something we have never seen"
+
+
+def test_relative_time_reads_as_hebrew(ran):
+    from harel.serve import hebrew as he
+
+    now = datetime.now(timezone.utc)
+    assert he.ago((now - timedelta(minutes=25)).isoformat()) == "לפני 25 דק׳"
+    assert he.ago((now - timedelta(hours=1)).isoformat()) == "לפני שעה"
+    assert he.ago((now - timedelta(hours=5)).isoformat()) == "לפני 5 שעות"
+    assert he.ago((now - timedelta(days=1)).isoformat()) == "אתמול"
+    assert he.ago((now - timedelta(days=4)).isoformat()) == "לפני 4 ימים"
+
+
+def test_coverage_warnings_are_composed_in_hebrew_not_translated(ran):
+    """The English sentences and the Hebrew ones are both built from the same
+    structured entries, so neither can drift into describing the other's facts."""
+    from harel.serve.terminal import _coverage_warning_he
+
+    _, views = ran
+    entries = views.coverage_warning_entries()
+    assert entries, "the shipped config must produce at least one warning"
+    assert len(entries) == len(views._coverage_warnings())
+    for entry in entries:
+        rendered = _coverage_warning_he(entry)
+        # Composed prose, not a dict falling through to the page. (The word
+        # "kind" itself appears legitimately: one config note reads
+        # "no collector is implemented for kind=finnhub yet".)
+        assert rendered and "'kind':" not in rendered
+        # The source key stays Latin and isolated; the prose around it is Hebrew.
+        if entry.get("source"):
+            assert entry["source"] in rendered
+
+
+def test_a_latin_unit_never_sits_outside_its_isolate(ran, db):
+    """An isolate protects what is inside it. "NORMAL {island} · HIGH {island}"
+    left the labels outside, so the bidi algorithm merged them with their
+    neighbours and reordered the run into "75 NORMAL 35 · HIGH 55 · ALERT".
+    The unit belongs inside the island with its number."""
+    from harel.serve.terminal import render_item
+
+    _, views = ran
+    page = render_item(views, _any_uid(views))
+
+    # The whole tier scale is one run.
+    assert "NORMAL 35 · HIGH 55 · ALERT 75" in page
+    # A timestamp keeps its zone; a close keeps its "ET".
+    assert "UTC</span>" in page
+    assert "ET</span>" in page
+    # ...and none of them is left dangling after a closing isolate.
+    for orphan in ("</span> UTC", "</span> ET", "</span> pp"):
+        assert orphan not in page, orphan

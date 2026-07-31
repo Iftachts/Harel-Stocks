@@ -53,7 +53,7 @@ harel probe-maya              # אימות הערוץ הישראלי
 harel collect --hours 336     # איסוף ראשון, שבועיים אחורה
 harel morning                 # תדריך בוקר
 harel watch --interval 300    # לולאת איסוף רציפה (מעבר מלא ~250 שניות)
-harel serve                   # http://127.0.0.1:8787  ← הטרמינל
+harel serve                   # http://127.0.0.1:8787  ← הטרמינל (עברית, RTL)
 ```
 
 **איך זה עובד, בשפה פשוטה: [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md)** —
