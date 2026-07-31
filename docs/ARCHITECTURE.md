@@ -1,5 +1,9 @@
 # Architecture
 
+> This is the engineering view. For the plain-language walkthrough — where the
+> information comes from and what happens to it — see
+> [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md).
+
 ```
                  collectors                 enrichment              surfaces
   ┌───────────────────────────┐   ┌──────────────────────┐   ┌──────────────────┐
