@@ -377,6 +377,35 @@ def test_yahoo_move_is_measured_against_the_prior_session(config, db):
         "a +2% day must not be reported as +13.5% because the chart range is 5d"
 
 
+def test_phrase_queries_drop_the_agency_filter_but_faa_keeps_it(config, db):
+    """Once a term is an exact phrase, the phrase is the precision and the
+    agency list only removes true positives. A source that forces its own
+    agency (faa_ads) is the exception - there the agency IS the subject."""
+    routes = {"federalregister.gov/api/v1/documents.json": fixture_json("federal_register.json")}
+
+    client = FakeHttpClient(routes)
+    list(FederalRegisterCollector(
+        config.sources["federal_register"],
+        CollectorContext(config=config, client=client, db=db, lookback_hours=72),
+    ).collect())
+    phrase_calls = [c for c in client.calls if "conditions%5Bterm%5D=%22" in c
+                    or 'conditions[term]="' in c]
+    assert phrase_calls, "the config must exercise at least one multi-word term"
+    for call in phrase_calls:
+        assert "conditions[agencies][]" not in call, \
+            f"phrase query should not bind an agency: {call[:130]}"
+
+    faa_client = FakeHttpClient(routes)
+    list(FederalRegisterCollector(
+        config.sources["faa_ads"],
+        CollectorContext(config=config, client=faa_client, db=db, lookback_hours=72),
+    ).collect())
+    assert faa_client.calls, "faa_ads must still issue queries"
+    for call in faa_client.calls:
+        assert "federal-aviation-administration" in call, \
+            "faa_ads must always bind its own agency"
+
+
 def test_faa_source_only_runs_for_sectors_that_claim_it(config, db):
     """faa_ads forces agency=FAA, but the sector loop ran for every sector - so
     the FAA got queried with medical-device and geothermal terms and the results

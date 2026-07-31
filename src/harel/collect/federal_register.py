@@ -92,13 +92,25 @@ class FederalRegisterCollector(Collector):
 
     def _query(self, agencies: list[str], term: str, tickers: list[str],
                sector_key: str) -> Iterator[RawItem]:
+        phrase = _as_phrase(term)
         params: list[tuple[str, str]] = [
-            ("conditions[term]", _as_phrase(term)),
+            ("conditions[term]", phrase),
             ("conditions[publication_date][gte]", self.ctx.since.date().isoformat()),
             ("per_page", str(MAX_PER_QUERY)),
             ("order", "newest"),
         ]
-        params += [("conditions[agencies][]", a) for a in agencies]
+        # The agency list existed to constrain loose word-matching. Now that a
+        # multi-word term is searched as an exact phrase, the phrase IS the
+        # precision, and the agency filter only drops true positives published
+        # by an agency the sector did not happen to list. Measured over 2026:
+        # "export controls" 6 -> 24 hits, "critical infrastructure protection"
+        # 1 -> 10, "zero trust architecture" 0 -> 3.
+        #
+        # A source that forces its own agency (faa_ads) is different: there the
+        # agency is the subject of the source, not a filter, so it always binds.
+        forced = bool(self.source.raw.get("agency_filter"))
+        if forced or not phrase.startswith('"'):
+            params += [("conditions[agencies][]", a) for a in agencies]
         params += [("fields[]", f) for f in FIELDS]
 
         resp = self.client.get(DOCS_URL, params=params, allow_status=(400, 404))
