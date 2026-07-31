@@ -191,10 +191,15 @@ class EdgarSubmissionsCollector(Collector):
         try:
             resp = self.client.get(raw_url, allow_status=(403, 404))
             if resp.status >= 400:
+                # Never lose the filing over a missing detail - but say so.
+                # Failing quietly here downgrades every Form 4 back to "looks
+                # like a purchase" with nothing on screen to explain why.
+                self.warn(f"Form 4 detail unavailable (HTTP {resp.status}): {raw_url}")
                 return None
             body = resp.text
-        except Exception:
-            return None       # never lose the filing over a missing detail
+        except Exception as exc:
+            self.warn(f"Form 4 detail failed ({type(exc).__name__}): {raw_url}")
+            return None
 
         codes = re.findall(_TAG.format("transactionCode"), body)
         if not codes:
@@ -269,14 +274,14 @@ class EdgarSubmissionsCollector(Collector):
             title_bits.append(f"- {description}")
 
         external_id = f"{accession}:{doc or 'index'}"
-        # The submissions feed re-emits the same filings every pass, so only pay
-        # for the detail fetch on something we have not stored yet.
-        insider = (
-            self._form4_detail(form, url)
-            if form in ("4", "4/A")
-            and not self.db.has_external_id(self.source.key, external_id)
-            else None
-        )
+        insider = None
+        if form in ("4", "4/A"):
+            # The submissions feed re-emits the same filings every pass. Reuse
+            # what we already parsed rather than refetching - and reuse it
+            # rather than dropping it, or the rebuilt item would overwrite the
+            # enriched row and the classification would decay away.
+            prior = self.db.stored_meta(self.source.key, external_id) or {}
+            insider = prior.get("insider") or self._form4_detail(form, url)
         if insider:
             title_bits = [f"[{form}]", company, "-", insider["label"]]
 

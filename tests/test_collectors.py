@@ -479,6 +479,38 @@ def test_form4_separates_a_grant_from_an_open_market_trade(config, db):
     assert config.scoring.noise_form_types[ROUTINE_FORM4] <= 20
 
 
+def test_form4_classification_survives_a_second_pass(config, db):
+    """The submissions feed re-emits the same filings every pass, so the detail
+    fetch is skipped the second time round. Skipping alone silently degraded the
+    item: it was rebuilt without its classification and upsert overwrote the
+    enriched row, so titles reverted to "FORM 4" and grants scored like trades
+    again. The stored result has to be carried forward."""
+    from harel.collect.edgar import EdgarSubmissionsCollector, ROUTINE_FORM4
+
+    collector = EdgarSubmissionsCollector(
+        config.sources["sec_edgar_submissions"],
+        ctx(config, db, {"doc.xml": fixture_text("form4_grant.xml")}),
+    )
+    url = "https://www.sec.gov/Archives/edgar/data/1/000/xslF345X05/doc.xml"
+    first = collector._form4_detail("4", url)
+    assert first and first["form_type"] == ROUTINE_FORM4
+
+    # Simulate the row already being stored, then rebuild it with no network.
+    import json as _json
+    db.conn.execute(
+        "INSERT INTO items (uid, source, source_kind, external_id, title, url,"
+        " published_at, collected_at, meta_json) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("u1", "sec_edgar_submissions", "edgar", "acc:doc", "t", url,
+         "2026-07-30T12:00:00+00:00", "2026-07-30T12:00:00+00:00",
+         _json.dumps({"insider": first})),
+    )
+    db.conn.commit()
+
+    carried = db.stored_meta("sec_edgar_submissions", "acc:doc")
+    assert carried and carried["insider"]["form_type"] == ROUTINE_FORM4, \
+        "a later pass must reuse the classification instead of dropping it"
+
+
 def test_fulltext_query_keeps_the_suffix_when_the_name_is_a_common_word(config):
     """Dropping the legal suffix is right for a distinctive name, but "NICE Ltd"
     became "NICE" and "Allot Ltd" became "Allot", so any filing using the word

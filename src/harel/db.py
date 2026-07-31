@@ -364,14 +364,24 @@ class Database:
             out.append(d)
         return out
 
-    def has_external_id(self, source: str, external_id: str) -> bool:
-        """Have we already stored this exact filing? Lets a collector skip an
-        expensive detail fetch for something it has seen on a previous pass."""
+    def stored_meta(self, source: str, external_id: str) -> dict[str, Any] | None:
+        """Meta we already hold for this exact item, if any.
+
+        Lets a collector skip an expensive detail fetch on a later pass *and*
+        carry the earlier result forward. Skipping alone is not enough: upsert
+        replaces the row, so an item rebuilt without its enrichment overwrites
+        the enriched one and the detail decays away pass by pass.
+        """
         row = self.conn.execute(
-            "SELECT 1 FROM items WHERE source = ? AND external_id = ? LIMIT 1",
+            "SELECT meta_json FROM items WHERE source = ? AND external_id = ? LIMIT 1",
             (source, external_id),
         ).fetchone()
-        return row is not None
+        if not row or not row["meta_json"]:
+            return None
+        try:
+            return json.loads(row["meta_json"])
+        except (TypeError, ValueError):
+            return None
 
     def item(self, uid: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM items WHERE uid = ?", (uid,)).fetchone()
