@@ -211,7 +211,11 @@ class Views:
             if abs(price["change_pct"]) < min_abs_pct:
                 continue
             candidates = [
-                r for r in self.db.feed(tickers=[ticker], min_score=30,
+                # Must not be stricter than the feed's own threshold, or the
+                # two panels contradict each other: TEVA showed "no matching
+                # news" here while its guidance-change story sat in the feed
+                # directly below at 27.
+                r for r in self.db.feed(tickers=[ticker], min_score=20,
                                         since_hours=30, limit=8)
                 # Our own "the tape moved and we found nothing" marker is not a
                 # story. Offering it as the driver of the move it describes is

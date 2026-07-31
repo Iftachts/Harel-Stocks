@@ -79,7 +79,13 @@ a:hover { text-decoration: underline; }
 
 def render_terminal(views: Views) -> str:
     brief = views.morning_brief(hours=24)
-    feed = views.feed(min_score=40, hours=24, limit=60)
+    # 40 was reachable only because the [TAPE] markers carried a forced 70 and
+    # sat in the feed. With those moved to the movers board where they belong,
+    # genuine news peaks in the low 30s once recency decay has run for a few
+    # hours - so a threshold of 40 renders an empty panel on any day that is not
+    # breaking live, which is exactly when you would distrust the whole tool.
+    # 20 matches the RUNBOOK's own advice for a quiet tape.
+    feed = views.feed(min_score=20, hours=24, limit=60)
     moving = views.whats_moving(min_abs_pct=1.5)
     health = views.health()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -101,12 +107,25 @@ def render_terminal(views: Views) -> str:
     warnings = brief.get("coverage_warnings") or []
     if warnings:
         parts.append("<section><h2>Coverage warnings</h2>")
-        parts += [f"<div class='warn'>{html.escape(w)}</div>" for w in warnings]
+        # The "why" behind a disabled source is a paragraph, and eight of them
+        # pushed the actual news below the fold. Keep the headline reason here;
+        # the full note lives in config/sources.yaml and /api/health.
+        for w in warnings:
+            short = w if len(w) <= 120 else w[:117].rstrip(" ,.;-") + "..."
+            parts.append(f"<div class='warn'>{html.escape(short)}</div>")
         parts.append("</section>")
 
-    parts.append(_section("Alerts (last 24h)", brief["alerts"]))
+    empty_alerts = (
+        "no alerts in the last 24h"
+        if health["db"]["items"] else "database is empty - run `harel collect`"
+    )
+    parts.append(_section("Alerts (last 24h)", brief["alerts"], empty=empty_alerts))
     parts.append(_movers_section(moving["movers"]))
-    parts.append(_section("Feed", feed["items"]))
+    parts.append(_section(
+        "Feed", feed["items"],
+        empty=("nothing above score 20 in the last 24h"
+               if health["db"]["items"] else "database is empty - run `harel collect`"),
+    ))
     if brief.get("tase_overnight"):
         parts.append(_section("TASE / MAYA overnight", brief["tase_overnight"]))
     parts.append(_calendar_section(brief.get("calendar_next_7d") or []))
@@ -115,10 +134,14 @@ def render_terminal(views: Views) -> str:
     return "".join(parts)
 
 
-def _section(title: str, items: list[dict[str, Any]]) -> str:
+def _section(title: str, items: list[dict[str, Any]], empty: str | None = None) -> str:
     if not items:
+        # "run `harel collect`" was printed whenever a panel was empty, so a
+        # working system with a quiet tape accused itself of never having
+        # collected. Distinguishing the two is the entire point of this page.
         return (f"<section><h2>{html.escape(title)}</h2>"
-                f"<div class='empty'>nothing yet - run `harel collect`</div></section>")
+                f"<div class='empty'>{html.escape(empty or 'nothing to show')}"
+                f"</div></section>")
 
     rows = ["<table><tr><th class='score'>SC</th><th class='tkr'>SYM</th>"
             "<th class='rel'>REL</th><th class='tm'>TIME</th>"
