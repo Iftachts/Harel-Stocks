@@ -153,6 +153,10 @@ class CalendarEntry:
     source: str
     confidence: float = 0.8
     url: str = ""
+    # How this date reaches this ticker. DIRECT is the company's own calendar;
+    # SECTOR_REG is a date in its industry, which is not the same thing and must
+    # not be offered as "the next known catalyst" for the company.
+    relation: str = "DIRECT"
 
 
 _WS = re.compile(r"\s+")

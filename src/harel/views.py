@@ -114,6 +114,12 @@ def _compact(row: dict[str, Any], include_reasons: bool = False) -> dict[str, An
     if summary:
         out["summary"] = summary[:MAX_SUMMARY_CHARS]
     meta = row.get("meta") or {}
+    if meta.get("undated"):
+        # The feed gave no date, so `t` is when we FOUND it, not when it was
+        # published. Showing an invented timestamp as a publication time is how
+        # an evergreen marketing page reads as six-hour-old news.
+        out["published_unknown"] = True
+        out["discovered_at"] = row.get("collected_at")
     for key in ("form_type", "items", "item_labels", "nct_id", "status", "change",
                 "agencies", "document_number", "public_inspection", "sponsor",
                 "classification", "synthetic", "kind"):
@@ -396,8 +402,12 @@ class Views:
                 "volume_multiple": mover.get("volume_multiple"),
                 "session": mover.get("session"),
                 # Say what we looked at and did not find, so this reads as a
-                # question rather than as a claim.
-                "checked": "no company story above score 20 in the last 30h",
+                # question rather than as a claim. "no company story" was not
+                # quite true and contradicted the screen: there often IS a
+                # story, it is a price recap, and it was ruled out on purpose.
+                "checked": ("no eligible pre-move catalyst above score 20 in the "
+                            "last 30h" + (" (price recaps excluded as reactive)"
+                                          if mover.get("post_move_commentary") else "")),
                 "post_move_commentary": mover.get("post_move_commentary") or [],
                 "next_catalyst": self._next_catalyst(mover["ticker"]),
             })
@@ -405,10 +415,27 @@ class Views:
         return out
 
     def _next_catalyst(self, ticker: str) -> dict[str, Any] | None:
-        """The nearest known date. Positioning ahead of results is the most
-        common benign explanation for a move nobody can source."""
-        entries = self.db.calendar([ticker], days_ahead=21)
-        return entries[0] if entries else None
+        """The nearest known date for THIS company.
+
+        A date only counts as the company's catalyst if it reaches the company
+        directly. An airworthiness directive taking effect for Textron Aviation
+        is a real date and a real sector link, but it was being offered as TAT
+        Technologies' "next known date", which is a different and false claim.
+        A sector date is still shown when there is nothing better - labelled as
+        the weak link it is.
+        """
+        entries = self.db.calendar([ticker], days_ahead=45)
+        if not entries:
+            return None
+        own = [e for e in entries if (e.get("relation") or "") in ("DIRECT", "SUBSIDIARY")]
+        if own:
+            return {**own[0], "strength": "company"}
+        weak = entries[0]
+        wording = {"SECTOR_REG": "sector-regulatory", "PRODUCT_RIVAL": "rival-product",
+                   "PEER": "peer"}.get(weak.get("relation") or "", "sector")
+        return {**weak, "strength": "weak",
+                "caveat": f"weak {wording} link - a date in the sector, "
+                          f"not this company's"}
 
     # --------------------------------------------------- morning brief ---- #
     def morning_brief(self, hours: float = 16.0) -> dict[str, Any]:
@@ -493,7 +520,13 @@ class Views:
         collected = _published_utc({"published_at": row.get("collected_at")})
         close = last_session_close()
 
-        timing: dict[str, Any] = {"published_utc": row.get("published_at")}
+        undated = bool(meta.get("undated"))
+        timing: dict[str, Any] = {
+            "published_utc": None if undated else row.get("published_at"),
+            "publication_date": "unknown - the feed carried no date, so the "
+                                "timestamp below is when we found it, not when "
+                                "it was published" if undated else "as published",
+        }
         if pub:
             timing.update({
                 "published_et": pub.astimezone(MARKET_TZ).strftime("%Y-%m-%d %H:%M ET"),

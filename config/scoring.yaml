@@ -458,6 +458,13 @@ overrides:
     # TIGIT-class read-across is effectively direct news for Compugen
     relation_overrides:
       PRODUCT_RIVAL: 0.95
+  KEN:
+    # Kenon is a HOLDING company. NRG, Vistra and Talen are peers of OPC Energy
+    # and CPV - the assets - not of the listed entity, whose price also carries
+    # holding-company discount, currency and disposal news. The read-across is
+    # real but one step removed, so it is discounted rather than dropped.
+    relation_overrides:
+      PEER: 0.45
   PERI:
     # Bing/Google terms-of-trade changes have historically caused >30% gaps
     keyword_boosts:

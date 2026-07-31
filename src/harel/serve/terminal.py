@@ -202,7 +202,7 @@ def _section(title: str, items: list[dict[str, Any]], empty: str | None = None) 
             f"<td class='score' style='color:{tier_color}'>{it['score']:.0f}</td>"
             f"<td class='tkr'>{html.escape(it.get('ticker', ''))}</td>"
             f"<td class='rel' style='color:{rel_color}'>{html.escape(rel)}</td>"
-            f"<td class='tm'>{html.escape(_fmt_time(it['t']))}</td>"
+            f"<td class='tm'>{_time_cell(it)}</td>"
             f"<td><a href='{html.escape(url)}' target='_blank' rel='noreferrer'>"
             f"{title_html}</a> {events}{corr_html}{_dig(it.get('uid'))}"
             f"<div class='why'>{why}</div></td>"
@@ -219,13 +219,18 @@ def _unexplained_section(alerts: list[dict[str, Any]]) -> str:
     rows = []
     for a in alerts:
         catalyst = a.get("next_catalyst")
-        tail = f" &middot; {html.escape(a['checked'])}"
-        if catalyst:
-            tail += (f" &middot; next known date: {html.escape(catalyst['date'])} "
-                     f"{html.escape(catalyst['label'][:60])}")
+        tail = html.escape(a["checked"])
+        if catalyst and catalyst.get("strength") == "company":
+            tail += (f"<br>next known catalyst: <b>{html.escape(catalyst['date'])}</b> "
+                     f"{html.escape(catalyst['label'][:70])} &mdash; positioning ahead "
+                     f"of it is possible but unverified")
+        elif catalyst:
+            tail += (f"<br>{html.escape(catalyst.get('caveat', 'weak link'))}: "
+                     f"{html.escape(catalyst['date'])} "
+                     f"{html.escape(catalyst['label'][:70])}")
         rows.append(
             f"<div class='tape'><b>{html.escape(a['headline'])}</b>"
-            f"<div class='why'>no verified catalyst{tail}</div></div>"
+            f"<div class='why'>{tail.lstrip(' &middot;')}</div></div>"
         )
     return ("<section><h2>Unexplained moves</h2>" + "".join(rows)
             + "<p class='note'>These are questions, not findings. The tape moved "
@@ -363,7 +368,8 @@ def render_item(views: Views, uid: str) -> str:
         + ("" if lag < 30 else " <span class='bad'>&mdash; late</span>")
     )
     parts.append(_kv("When", [
-        ("published", f"{html.escape(str(when.get('published_utc') or ''))[:16]} UTC "
+        ("publication date", html.escape(str(when.get("publication_date") or "-"))),
+        ("published", f"{html.escape(str(when.get('published_utc') or 'unknown'))[:16]} UTC "
                       f"&middot; {html.escape(str(when.get('published_et') or ''))} "
                       f"&middot; {html.escape(str(when.get('published_israel') or ''))}"),
         ("age", f"{when.get('age_hours', '?')}h"),
@@ -607,6 +613,15 @@ def _quote_label(quote: dict[str, Any] | None) -> str:
     if age is None:
         return f"{provider}, capture time unknown"
     return f"{provider} · {age}m old, delayed"
+
+
+def _time_cell(item: dict[str, Any]) -> str:
+    """When it was published - or, honestly, when we merely found it."""
+    if item.get("published_unknown"):
+        seen = _fmt_time(item.get("discovered_at") or item["t"])
+        return (f"<span class='muted'>date unknown</span>"
+                f"<div class='why'>seen {html.escape(seen)}</div>")
+    return html.escape(_fmt_time(item["t"]))
 
 
 def _fmt_time(iso: str) -> str:

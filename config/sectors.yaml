@@ -30,9 +30,17 @@ benchmarks:
     medical_devices: IHI
     defense: ITA
     aerospace_mro: ITA
-    cybersecurity_platform: QQQ
-    network_security: QQQ
+    # QQQ is the whole Nasdaq: on a day the security group sells off inside a
+    # flat tape, a PANW move measured against QQQ looks stock-specific when it
+    # is the group. CIBR is the sector, which is what "relative to its group"
+    # was supposed to mean. Verified quoting on the price endpoint.
+    cybersecurity_platform: CIBR
+    network_security: CIBR
     enterprise_software_cx: IGV
+    # AUDC is communications infrastructure software, so IGV is broader than
+    # ideal - there is no free comms-software index, and a hand-built peer
+    # basket would need prices for names outside this universe. IGV is the
+    # closest honest proxy; treat AUDC's relative number as indicative.
     voice_networking: IGV
     adtech: QQQ
     fintech_payments: QQQ

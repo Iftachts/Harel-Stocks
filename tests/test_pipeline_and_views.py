@@ -646,3 +646,142 @@ def test_a_passive_13g_is_not_insider_activity(config):
     )
     scored = scorer.score(activist, [Link("ORA", "DIRECT", 0.97, "test")], now=now)
     assert scored.score > 25, "an activist stake IS material"
+
+
+def test_earnings_dates_are_read_out_of_the_announcement(config, db):
+    """LIMITATIONS gap #4 is "no official earnings calendar", priced at a paid
+    feed. Every issuer publishes the date weeks ahead in plain English, and we
+    were already collecting that release and throwing the date away."""
+    from harel.pipeline import _earnings_date
+    from harel.models import RawItem
+
+    def item(title, summary=""):
+        return RawItem(source="company_ir_rss", source_kind="rss", external_id=title,
+                       title=title, url="", summary=summary,
+                       published_at=datetime.now(timezone.utc))
+
+    # %-d is not portable to Windows, so build the day number by hand.
+    ahead = datetime.now(timezone.utc) + timedelta(days=20)
+    when = f"{ahead:%B} {ahead.day}, {ahead.year}"
+
+    got = _earnings_date(item(
+        "Tower Semiconductor Announces Second Quarter 2026 Financial Results",
+        f"Tower Semiconductor will issue its second quarter earnings release on {when}."))
+    assert got and got[0] == ahead.date().isoformat(), got
+    assert "Q2" in got[1]
+
+    # Must not fire on the results themselves, nor on a conference appearance.
+    assert _earnings_date(item(
+        "Teva Delivers Strong Q2 Results and Raises Outlook",
+        "Revenues of $4.2 billion in the second quarter.")) is None
+    assert _earnings_date(item(
+        f"Compugen to Participate in BTIG Biotechnology Conference on {when}")) is None
+    # A date in the past is a report, not a schedule.
+    assert _earnings_date(item(
+        "Company Announces First Quarter 2020 Results Conference Call",
+        "will host a call on May 4, 2020.")) is None
+
+
+def test_a_sector_date_is_not_the_companys_next_catalyst(ran, db):
+    """An airworthiness directive taking effect for Textron Aviation is a real
+    date and a real sector link, but it was offered as TAT Technologies' "next
+    known date", which is a different and false claim."""
+    from harel.models import CalendarEntry, PriceSnapshot
+
+    _, views = ran
+    now = datetime.now(timezone.utc)
+    soon = (now + timedelta(days=6)).date().isoformat()
+    later = (now + timedelta(days=9)).date().isoformat()
+    db.save_price(PriceSnapshot(ticker="ITA", asof=now, last=100.0, prev_close=99.2,
+                                change_pct=0.8, session="regular", provider="yahoo"))
+    db.save_price(PriceSnapshot(ticker="TATT", asof=now, last=100.0, prev_close=103.3,
+                                change_pct=-3.2, session="regular", provider="yahoo"))
+    db.save_calendar([CalendarEntry(
+        ticker="TATT", kind="rule_effective", date=soon,
+        label="Rule effective: Airworthiness Directives; Textron Aviation",
+        source="federal_register", confidence=0.9, relation="SECTOR_REG")])
+    db.conn.commit()
+
+    alert = next(a for a in views.whats_moving(1.0)["unexplained"]
+                 if a["ticker"] == "TATT")
+    assert alert["next_catalyst"]["strength"] == "weak"
+    assert "not this company" in alert["next_catalyst"]["caveat"]
+
+    # A company date outranks it the moment one exists.
+    db.save_calendar([CalendarEntry(
+        ticker="TATT", kind="earnings", date=later, label="Q2 results",
+        source="company_ir_rss", confidence=0.95, relation="DIRECT")])
+    db.conn.commit()
+    alert = next(a for a in views.whats_moving(1.0)["unexplained"]
+                 if a["ticker"] == "TATT")
+    assert alert["next_catalyst"]["strength"] == "company"
+    assert alert["next_catalyst"]["date"] == later
+
+
+def test_regional_mirrors_of_one_story_are_one_story():
+    """Google News appends " - <publisher>", and the same wire copy is
+    syndicated to regional mirrors, so one article arrived twice and counted as
+    two independent sources."""
+    from harel.dedupe import normalize_title
+
+    base = "NRG Energy Gears Up to Report Q2 Earnings: Here's What to Expect"
+    assert (normalize_title(f"{base} - Yahoo Finance")
+            == normalize_title(f"{base} - Yahoo Finance Singapore"))
+    assert (normalize_title("Teva Announces Q2 Results - Reuters")
+            != normalize_title("Compugen Announces Phase 2 Data - Reuters"))
+
+
+def test_a_placeholder_headline_is_a_parser_fault_not_a_story():
+    """BrainsWay's feed emitted an entry titled literally "Title". It linked to
+    BWAY, scored 32, and sat in the feed as company news."""
+    from harel.collect.rss import _is_placeholder_title
+
+    for junk in ("Title", "title", "(No Title)", "Untitled", "", "  ", "news"):
+        assert _is_placeholder_title(junk), junk
+    for real in ("Teva Announces Q2 Results", "BrainsWay to Report Q2 Financials"):
+        assert not _is_placeholder_title(real), real
+
+
+def test_an_undated_item_reports_discovery_time_as_discovery_time(ran, db):
+    """Showing an invented timestamp as a publication time is how an evergreen
+    marketing page reads as six-hour-old news."""
+    from harel.serve.terminal import _time_cell
+
+    _, views = ran
+    now = datetime.now(timezone.utc)
+    db.conn.execute(
+        "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, title, "
+        "url, published_at, collected_at, score, tier, meta_json) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("nodate", "company_ir_rss", "rss", "nodate", "Connecting Millions in Mexico",
+         "https://example.com/c", now.isoformat(), now.isoformat(), 8.0, "NOISE",
+         '{"undated": true}'),
+    )
+    db.conn.execute(
+        "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, why, "
+        "score) VALUES (?,?,?,?,?,?)", ("nodate", "GILT", "DIRECT", 0.95, "t", 8.0))
+    db.conn.commit()
+
+    item = next(i for i in views.feed(min_score=0, hours=LOOKBACK, limit=200)["items"]
+                if i["uid"] == "nodate")
+    assert item["published_unknown"] is True
+    assert item["discovered_at"]
+    assert "date unknown" in _time_cell(item)
+
+    explained = views.explain("nodate")
+    assert explained["when"]["published_utc"] is None
+    assert "unknown" in explained["when"]["publication_date"]
+
+
+def test_a_holding_companys_peers_read_across_at_a_discount(config):
+    """NRG, Vistra and Talen are peers of OPC Energy and CPV - the assets - not
+    of Kenon, whose price also carries holding-company discount and disposals."""
+    ken = (config.scoring.overrides.get("KEN") or {}).get("relation_overrides") or {}
+    assert ken.get("PEER", 1.0) < config.scoring.relations["PEER"]
+
+
+def test_benchmarks_are_the_actual_sector(config):
+    """QQQ is the whole Nasdaq: a PANW move measured against it reads as
+    stock-specific when it is the security group moving."""
+    assert config.benchmark_for("cybersecurity_platform") == "CIBR"
+    assert config.benchmark_for("semiconductors_foundry") == "SOXX"

@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS calendar (
     source     TEXT,
     confidence REAL,
     url        TEXT,
+    relation   TEXT,
     PRIMARY KEY (ticker, kind, date, label)
 );
 
@@ -160,6 +161,7 @@ class Database:
         simply reads back as None, which the surfaces render as "unknown"."""
         added: list[tuple[str, str, str]] = [
             ("prices", "provider", "TEXT"),
+            ("calendar", "relation", "TEXT"),
         ]
         for table, column, decl in added:
             cols = {r["name"] for r in
@@ -248,11 +250,12 @@ class Database:
         return len(rows)
 
     def save_calendar(self, entries: Iterable[CalendarEntry]) -> int:
-        rows = [(e.ticker, e.kind, e.date, e.label, e.source, e.confidence, e.url)
-                for e in entries]
+        rows = [(e.ticker, e.kind, e.date, e.label, e.source, e.confidence, e.url,
+                 e.relation) for e in entries]
         self.conn.executemany(
-            "INSERT OR REPLACE INTO calendar (ticker,kind,date,label,source,confidence,url) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO calendar "
+            "(ticker,kind,date,label,source,confidence,url,relation) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             rows,
         )
         return len(rows)

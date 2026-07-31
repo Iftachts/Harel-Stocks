@@ -11,6 +11,8 @@ Drives four different kinds of feed, all of which happen to speak RSS:
 from __future__ import annotations
 
 import calendar
+import html
+import re
 import time
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -30,11 +32,24 @@ MAX_THEME_QUERIES_PER_SECTOR = 3
 # "Microsoft" or "Salesforce" for NICE would bury the feed - so peers stay on
 # the existing match-in-collected-content path.
 MAX_RIVAL_TERMS_PER_QUERY = 6
+# A feed emitting placeholders must not turn one pass into a hundred fetches.
+MAX_TITLE_LOOKUPS_PER_RUN = 5
+
+# Headlines that carry no information - CMS templating leftovers, almost always.
+_PLACEHOLDER_TITLES = {
+    "title", "untitled", "no title", "notitle", "post title", "page title",
+    "default title", "sample", "test", "rss", "feed", "news", "item",
+}
+_OG_TITLE = re.compile(
+    r"<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"']([^\"']{4,300})",
+    re.IGNORECASE)
+_HTML_TITLE = re.compile(r"<title[^>]*>([^<]{4,300})</title>", re.IGNORECASE)
 
 
 @register("rss")
 class RssCollector(Collector):
     def collect(self) -> Iterator[RawItem]:
+        self._title_lookups = 0
         for feed_url, seed_tickers, seed_relation, label in self._feed_plan():
             try:
                 yield from self._read_feed(feed_url, seed_tickers, seed_relation, label)
@@ -221,9 +236,18 @@ class RssCollector(Collector):
     def _entry_to_item(self, entry, feed_url: str, seed_tickers: list[str],
                        seed_relation: str, label: str) -> RawItem | None:
         title = (entry.get("title") or "").strip()
-        if not title:
-            return None
         link = entry.get("link") or entry.get("id") or ""
+        if _is_placeholder_title(title):
+            # BrainsWay's feed emitted an entry whose title was literally
+            # "Title". It linked to BWAY, scored 32 and sat in the feed as
+            # company news. A headline that says nothing is a parser problem,
+            # not a story: try the page's own title, then give up loudly.
+            recovered = self._title_from_page(link)
+            if not recovered:
+                self.warn(f"{label}: entry has no usable title "
+                          f"({title!r}) - skipped: {link[:120]}")
+                return None
+            title = recovered
         published, dated = _entry_datetime(entry)
 
         summary = entry.get("summary") or ""
@@ -249,6 +273,36 @@ class RssCollector(Collector):
                 if isinstance(entry.get("source"), dict) else entry.get("author"),
             },
         )
+
+
+    def _title_from_page(self, url: str) -> str | None:
+        """Last resort for an entry with no usable headline: ask the page.
+
+        Bounded per run - a feed that emits nothing but placeholders must not
+        turn one collection pass into a hundred page fetches.
+        """
+        if not url or self._title_lookups >= MAX_TITLE_LOOKUPS_PER_RUN:
+            return None
+        self._title_lookups += 1
+        try:
+            resp = self.client.get(url, allow_status=(403, 404, 410))
+        except Exception:
+            return None
+        if resp.status >= 400:
+            return None
+        for pattern in (_OG_TITLE, _HTML_TITLE):
+            match = pattern.search(resp.text or "")
+            if match:
+                candidate = html.unescape(match.group(1)).strip()
+                if not _is_placeholder_title(candidate):
+                    return candidate[:300]
+        return None
+
+
+def _is_placeholder_title(title: str) -> bool:
+    """A headline that carries no information. Templating leftovers, mostly."""
+    cleaned = re.sub(r"[^\w\s]", "", (title or "").strip()).strip().lower()
+    return cleaned in _PLACEHOLDER_TITLES or len(cleaned) < 3
 
 
 def _entry_datetime(entry) -> tuple[datetime, bool]:

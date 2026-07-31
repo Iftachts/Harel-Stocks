@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from .collect import CollectorContext, build_collectors
@@ -191,6 +192,11 @@ class Pipeline:
             if abs((scored.score or 0) - (row["score"] or 0)) > 0.05:
                 changed += 1
             self.db.upsert_item(scored, row["dedupe_key"], row["cluster_id"])
+            # Re-harvest dates too: the calendar is built by the same pass, so a
+            # new extractor (or a corrected relation on an existing entry) has
+            # to be applied to the back catalogue as well, not only to whatever
+            # happens to be collected next.
+            self._extract_calendar(scored)
 
         self.db.conn.commit()
         return {"examined": len(rows), "rescored": changed, "dropped": dropped}
@@ -240,6 +246,28 @@ class Pipeline:
                         ticker=link.ticker, kind=kind, date=date_str, label=label,
                         source=scored.raw.source, confidence=confidence,
                         url=scored.raw.url,
+                        # How this date reaches this ticker. A rule taking effect
+                        # for Textron Aviation is a real date and a real sector
+                        # link, but it is not TAT Technologies' next catalyst,
+                        # and it was being offered as exactly that.
+                        relation=link.relation,
+                    ))
+
+        # An issuer announcing when it will report is the single most valuable
+        # forward date a short-term trader has, and it is published weeks ahead
+        # in plain English: "will issue its second quarter 2026 earnings release
+        # on Tuesday, August 4, 2026". docs/LIMITATIONS.md lists the missing
+        # earnings calendar as gap #4 and prices it at a paid feed; the date was
+        # sitting in the press release the whole time.
+        reported = _earnings_date(scored.raw)
+        if reported:
+            date_str, label = reported
+            for link in scored.links:
+                if link.relation in ("DIRECT", "SUBSIDIARY"):
+                    entries.append(CalendarEntry(
+                        ticker=link.ticker, kind="earnings", date=date_str,
+                        label=label, source=scored.raw.source, confidence=0.95,
+                        url=scored.raw.url, relation=link.relation,
                     ))
 
         if meta.get("primary_completion"):
@@ -292,3 +320,80 @@ class Pipeline:
                     session=row.get("session") or "unknown",
                 )
         return out
+
+
+# --------------------------------------------------------------------------- #
+# Earnings dates, read out of the announcement that carries them.
+#
+# docs/LIMITATIONS.md gap #4 is "no official earnings calendar" and prices it at
+# a paid feed. But every issuer publishes the date weeks ahead, in a press
+# release, in plain English:
+#
+#   "Tower Semiconductor ... will issue its second quarter 2026 earnings release
+#    on Tuesday, August 4, 2026."
+#
+# We were already collecting that release and scoring it as a low-value
+# "conference call" item, then throwing the date away.
+# --------------------------------------------------------------------------- #
+_EARNINGS_ANNOUNCEMENT = re.compile(
+    r"\b(will (issue|report|release|host|announce)|to (report|announce|release|host)|"
+    r"schedules?|has scheduled|announces? (the )?(date|timing))\b", re.IGNORECASE)
+_EARNINGS_SUBJECT = re.compile(
+    r"\b((first|second|third|fourth)[- ]quarter|q[1-4]|full[- ]year|annual|"
+    r"half[- ]year)\b.{0,40}?\b(results|earnings)\b|"
+    r"\b(results|earnings)\b.{0,40}?\b((first|second|third|fourth)[- ]quarter|q[1-4])\b",
+    re.IGNORECASE | re.DOTALL)
+_MONTH = ("january february march april may june july august september october "
+          "november december").split()
+_DATE_MDY = re.compile(
+    r"\b(" + "|".join(_MONTH) + r")\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b",
+    re.IGNORECASE)
+_DATE_DMY = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(" + "|".join(_MONTH) + r"),?\s+(\d{4})\b",
+    re.IGNORECASE)
+_QUARTER_LABEL = re.compile(
+    r"\b(first|second|third|fourth)[- ]quarter\b|\bq([1-4])\b", re.IGNORECASE)
+
+
+def _earnings_date(item) -> tuple[str, str] | None:
+    """(ISO date, label) if this item announces when results will be published.
+
+    Deliberately strict on all three legs - it must look like an announcement,
+    be about results, and carry a parseable date - because a wrong earnings date
+    is worse than no earnings date: it invites a trader to hold through what
+    they think is a quiet session.
+    """
+    text = f"{item.title}\n{item.summary}"[:1500]
+    if not (_EARNINGS_ANNOUNCEMENT.search(text) and _EARNINGS_SUBJECT.search(text)):
+        return None
+
+    today = datetime.now(timezone.utc).date()
+    best: date | None = None
+    for match in _DATE_MDY.finditer(text):
+        month, day, year = match.group(1), match.group(2), match.group(3)
+        found = _safe_date(int(year), _MONTH.index(month.lower()) + 1, int(day))
+        if found and today <= found <= today + timedelta(days=120):
+            best = found if best is None else min(best, found)
+    for match in _DATE_DMY.finditer(text):
+        day, month, year = match.group(1), match.group(2), match.group(3)
+        found = _safe_date(int(year), _MONTH.index(month.lower()) + 1, int(day))
+        if found and today <= found <= today + timedelta(days=120):
+            best = found if best is None else min(best, found)
+    if best is None:
+        return None
+
+    quarter = _QUARTER_LABEL.search(text)
+    if quarter:
+        word = quarter.group(1) or ""
+        label = (f"Q{['first', 'second', 'third', 'fourth'].index(word.lower()) + 1}"
+                 if word else f"Q{quarter.group(2)}")
+    else:
+        label = "Results"
+    return best.isoformat(), f"{label} results (company-announced date)"
+
+
+def _safe_date(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None

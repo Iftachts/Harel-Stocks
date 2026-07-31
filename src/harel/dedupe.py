@@ -23,6 +23,13 @@ from .models import RawItem
 _PUNCT = re.compile(r"[^\w\s֐-׿]+", re.UNICODE)
 _WS = re.compile(r"\s+")
 
+# Google News appends " - <publisher>" to every headline, and the same wire copy
+# is syndicated to regional mirrors, so one story arrived as
+# "…Here's What to Expect - Yahoo Finance" and again as
+# "…Here's What to Expect - Yahoo Finance Singapore" - two fingerprints, two
+# rows, and a corroboration count of two for a single article.
+_PUBLISHER_SUFFIX = re.compile(r"\s+[-–—|]\s+[^-–—|]{2,45}$")
+
 # Wire boilerplate that shifts the fingerprint without changing the story.
 _BOILERPLATE = re.compile(
     r"\b(globe ?newswire|business ?wire|pr ?newswire|globe|newswire|accesswire|"
@@ -40,6 +47,7 @@ _STOP = {
 
 def normalize_title(title: str) -> str:
     text = unicodedata.normalize("NFKC", title or "").lower()
+    text = _PUBLISHER_SUFFIX.sub("", text)
     text = _BOILERPLATE.sub(" ", text)
     text = _PUNCT.sub(" ", text)
     tokens = [t for t in _WS.split(text) if t and t not in _STOP and len(t) > 1]
