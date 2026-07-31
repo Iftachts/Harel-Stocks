@@ -95,6 +95,7 @@ class Pipeline:
             key = collector.source.key
             started = time.monotonic()
             count = 0
+            failure: str | None = None
             try:
                 for item in collector.collect():
                     count += 1
@@ -106,17 +107,30 @@ class Pipeline:
                         report.errors.append(f"{key}: failed to store an item: {exc}")
                         log.exception("store failed for %s", key)
             except Exception as exc:
-                report.errors.append(f"{key}: collector aborted: {type(exc).__name__}: {exc}")
+                failure = f"{type(exc).__name__}: {exc}"
+                report.errors.append(f"{key}: collector aborted: {failure}")
                 log.exception("collector %s aborted", key)
 
             report.by_source[key] = count
             report.warnings.extend(f"{key}: {w}" for w in collector.warnings)
-            self.db.set_source_state(
-                key,
-                last_run_at=datetime.now(timezone.utc).isoformat(),
-                last_ok_at=datetime.now(timezone.utc).isoformat() if count else None,
-                items_last_run=count,
-            )
+
+            # A pass that finds nothing is a SUCCESSFUL pass. Recording "ok" only
+            # when items came back - and writing last_ok_at=None otherwise, which
+            # `set_source_state` merges in and so *erases* the previous success -
+            # made a quiet source indistinguishable from a dead one. openFDA and
+            # ClinicalTrials are quiet for days at a time and were reading as
+            # "never worked", which is the precise confusion this bookkeeping
+            # exists to prevent.
+            now = datetime.now(timezone.utc).isoformat()
+            state: dict[str, Any] = {"last_run_at": now, "items_last_run": count}
+            if failure:
+                prior = self.db.get_source_state(key)
+                state["last_error"] = failure[:400]
+                state["consecutive_failures"] = int(
+                    prior.get("consecutive_failures") or 0) + 1
+            else:
+                state.update(last_ok_at=now, last_error=None, consecutive_failures=0)
+            self.db.set_source_state(key, **state)
             log.info("%s: %d items in %.1fs", key, count, time.monotonic() - started)
 
         self.db.conn.commit()

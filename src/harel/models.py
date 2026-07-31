@@ -120,6 +120,10 @@ class PriceSnapshot:
     day_high: float | None = None
     day_low: float | None = None
     session: str = "unknown"          # premarket | regular | afterhours | closed
+    # Which feed this print came from. A trader reconciling our -4.2% against
+    # their broker needs to know whether they are looking at a delayed Yahoo
+    # intraday quote or a Stooq end-of-day bar; the two disagree by design.
+    provider: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -134,6 +138,7 @@ class PriceSnapshot:
                 round(self.volume_multiple, 2) if self.volume_multiple is not None else None
             ),
             "session": self.session,
+            "provider": self.provider,
         }
 
 

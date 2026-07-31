@@ -306,6 +306,10 @@ class EdgarSubmissionsCollector(Collector):
             seed_tickers=[ticker],
             seed_relation="DIRECT",
             meta={
+                # Named provenance for the drill-down. "SEC EDGAR" alone does not
+                # tell a reader which company's filing list this came off, and
+                # the CIK is what they need to look it up themselves.
+                "feed_label": f"SEC submissions feed for {ticker} (CIK {cik_int})",
                 # A grant-only Form 4 is routine paperwork. Left as plain "4" it
                 # scored like an open-market purchase and took the top of the
                 # feed; ROUTINE_FORM4 carries a hard cap in scoring.yaml.
@@ -411,6 +415,9 @@ class EdgarFullTextCollector(Collector):
             seed_tickers=[ticker],
             seed_relation="PEER",
             meta={
+                "feed_label": f"SEC full-text search for {query}",
+                "seed_why": (f"{filer}'s own {form} filing contains {query}; this "
+                             f"is somebody else's document, not {ticker}'s"),
                 "form_type": form,
                 "accession": accession,
                 "filer": filer,

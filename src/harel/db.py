@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS prices (
     day_high    REAL,
     day_low     REAL,
     session     TEXT,
+    provider    TEXT,
     PRIMARY KEY (ticker, asof)
 );
 
@@ -150,7 +151,21 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.conn.executescript(TRIGGERS)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns that `CREATE TABLE IF NOT EXISTS` cannot add to a database
+        that already exists. Every entry here must be nullable: an older row
+        simply reads back as None, which the surfaces render as "unknown"."""
+        added: list[tuple[str, str, str]] = [
+            ("prices", "provider", "TEXT"),
+        ]
+        for table, column, decl in added:
+            cols = {r["name"] for r in
+                    self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column not in cols:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # -- plumbing ---------------------------------------------------------- #
     @contextmanager
@@ -212,11 +227,11 @@ class Database:
         self.conn.execute(
             """INSERT OR REPLACE INTO prices
                (ticker, asof, last, prev_close, change_pct, volume, adv20,
-                vol_mult, day_high, day_low, session)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                vol_mult, day_high, day_low, session, provider)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (snap.ticker, snap.asof.isoformat(), snap.last, snap.prev_close,
              snap.change_pct, snap.volume, snap.adv20, snap.volume_multiple,
-             snap.day_high, snap.day_low, snap.session),
+             snap.day_high, snap.day_low, snap.session, snap.provider),
         )
 
     def save_bars(self, ticker: str, bars: Iterable[dict[str, Any]]) -> int:
@@ -267,6 +282,53 @@ class Database:
             "SELECT * FROM source_state ORDER BY consecutive_failures DESC, source"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def detection_lag(self, hours: float = 6.0) -> dict[str, dict[str, Any]]:
+        """Per source: how long we typically take to see something after it was
+        published.
+
+        This is the number that decides whether a source is tradeable. A feed
+        that reaches us a median of three minutes late is an edge; the same feed
+        at ninety minutes is a history lesson, and until now nothing on any
+        screen distinguished the two.
+
+        The window is on **publication**, not collection. Windowing on collection
+        put every item of the first two-week backfill in the sample - each of
+        them "late" by up to fourteen days purely because it predated the
+        install - and reported medians of four days for sources that are in fact
+        minutes behind. A measurement that misleading is worse than none.
+
+        Median and p90 rather than a mean, so one slow straggler cannot make a
+        fast source look broken.
+        """
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        rows = self.conn.execute(
+            "SELECT source, (julianday(collected_at) - julianday(published_at)) * 1440 "
+            "AS lag FROM items WHERE published_at >= ?",
+            (since,),
+        ).fetchall()
+
+        buckets: dict[str, list[float]] = {}
+        for row in rows:
+            lag = row["lag"]
+            if lag is None or lag < 0:
+                # Negative means the source stamped it in the future - a clock or
+                # timezone problem at the far end, not a measurement of our speed.
+                continue
+            buckets.setdefault(row["source"], []).append(float(lag))
+
+        out: dict[str, dict[str, Any]] = {}
+        for source, lags in buckets.items():
+            lags.sort()
+            mid = len(lags) // 2
+            median = (lags[mid] if len(lags) % 2
+                      else (lags[mid - 1] + lags[mid]) / 2)
+            out[source] = {
+                "items": len(lags),
+                "median_minutes": round(median, 1),
+                "p90_minutes": round(lags[min(len(lags) - 1, int(len(lags) * 0.9))], 1),
+            }
+        return out
 
     def log_run(self, **fields: Any) -> None:
         self.conn.execute(
@@ -394,6 +456,24 @@ class Database:
         d["tickers"] = self.tickers_for(uid)
         d["cluster"] = self.cluster_members(d.get("cluster_id"), exclude=uid)
         return d
+
+    def resolve_uid(self, uid: str) -> str | None:
+        """Full uid for an exact id or an unambiguous prefix.
+
+        uids are 40-char sha1; nobody retypes one. A prefix is what you actually
+        copy off a screen, and an ambiguous prefix returns nothing rather than
+        guessing at which item you meant.
+        """
+        uid = (uid or "").strip().lower()
+        if not uid:
+            return None
+        row = self.conn.execute(
+            "SELECT uid FROM items WHERE uid = ?", (uid,)).fetchone()
+        if row:
+            return row["uid"]
+        rows = self.conn.execute(
+            "SELECT uid FROM items WHERE uid LIKE ? LIMIT 2", (uid + "%",)).fetchall()
+        return rows[0]["uid"] if len(rows) == 1 else None
 
     def tickers_for(self, uid: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(

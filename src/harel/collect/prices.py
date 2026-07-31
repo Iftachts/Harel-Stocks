@@ -118,6 +118,7 @@ class PriceCollector(Collector):
             day_high=last_bar["high"],
             day_low=last_bar["low"],
             session="closed",
+            provider="stooq",
         )
 
     def _yahoo_backfill_bars(self, ticker: str) -> None:
@@ -221,6 +222,7 @@ class PriceCollector(Collector):
             day_high=meta.get("regularMarketDayHigh"),
             day_low=meta.get("regularMarketDayLow"),
             session=current_session(),
+            provider="yahoo",
         )
 
     def _adv_from_bars(self, ticker: str) -> float | None:

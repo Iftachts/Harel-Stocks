@@ -185,8 +185,19 @@ class RssCollector(Collector):
                 continue
             if required:
                 haystack = f"{item.title} {item.summary}".lower()
-                if not any(term in haystack for term in required):
+                hit = next((t for t in required if t in haystack), None)
+                if hit is None:
                     continue
+                # Record the term that earned the tag. Without it the link reads
+                # "collected from google_news as product_rival", which asks the
+                # reader to take the competitor claim on trust.
+                item.meta["matched_term"] = hit
+                item.meta["seed_why"] = (
+                    f'the story names "{hit}", tracked as a rival product for '
+                    f'{seed_tickers[0]}'
+                )
+            elif seed_tickers:
+                item.meta["seed_why"] = f'found by our "{label}" search'
             count += 1
             yield item
 
@@ -244,7 +255,12 @@ def _is_hebrew(text: str) -> bool:
     return any("֐" <= ch <= "׿" for ch in text or "")
 
 
-_ENGLISH_WORD_TICKERS = {"ICL", "ORA", "KEN", "NICE", "ALLT", "PERI", "ONE", "ALL"}
+# Symbols that are also ordinary English words, so `"<TICKER>" stock` returns
+# somebody else's story. GILT earned its place the hard way: the drill-down page
+# showed "REG - FTSE Russell - 0 1/8% Index-linked Treasury Gilt 2041" tagged
+# DIRECT for Gilat Satellite. A gilt is a UK government bond.
+_ENGLISH_WORD_TICKERS = {"ICL", "ORA", "KEN", "NICE", "ALLT", "PERI", "ONE", "ALL",
+                         "GILT"}
 
 
 def _is_wordlike(ticker: str) -> bool:

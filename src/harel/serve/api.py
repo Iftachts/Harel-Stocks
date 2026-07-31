@@ -13,7 +13,7 @@ from typing import Any
 
 from ..config import get_config
 from ..db import Database
-from ..views import Views
+from ..views import RELATION_MEANING, Views
 
 
 def create_app(db_path: str | None = None):
@@ -35,7 +35,7 @@ def create_app(db_path: str | None = None):
         """
         media_type = "application/json; charset=utf-8"
 
-    from .terminal import render_terminal
+    from .terminal import render_item, render_sources, render_terminal
 
     db = Database(db_path)
     views = Views(db=db, config=get_config())
@@ -53,6 +53,16 @@ def create_app(db_path: str | None = None):
     @app.get("/", response_class=HTMLResponse)
     def terminal() -> str:
         return render_terminal(views)
+
+    @app.get("/item/{uid}", response_class=HTMLResponse)
+    def item_page(uid: str) -> str:
+        """The evidence behind one line of the feed, for a human who is going to
+        check it before trading it."""
+        return render_item(views, uid)
+
+    @app.get("/sources", response_class=HTMLResponse)
+    def sources_page() -> str:
+        return render_sources(views)
 
     @app.get("/agent/manifest")
     def manifest() -> dict[str, Any]:
@@ -98,6 +108,16 @@ def create_app(db_path: str | None = None):
     def item(uid: str) -> dict[str, Any]:
         return views.item(uid)
 
+    @app.get("/api/explain/{uid}")
+    def explain(uid: str) -> dict[str, Any]:
+        """Full audit of one item: provenance, timing, link rules, score trace,
+        corroboration, tape context and outside verification links."""
+        return views.explain(uid)
+
+    @app.get("/api/sources")
+    def sources() -> dict[str, Any]:
+        return views.sources_report()
+
     @app.get("/api/calendar")
     def calendar(tickers: str | None = None, days: int = 45) -> dict[str, Any]:
         return views.calendar(_split(tickers), days=days)
@@ -127,15 +147,10 @@ AGENT_MANIFEST: dict[str, Any] = {
     "how_to_read_an_item": {
         "score": "0-100 materiality for a SHORT-TERM trader, not for a long-term thesis.",
         "tier": "ALERT >=75, HIGH 55-74, NORMAL 35-54. Below 35 is hidden by default.",
-        "relation": {
-            "DIRECT": "the company's own news - treat as fact about the issuer",
-            "SUBSIDIARY": "a controlled entity; economically the same issuer",
-            "PRODUCT_RIVAL": "same molecule / mechanism / design socket - read across",
-            "CUSTOMER": "a customer's spend, which is our revenue",
-            "PEER": "a named competitor's own news - sector sentiment, not our fact",
-            "SECTOR_REG": "a regulator acting on our sector",
-            "SECTOR_THEME": "a thematic story touching the sector",
-        },
+        # One definition, read by the manifest, the MCP instructions and the
+        # drill-down page alike, so what the agent is told and what the trader
+        # reads cannot drift apart.
+        "relation": RELATION_MEANING,
         "why": "plain-language justification for the link; quote it, do not invent one",
         "reasons": "the full scoring trace; use it to explain rankings",
         "corroboration": "number of independent sources carrying the same story",
@@ -150,6 +165,12 @@ AGENT_MANIFEST: dict[str, Any] = {
         "never present those as the cause of that day's move; they are the next "
         "session's catalyst.",
         "Check `coverage_warnings` in /api/morning before claiming 'no news'.",
+        "When the user asks why an item is ranked where it is, why it is tagged "
+        "with a ticker, or whether it can be trusted, call /api/explain/{uid} "
+        "rather than reasoning from the headline. It carries the provenance, the "
+        "scoring trace, the corroboration and outside links to verify it.",
+        "Every item has a human page at /item/{uid}. Offer that link when the "
+        "user says they want to check something themselves.",
         "An item with meta.kind == 'unexplained_move' means the tape moved and we "
         "found NO story - say so explicitly rather than inventing a cause.",
     ],
@@ -160,6 +181,11 @@ AGENT_MANIFEST: dict[str, Any] = {
         "/api/search": "SQLite FTS5 full-text over everything collected",
         "/api/moving": "price movers joined with their best explanation",
         "/api/item/{uid}": "full record incl. body and duplicate sources",
+        "/api/explain/{uid}": "the audit trail: which query found it, source trust, "
+                              "publication time vs the bell, why it links to each "
+                              "ticker, the score arithmetic, who else carried it, "
+                              "the tape, and links to verify it elsewhere",
+        "/api/sources": "every source, its trust, and when it last returned anything",
         "/api/calendar": "known upcoming catalysts",
         "/api/health": "source health, missing keys, unresolved tickers",
     },

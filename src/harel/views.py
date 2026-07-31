@@ -17,6 +17,7 @@ surfaces cannot drift apart.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
@@ -25,7 +26,39 @@ from .config import Config, get_config
 from .db import Database
 
 MARKET_TZ = ZoneInfo("America/New_York")
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 MARKET_CLOSE_HOUR = 16
+
+# What a trust weight actually means, in words. The number alone ("trust 0.60")
+# tells a trader nothing about whether they should go and read the original.
+TRUST_MEANING = [
+    (0.95, "primary document - the issuer or the regulator itself"),
+    (0.85, "first-hand, but not the issuer's own words"),
+    (0.70, "reliable secondary reporting"),
+    (0.00, "aggregator - somebody else's reporting, rewritten"),
+]
+
+# What each relation means, in one line. This is the canonical copy: the REST
+# manifest and the MCP instructions both read it from here, so the explanation a
+# trader sees and the explanation the agent is given can never drift apart.
+RELATION_MEANING = {
+    "DIRECT": "the company's own news - treat as fact about the issuer",
+    "SUBSIDIARY": "a controlled entity; economically the same issuer",
+    "PRODUCT_RIVAL": "same molecule / mechanism / design socket - read across",
+    "CUSTOMER": "a customer's spend, which is our revenue",
+    "PEER": "a named competitor's own news - sector sentiment, not our fact",
+    "SUPPLIER": "an input we depend on",
+    "SECTOR_REG": "a regulator acting on our sector",
+    "SECTOR_THEME": "a thematic story touching the sector",
+    "MACRO": "a market-wide condition, not a company fact",
+}
+
+# Free price feeds, and what each one is actually giving you.
+PROVIDER_MEANING = {
+    "yahoo": "Yahoo chart endpoint - unofficial and delayed (~15 min), "
+             "includes pre/post-market prints",
+    "stooq": "Stooq daily bar - end-of-day only, never intraday",
+}
 
 
 def last_session_close(now: datetime | None = None) -> datetime:
@@ -199,6 +232,57 @@ class Views:
                     "hint": "FTS5 syntax: use quotes for phrases, OR / NOT / NEAR()"}
         return {"query": query, "count": len(rows), "items": [_compact(r) for r in rows]}
 
+    # ------------------------------------------------------------ quote ---- #
+    def quote(self, ticker: str) -> dict[str, Any] | None:
+        """The stored print for one symbol, with its provenance attached.
+
+        A percentage on a screen is a claim, and a day trader has to be able to
+        reconcile it against their own broker. That needs three things we used to
+        drop on the floor: which feed it came from, when we captured it, and what
+        the previous close we divided by actually was.
+        """
+        row = self.db.latest_price(ticker)
+        if not row:
+            return None
+        asof = _published_utc({"published_at": row.get("asof")})
+        age_min = ((datetime.now(timezone.utc) - asof).total_seconds() / 60
+                   if asof else None)
+        provider = (row.get("provider") or "").strip()
+
+        if provider == "stooq":
+            freshness = f"end-of-day bar for {str(row.get('asof'))[:10]} - not an intraday price"
+        elif age_min is None:
+            freshness = "capture time unknown"
+        elif provider:
+            freshness = (f"captured {age_min:.0f} min ago; the feed itself is "
+                         f"delayed on top of that")
+        else:
+            freshness = (f"captured {age_min:.0f} min ago; provider was not "
+                         f"recorded for this print")
+
+        return {
+            "ticker": ticker.upper(),
+            "last": row.get("last"),
+            "prev_close": row.get("prev_close"),
+            "change_pct": (round(row["change_pct"], 2)
+                           if row.get("change_pct") is not None else None),
+            "volume": row.get("volume"),
+            "adv20": row.get("adv20"),
+            "volume_multiple": (round(row["vol_mult"], 2)
+                                if row.get("vol_mult") else None),
+            "session": row.get("session"),
+            "provider": provider or "unknown",
+            "provider_note": PROVIDER_MEANING.get(
+                provider, "provider not recorded (print predates provenance tracking)"),
+            "asof": row.get("asof"),
+            "age_minutes": round(age_min) if age_min is not None else None,
+            "freshness": freshness,
+            "math": (f"({row['last']} - {row['prev_close']}) / {row['prev_close']} "
+                     f"= {row['change_pct']:+.2f}%"
+                     if row.get("last") and row.get("prev_close")
+                     and row.get("change_pct") is not None else None),
+        }
+
     # ---------------------------------------------------- what's moving ---- #
     def whats_moving(self, min_abs_pct: float = 2.0) -> dict[str, Any]:
         """Price movers joined with their best explanation."""
@@ -240,6 +324,9 @@ class Views:
             movers.append({
                 "ticker": ticker,
                 "change_pct": round(price["change_pct"], 2),
+                # Where this percentage came from, so it can be checked against a
+                # broker screen instead of taken on faith.
+                "quote": self.quote(ticker),
                 "benchmark": bench_sym,
                 "benchmark_pct": round(bench_pct, 2) if bench_pct is not None else None,
                 "relative_pct": relative,
@@ -304,6 +391,165 @@ class Views:
             "same_story_from_other_sources": row["cluster"],
         }
 
+    # ---------------------------------------------------------- explain ---- #
+    def explain(self, uid: str) -> dict[str, Any]:
+        """Everything behind one line on the screen — for a trader who is going
+        to check it themselves before risking money on it.
+
+        `item()` returns the record. This returns the *audit*: which query found
+        it, how trusted that source is and why, what time it was published in all
+        three time zones that matter, whether it landed before or after the bell,
+        which rule attached it to which ticker, the arithmetic of the score, who
+        else carried the story, what the tape was doing, and a set of outside
+        links to verify the whole thing without us.
+
+        Nothing here is recomputed. It is the stored trace, unpacked.
+        """
+        full = self.db.resolve_uid(uid)
+        if not full:
+            return {"error": f"no item matching '{uid}'",
+                    "hint": "uids are sha1 hex; a unique prefix of 8+ chars is enough"}
+        row = self.db.item(full)
+        meta = row.get("meta") or {}
+        src = self.config.sources.get(row["source"])
+        trust = src.trust if src else None
+
+        pub = _published_utc(row)
+        collected = _published_utc({"published_at": row.get("collected_at")})
+        close = last_session_close()
+
+        timing: dict[str, Any] = {"published_utc": row.get("published_at")}
+        if pub:
+            timing.update({
+                "published_et": pub.astimezone(MARKET_TZ).strftime("%Y-%m-%d %H:%M ET"),
+                "published_israel": pub.astimezone(ISRAEL_TZ).strftime("%Y-%m-%d %H:%M IL"),
+                "age_hours": round((datetime.now(timezone.utc) - pub).total_seconds() / 3600, 1),
+                "session_at_publication": _market_session(pub),
+                "vs_last_close": (
+                    f"published before the {close.astimezone(MARKET_TZ):%Y-%m-%d %H:%M} ET "
+                    f"close - it can be a cause of that session's move"
+                    if pub <= close else
+                    f"published after the {close.astimezone(MARKET_TZ):%Y-%m-%d %H:%M} ET "
+                    f"close - it is the next session's setup, and cannot have caused "
+                    f"that session's move"
+                ),
+            })
+        timing["first_seen_by_us_utc"] = row.get("collected_at")
+        if pub and collected:
+            # How long we were blind to it. This is the number that says whether
+            # the system is fast enough to trade on, and nothing else reports it.
+            timing["detection_lag_minutes"] = round(
+                (collected - pub).total_seconds() / 60)
+
+        links = [
+            {
+                "ticker": t["ticker"],
+                "relation": t["relation"],
+                "relation_means": RELATION_MEANING.get(t["relation"], ""),
+                "confidence": t["confidence"],
+                "why": t["why"],
+                "score": round(t["score"], 1),
+                "tier": self.config.scoring.tier_for(t["score"]),
+            }
+            for t in row.get("tickers") or []
+        ]
+
+        members = row.get("cluster") or []
+        carriers = {row["source"]} | {m["source"] for m in members if m.get("source")}
+
+        tiers = self.config.scoring.tiers
+        return {
+            "uid": row["uid"],
+            "title": row["title"],
+            "url": row.get("url"),
+            "where_it_came_from": {
+                "source": row["source"],
+                "source_label": src.label if src else row["source"],
+                "collector": row.get("source_kind"),
+                "trust": trust,
+                "trust_means": _trust_meaning(trust),
+                "typical_latency": src.latency if src else None,
+                # The single most useful line for "why am I seeing this": the
+                # exact query or feed that pulled it in.
+                "found_by": (meta.get("feed_label") or meta.get("query")
+                             or (src.label if src else row["source"])),
+                "feed_url": meta.get("feed"),
+                "publisher": meta.get("publisher"),
+                "id_at_source": row.get("external_id"),
+            },
+            "when": timing,
+            "who_it_is_about": links,
+            "how_it_scored": {
+                "score": round(row.get("score") or 0, 1),
+                "tier": row.get("tier"),
+                "thresholds": {"ALERT": tiers.get("alert", 75),
+                               "HIGH": tiers.get("high", 55),
+                               "NORMAL": tiers.get("normal", 35)},
+                "events": row.get("events") or [],
+                "trace": _trace(row.get("reasons") or []),
+                "note": "the stored trace, in order. Multipliers compound; "
+                        "'+' lines are added after; a cap overrides everything.",
+            },
+            "who_else_carried_it": {
+                "corroboration": len(carriers),
+                "counts": "distinct SOURCES, not documents",
+                "members": [
+                    {"source": m["source"], "title": m["title"], "url": m.get("url"),
+                     "published_at": m.get("published_at"), "uid": m["uid"]}
+                    for m in members
+                ],
+            },
+            "what_the_tape_did": [
+                q for q in (self.quote(t["ticker"]) for t in links) if q
+            ],
+            "check_it_yourself": self._verify_links(row, [t["ticker"] for t in links]),
+            "raw": {
+                "summary": row.get("summary"),
+                "body_excerpt": (row.get("body") or "")[:4000],
+                "meta": meta,
+            },
+        }
+
+    def _verify_links(self, row: dict[str, Any], tickers: Sequence[str]) -> list[dict[str, str]]:
+        """Outside places to confirm this, none of which are us."""
+        from urllib.parse import quote_plus
+
+        out: list[dict[str, str]] = []
+        if row.get("url"):
+            out.append({
+                "label": "the original document",
+                "url": row["url"],
+                "checks": "that it says what our headline says it says",
+            })
+        title = (row.get("title") or "")[:120]
+        if title:
+            out.append({
+                "label": "this headline on Google News",
+                "url": f"https://news.google.com/search?q={quote_plus(title)}",
+                "checks": "who else is carrying it, and who had it first",
+            })
+        for ticker in dict.fromkeys(tickers):
+            tc = self.config.ticker(ticker)
+            if tc and tc.cik10:
+                out.append({
+                    "label": f"{ticker} filings on SEC EDGAR",
+                    "url": ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
+                            f"&CIK={tc.cik10}&type=&dateb=&owner=include&count=40"),
+                    "checks": "whether there is a filing behind the story, and its exact time",
+                })
+            if tc and tc.tase_id:
+                out.append({
+                    "label": f"{ticker} immediate reports on MAYA (TASE)",
+                    "url": f"https://maya.tase.co.il/company/{tc.tase_id}?view=reports",
+                    "checks": "the Hebrew disclosure, which is often hours ahead of the US wire",
+                })
+            out.append({
+                "label": f"{ticker} quote",
+                "url": f"https://finance.yahoo.com/quote/{ticker}",
+                "checks": "our price and volume numbers against a second screen",
+            })
+        return out
+
     # --------------------------------------------------------- calendar ---- #
     def calendar(self, tickers: Sequence[str] | None = None,
                  days: int = 45) -> dict[str, Any]:
@@ -357,6 +603,73 @@ class Views:
             "source_state": states,
         }
 
+    # ---------------------------------------------------- source report ---- #
+    def sources_report(self) -> dict[str, Any]:
+        """Every configured source, what it is, and when it last actually worked.
+
+        `health()` answers "is anything broken". This answers the question a
+        trader asks instead: "did the system even look?" - which is a different
+        question, and the one that decides whether an empty screen means quiet.
+        """
+        # Two kinds of row live in `source_state`: one per source (written by the
+        # pipeline) and one per feed URL (written by the RSS collector, keyed
+        # "<source>:<url>"). Summing them double-counts, so the source-level row
+        # is the record and the per-URL rows only contribute failure detail.
+        by_key: dict[str, dict[str, Any]] = {}
+        for state in self.db.source_health():
+            key, sep, _url = str(state["source"]).partition(":")
+            entry = by_key.setdefault(key, {"feeds": 0, "items_last_run": 0,
+                                            "failing": 0, "last_ok_at": None,
+                                            "last_run_at": None, "last_error": None})
+            if sep:
+                entry["feeds"] += 1
+                if (state.get("consecutive_failures") or 0) >= 3:
+                    entry["failing"] += 1
+                    entry["last_error"] = state.get("last_error")
+                continue
+            entry["items_last_run"] = int(state.get("items_last_run") or 0)
+            entry["last_ok_at"] = state.get("last_ok_at")
+            entry["last_run_at"] = state.get("last_run_at")
+            if state.get("last_error"):
+                entry["last_error"] = state.get("last_error")
+
+        lags = self.db.detection_lag(hours=6)
+        out = []
+        for key, source in sorted(self.config.sources.items()):
+            seen = by_key.get(key, {})
+            lag = lags.get(key) or {}
+            note = " ".join((source.raw.get("notes") or "").split())
+            out.append({
+                "source": key,
+                "label": source.label,
+                "collector": source.kind,
+                "trust": source.trust,
+                "trust_means": _trust_meaning(source.trust),
+                "latency": source.latency,
+                "enabled": source.enabled,
+                "available": source.available,
+                "degraded": source.degraded,
+                "requires_key": source.requires,
+                "endpoints_tracked": seen.get("feeds", 0),
+                "items_last_run": seen.get("items_last_run", 0),
+                "last_ok_at": seen.get("last_ok_at"),
+                "last_run_at": seen.get("last_run_at"),
+                "failing_endpoints": seen.get("failing", 0),
+                "last_error": seen.get("last_error"),
+                # How stale this source's news is by the time we can act on it.
+                # The single most important number for deciding whether to trade
+                # off a source or merely to read it.
+                "median_lag_minutes": lag.get("median_minutes"),
+                "p90_lag_minutes": lag.get("p90_minutes"),
+                "lag_sample": lag.get("items", 0),
+                "note": note[:400],
+            })
+        return {
+            "asof": datetime.now(timezone.utc).isoformat(),
+            "sources": out,
+            "warnings": self._coverage_warnings(),
+        }
+
     # --------------------------------------------------------- internal ---- #
     def _coverage_warnings(self) -> list[str]:
         warnings: list[str] = []
@@ -408,3 +721,66 @@ class Views:
                 f"{state['consecutive_failures']} times: {state.get('last_error')}"
             )
         return warnings
+
+
+# --------------------------------------------------------------------------- #
+def _trust_meaning(trust: float | None) -> str:
+    if trust is None:
+        return "unknown source - not in config/sources.yaml"
+    for floor, meaning in TRUST_MEANING:
+        if trust >= floor:
+            return meaning
+    return ""
+
+
+def _market_session(dt: datetime) -> str:
+    """Which US session a timestamp fell in. Uses the real America/New_York
+    rules rather than a month-based DST guess, because 'pre-market or not' is
+    the difference between a gap and a nothing."""
+    et = dt.astimezone(MARKET_TZ)
+    if et.weekday() >= 5:
+        return "weekend"
+    minutes = et.hour * 60 + et.minute
+    if minutes < 4 * 60:
+        return "overnight"
+    if minutes < 9 * 60 + 30:
+        return "pre-market"
+    if minutes < 16 * 60:
+        return "regular session"
+    if minutes < 20 * 60:
+        return "after hours"
+    return "overnight"
+
+
+_TICKER_PREFIX = re.compile(r"^\[([A-Z0-9.\-]{1,8})\]\s*(.*)$")
+
+
+def _step(text: str) -> dict[str, str]:
+    """Label one line of the scoring trace so a reader can see the shape of the
+    arithmetic without parsing it: what it started from, what scaled it, what was
+    added, and what overrode the lot."""
+    if text.startswith("+"):
+        kind = "add"
+    elif "cap" in text.lower():
+        kind = "cap"
+    elif "base=" in text:
+        kind = "base"
+    elif re.search(r"x\d", text):
+        kind = "multiply"
+    else:
+        kind = "note"
+    return {"kind": kind, "step": text}
+
+
+def _trace(reasons: list[str]) -> dict[str, Any]:
+    """Split the flat `reasons` list back into the item-wide steps and the
+    per-ticker steps it was built from."""
+    item_steps: list[dict[str, str]] = []
+    per_ticker: dict[str, list[dict[str, str]]] = {}
+    for reason in reasons:
+        match = _TICKER_PREFIX.match(reason)
+        if match:
+            per_ticker.setdefault(match.group(1), []).append(_step(match.group(2)))
+        else:
+            item_steps.append(_step(reason))
+    return {"item": item_steps, "per_ticker": per_ticker}

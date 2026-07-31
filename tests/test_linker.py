@@ -146,3 +146,18 @@ def test_check_point_links_to_both_israeli_security_names(linker):
     links = linker.link(item("Check Point raises full-year revenue guidance"))
     assert rel(links, "PANW") == "PEER"
     assert rel(links, "ALLT") == "PEER"
+
+
+def test_a_uk_gilt_is_not_gilat_satellite(config):
+    """The drill-down page caught this: "REG - FTSE Russell - 0 1/8%
+    Index-linked Treasury Gilt 2041" was tagged DIRECT for GILT and reached
+    `harel brief GILT`, which does not filter by score. A gilt is a bond."""
+    from harel.collect.rss import _is_wordlike
+    from harel.enrich.linker import AMBIGUOUS_TICKERS
+
+    assert _is_wordlike("GILT"), 'the news query must not ask for "GILT" stock'
+    assert "GILT" in AMBIGUOUS_TICKERS
+
+    bond = item("REG - FTSE Russell - 0 1/8% Index-linked Treasury Gilt 2041")
+    links = EntityLinker(config).link(bond)
+    assert "GILT" not in {ln.ticker for ln in links}, links

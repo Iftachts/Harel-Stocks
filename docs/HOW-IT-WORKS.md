@@ -143,6 +143,43 @@ The web page has four parts, top to bottom:
 
 Then a calendar of known dates coming up.
 
+---
+
+## 7. Checking it for yourself
+
+You should not trade on a number a machine gave you without being able to see
+where it came from. Every headline on the page has a small **`why?`** link next
+to it. It opens that story's own page, which is the system showing its working:
+
+| The page tells you | Why it matters |
+|---|---|
+| **Which search found it** — not just "Google News" but the exact query, e.g. *"KEN rival products"* | A story found by a competitor search is not news about your company, and you can see that instantly |
+| **How much the source is worth, in words** — "aggregator: somebody else's reporting, rewritten" rather than a bare `0.60` | Tells you whether to go and read the original before acting |
+| **The exact publication time in three zones** — New York, Israel and UTC — and whether it landed before or after the closing bell | A filing at 16:13 cannot explain a move that ended at 16:00 |
+| **How long *we* took to see it** | If a story reached us 4 hours late, it is not tradeable news any more, and you should know that rather than assume it is fresh |
+| **Why it was tagged with that symbol** — the actual rule that matched, e.g. *the story names "NRG Energy", tracked as a rival product for KEN* | This is the claim most worth doubting, so it is stated in full |
+| **The score, step by step** — the starting number, every multiplier, every bonus, every cap | You can see whether the ranking rests on something real or on one aggressive rule |
+| **Who else carried the story**, with their links and times | One source saying something big is a different thing from four |
+| **Where the price came from** — which feed, how many minutes ago it was captured, and the actual subtraction behind the percentage | So you can reconcile our −4.2% against your own screen |
+
+At the bottom is a **Check it yourself** box: links straight to the original
+document, to the company's filings at the US regulator, to its Hebrew
+disclosures on the Tel Aviv exchange, to a quote screen, and to a search for the
+same headline elsewhere. None of those are us. If the original says something
+different from our line, the original is right.
+
+The same thing works away from the browser: `harel explain <id>` prints it in
+the terminal, and the AI assistant has it as a tool — so "why is this ranked so
+high, and can I trust it?" is a question it answers with evidence rather than
+with a summary of the headline.
+
+### Did the system even look?
+
+The **sources** page (linked at the top) lists every source, what it is, how
+much it is trusted, how many items it returned on the last pass, and when it
+last succeeded. An empty screen has two very different causes — nothing
+happened, or nothing was collected — and this is how you tell them apart.
+
 The same information is available three other ways: on the command line
 (`harel morning`, `harel feed`, `harel brief TEVA`), as a web interface other
 programs can read, and as a set of tools an AI assistant can query directly — so

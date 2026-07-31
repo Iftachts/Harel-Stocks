@@ -124,6 +124,34 @@ agent is told to weigh.
 
 ---
 
+## The audit surface
+
+`views.explain(uid)` is the one place that reassembles everything known about an
+item: the query or feed that found it (`meta.feed_label`), the source's trust and
+what that number means in words, publication time in UTC/ET/Israel against
+`last_session_close()`, the detection lag (`collected_at - published_at`), the
+link rules with their `why`, the stored `reasons` trace regrouped into item-wide
+and per-ticker steps, cluster membership, the tape with its provider, and a set
+of outside verification URLs.
+
+It **never recomputes**. `_trace()` only regroups and labels the stored strings,
+and a test asserts the multiset of steps out equals the multiset stored — a
+prettier explanation that quietly differs from the score is worse than no
+explanation.
+
+It backs four surfaces: `/item/{uid}` (HTML), `/api/explain/{uid}`, the `explain`
+MCP tool and `harel explain`. `RELATION_MEANING` lives in `views.py` and is read
+by the REST manifest, so what the trader reads and what the agent is told cannot
+drift.
+
+Two supporting details exist only for this: `prices.provider` (a quote with no
+stated origin cannot be reconciled against a broker screen) and `meta.seed_why`,
+which lets a collector explain *its own* seeding — "the story names 'NRG Energy',
+tracked as a rival product for KEN" instead of "collected from google_news as
+product_rival".
+
+---
+
 ## Storage
 
 SQLite with WAL and FTS5 (`unicode61`, so Hebrew search works). Tables: `items`,

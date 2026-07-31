@@ -34,6 +34,8 @@ RELATION_RANK = {
 # the feed, so they need an exchange prefix or a $ sigil.
 AMBIGUOUS_TICKERS = {
     "ICL", "ORA", "KEN", "NICE", "ALL", "ONE", "ARE", "IT", "OPK", "TAT",
+    # A gilt is a UK government bond, and the bond wires mention it constantly.
+    "GILT",
 }
 
 _TICKER_CONTEXT = r"(?:NASDAQ|NYSE|NYSE American|TASE|TLV|Nasdaq|Nyse)\s*[:\-]?\s*"
@@ -203,9 +205,15 @@ class EntityLinker:
         explicit = item.meta.get("relations") or {}
         for ticker, relation in explicit.items():
             offer(ticker, relation, 0.95, f"{item.source} matched entity directly")
+        # A collector that knows *why* it seeded a ticker says so in
+        # `meta.seed_why`. "collected from google_news as product_rival" is not
+        # something a trader can check; "the story names 'NRG Energy', a rival we
+        # track for KEN" is.
+        seed_why = str(item.meta.get("seed_why") or "").strip()
         for ticker in item.seed_tickers:
             if ticker not in explicit:
                 offer(ticker, item.seed_relation, 0.92,
+                      seed_why or
                       f"collected from {item.source} as {item.seed_relation.lower()}")
 
         # Synthetic items (tape alerts) are *about* exactly one ticker. Their

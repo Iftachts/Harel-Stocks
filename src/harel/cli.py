@@ -8,6 +8,8 @@
     harel brief TEVA          one name, direct + indirect
     harel search "potash"     full text
     harel moving              price movers and their causes
+    harel explain UID         where one item came from and how it scored
+    harel sources             per source: trust, items, lag, last success
     harel serve               REST API + HTML terminal on 127.0.0.1:8787
     harel mcp                 MCP server over stdio for an LLM agent
     harel export out.html     static snapshot of the terminal
@@ -128,6 +130,16 @@ def _build_parser() -> argparse.ArgumentParser:
     mv = sub.add_parser("moving", help="price movers and their causes")
     mv.add_argument("--min-pct", type=float, default=2.0)
     mv.set_defaults(handler=cmd_moving)
+
+    xp = sub.add_parser("explain",
+                        help="where one item came from and how it scored")
+    xp.add_argument("uid", help="uid or a unique prefix (8+ chars), as printed "
+                                "under each headline")
+    xp.set_defaults(handler=cmd_explain)
+
+    sr = sub.add_parser("sources",
+                        help="every source: trust, items last pass, last success")
+    sr.set_defaults(handler=cmd_sources)
 
     sv = sub.add_parser("serve", help="REST API + HTML terminal")
     sv.add_argument("--host", default="127.0.0.1")
@@ -352,15 +364,158 @@ def cmd_moving(args) -> int:
     for m in result["movers"]:
         color = C.GREEN if m["change_pct"] >= 0 else C.RED
         vol = f"{m['volume_multiple']:.1f}x" if m.get("volume_multiple") else "  -  "
-        print(f"{m['ticker']:<6} {color}{m['change_pct']:+6.2f}%{C.RESET}  vol {vol}")
+        quote = m.get("quote") or {}
+        print(f"{m['ticker']:<6} {color}{m['change_pct']:+6.2f}%{C.RESET}  vol {vol}"
+              f"  {C.GREY}{quote.get('provider', '?')}"
+              f" {quote.get('freshness', '')}{C.RESET}")
         if m["drivers"]:
             for driver in m["drivers"][:2]:
-                print(f"       {C.GREY}{driver['title'][:120]}{C.RESET}")
+                print(f"       {C.GREY}{driver['uid'][:10]}  "
+                      f"{driver['title'][:110]}{C.RESET}")
         else:
             print(f"       {C.AMBER}no matching news{C.RESET}")
     if not result["movers"]:
         print(f"{C.GREY}nothing moving more than {args.min_pct}%. "
               f"Run `harel collect --sources prices_stooq` first.{C.RESET}")
+    return 0
+
+
+def cmd_explain(args) -> int:
+    """Show the working behind one ranked item.
+
+    A day trader cannot outsource conviction. The feed says "this matters, 62";
+    this says which query found it, how much that source is worth, what time it
+    landed against the bell, why it is tagged with that symbol, how the 62 was
+    arrived at, who else has the story - and where to go and check.
+    """
+    result = _views(args).explain(args.uid)
+    if _emit(args, result):
+        return 0
+    if result.get("error"):
+        print(f"{C.RED}{result['error']}{C.RESET}")
+        if result.get("hint"):
+            print(f"{C.GREY}{result['hint']}{C.RESET}")
+        return 1
+
+    origin, when = result["where_it_came_from"], result["when"]
+    scored = result["how_it_scored"]
+
+    print(f"{C.BOLD}{result['title']}{C.RESET}")
+    print(f"{C.GREY}{result['uid']}{C.RESET}\n")
+
+    print(f"{C.BOLD}WHERE IT CAME FROM{C.RESET}")
+    print(f"  source     {origin['source']}  ({origin.get('source_label')})")
+    print(f"  trust      {origin.get('trust')}  {C.GREY}{origin.get('trust_means')}{C.RESET}")
+    print(f"  found by   {origin.get('found_by')}")
+    if origin.get("feed_url"):
+        print(f"  feed       {C.GREY}{origin['feed_url'][:130]}{C.RESET}")
+    print(f"  document   {C.GREY}{(result.get('url') or '-')[:130]}{C.RESET}\n")
+
+    print(f"{C.BOLD}WHEN{C.RESET}")
+    print(f"  published  {str(when.get('published_utc'))[:16]} UTC | "
+          f"{when.get('published_et')} | {when.get('published_israel')}"
+          f"   {C.GREY}({when.get('age_hours')}h ago, {when.get('session_at_publication')}){C.RESET}")
+    print(f"  bell       {when.get('vs_last_close')}")
+    lag = when.get("detection_lag_minutes")
+    if lag is not None:
+        colour = C.GREY if lag < 30 else C.AMBER
+        print(f"  we saw it  {colour}{lag} min after it was published{C.RESET}")
+    print()
+
+    print(f"{C.BOLD}WHO IT IS ABOUT{C.RESET}")
+    for link in result["who_it_is_about"]:
+        colour = REL_COLOR.get(link["relation"], C.GREY)
+        print(f"  {C.AMBER}{link['ticker']:<6}{C.RESET}{colour}{link['relation']:<14}"
+              f"{C.RESET}conf {link['confidence']:.2f}  score {link['score']:.1f}")
+        print(f"         {C.GREY}{link.get('why')}{C.RESET}")
+    print()
+
+    thresholds = scored["thresholds"]
+    print(f"{C.BOLD}HOW IT SCORED{C.RESET}  {scored['score']:.1f} {scored['tier']}"
+          f"   {C.GREY}NORMAL {thresholds['NORMAL']:.0f} | HIGH {thresholds['HIGH']:.0f}"
+          f" | ALERT {thresholds['ALERT']:.0f}{C.RESET}")
+    for step in scored["trace"]["item"]:
+        print(_trace_line(step))
+    for ticker, steps in scored["trace"]["per_ticker"].items():
+        print(f"  {C.AMBER}{ticker}{C.RESET}")
+        for step in steps:
+            print(_trace_line(step))
+    print()
+
+    carried = result["who_else_carried_it"]
+    print(f"{C.BOLD}WHO ELSE CARRIED IT{C.RESET}  x{carried['corroboration']} "
+          f"{C.GREY}({carried['counts']}){C.RESET}")
+    if not carried["members"]:
+        print(f"  {C.GREY}single-sourced{C.RESET}")
+    for member in carried["members"][:6]:
+        print(f"  {C.GREY}{member['source']:<18}{str(member.get('published_at'))[:16]}  "
+              f"{member['title'][:90]}{C.RESET}")
+    print()
+
+    for quote in result["what_the_tape_did"]:
+        print(f"{C.BOLD}TAPE{C.RESET}  {quote['ticker']} "
+              f"{quote.get('math') or 'no print stored'}  vol "
+              f"{quote.get('volume_multiple') or '-'}x ADV20")
+        print(f"  {C.GREY}{quote.get('provider')} · {quote.get('provider_note')}\n"
+              f"  {quote.get('freshness')}{C.RESET}")
+    print()
+
+    print(f"{C.BOLD}CHECK IT YOURSELF{C.RESET}")
+    for check in result["check_it_yourself"]:
+        print(f"  {check['label']}")
+        print(f"    {C.GREY}{check['url'][:140]}{C.RESET}")
+        print(f"    {C.GREY}{check['checks']}{C.RESET}")
+    return 0
+
+
+_OP_SYMBOL = {"base": "=", "multiply": "x", "add": "+", "cap": "!", "note": " "}
+
+
+def _trace_line(step: dict[str, str]) -> str:
+    """One step of the scoring trace. The operator lives in its own column, so
+    an "add" step must not also print its own leading + ("++4")."""
+    text = step["step"]
+    if step["kind"] == "add" and text.startswith("+"):
+        text = text[1:]
+    return f"  {_OP_SYMBOL.get(step['kind'], ' '):>2} {text}"
+
+
+def cmd_sources(args) -> int:
+    """Per source: is it live, how much does it return, when did it last work.
+
+    `doctor` answers "is anything broken". This answers "did we even look" -
+    which is the question behind every quiet screen.
+    """
+    report = _views(args).sources_report()
+    if _emit(args, report):
+        return 0
+    for warning in report["warnings"]:
+        print(f"{C.AMBER}! {warning[:150]}{C.RESET}")
+    if report["warnings"]:
+        print()
+    print(f"{C.GREY}{'SOURCE':<22}{'STATUS':<14}{'TRUST':>6}{'ITEMS':>7}"
+          f"{'LAG':>8}  LAST OK{C.RESET}")
+    for s in report["sources"]:
+        if not s["enabled"]:
+            status, colour = "off", C.GREY
+        elif not s["available"]:
+            status, colour = f"no {s['requires_key']}"[:13], C.RED
+        elif s["failing_endpoints"]:
+            status, colour = f"{s['failing_endpoints']} failing", C.RED
+        elif s["degraded"]:
+            status, colour = "degraded", C.AMBER
+        else:
+            status, colour = "live", C.GREEN
+        lag = s.get("median_lag_minutes")
+        lag_text = "-" if lag is None else f"{lag:.0f}m"
+        lag_colour = C.GREY if lag is None else (
+            C.GREEN if lag <= 20 else (C.RED if lag >= 90 else C.RESET))
+        print(f"{s['source'][:21]:<22}{colour}{status:<14}{C.RESET}{s['trust']:>6.2f}"
+              f"{s['items_last_run']:>7}{lag_colour}{lag_text:>8}{C.RESET}"
+              f"  {C.GREY}{str(s['last_ok_at'] or '-')[:16]}{C.RESET}")
+    print(f"\n{C.GREY}LAG = median minutes from publication to us, over items "
+          f"published in the last 24h.\n     It decides whether a source is "
+          f"tradeable or only informative.{C.RESET}")
     return 0
 
 
@@ -579,7 +734,10 @@ def _print_items(items: list[dict[str, Any]], show_reasons: bool = False) -> Non
               f"{C.AMBER}{it.get('ticker', ''):<6}{C.RESET}"
               f"{rel_color}{rel:<14}{C.RESET}"
               f"{C.GREY}{_ago(it['t']):>9}{C.RESET}  {it['title'][:118]}")
-        detail = f"        {C.GREY}{it['source']}{corr}"
+        # The uid prefix is what you type into `harel explain` to see where this
+        # came from and how it scored. A ranking you cannot interrogate is a
+        # ranking you have to take on faith.
+        detail = f"        {C.GREY}{it['uid'][:10]}  {it['source']}{corr}"
         if it.get("events"):
             detail += f" | {','.join(it['events'][:3])}"
         if it.get("why"):
