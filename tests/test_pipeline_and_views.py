@@ -875,3 +875,25 @@ def test_rescore_never_deletes_an_item_it_merely_failed_to_relink(config, db):
     assert db.tickers_for("seeded") == [], "an unevidenced search seed must be withdrawn"
     assert [l["ticker"] for l in db.tickers_for("from_issuer")] == ["TEVA"], \
         "an issuer feed's own seed is authoritative and must survive"
+
+
+def test_a_quiet_tape_never_renders_an_empty_feed_panel(ran, db):
+    """"Nothing above score 20" reads as a threshold artefact and leaves the
+    trader unable to tell a quiet tape from a broken pipeline - which is the one
+    distinction this page exists to make. On a Friday after the close, with
+    every recap correctly capped in the teens, the top of the basket genuinely
+    sits below 20."""
+    from harel.serve.terminal import render_terminal
+
+    _, views = ran
+    now = datetime.now(timezone.utc)
+    db.conn.execute("UPDATE items SET score = 12.0, tier = 'NOISE'")
+    db.conn.execute("UPDATE item_tickers SET score = 12.0")
+    db.conn.execute("UPDATE items SET published_at = ?", (now.isoformat(),))
+    db.conn.commit()
+
+    assert not views.feed(min_score=20, hours=24, limit=60)["items"]
+    page = render_terminal(views)
+    assert "quiet tape, not a blind one" in page
+    assert "Feed (below threshold)" in page
+    assert "items were collected and linked" in page

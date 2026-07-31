@@ -160,11 +160,20 @@ def render_terminal(views: Views) -> str:
     )
     parts.append(_section("News alerts (last 24h)", brief["alerts"], empty=empty_alerts))
     parts.append(_movers_section(moving["movers"]))
-    parts.append(_section(
-        "Feed", feed["items"],
-        empty=("nothing above score 20 in the last 24h"
-               if health["db"]["items"] else "database is empty - run `harel collect`"),
-    ))
+    if feed["items"]:
+        parts.append(_section("Feed", feed["items"]))
+    else:
+        # An empty panel is the one thing this page must never be. "Nothing
+        # above score 20" reads as a threshold artefact and leaves the trader
+        # unable to tell a quiet tape from a broken pipeline - which is the
+        # distinction the whole page exists to make. On a Friday evening after
+        # the close, with every recap and chart-generated piece correctly capped
+        # in the teens, the top of the basket genuinely sits below 20.
+        # Uncapped for the count: the feed keeps at most three per name, so the
+        # capped length understates how much actually came in - and this number
+        # is the whole point of the panel.
+        background = views.feed(min_score=0, hours=24, limit=400, max_per_ticker=None)
+        parts.append(_background_section(background["items"], health))
     if brief.get("tase_overnight"):
         parts.append(_section("TASE / MAYA overnight", brief["tase_overnight"]))
     parts.append(_calendar_section(brief.get("calendar_next_7d") or []))
@@ -210,6 +219,38 @@ def _section(title: str, items: list[dict[str, Any]], empty: str | None = None) 
         )
     rows.append("</table>")
     return f"<section><h2>{html.escape(title)}</h2>{''.join(rows)}</section>"
+
+
+def _background_section(items: list[dict[str, Any]], health: dict[str, Any]) -> str:
+    """What to show when nothing cleared the bar: the bar, and the best of what
+    is underneath it."""
+    if not items:
+        return _section(
+            "Feed", [],
+            empty=("nothing collected in the last 24h at all - check the sources "
+                   "page before assuming the market was quiet"
+                   if health["db"]["items"] else
+                   "database is empty - run `harel collect`"),
+        )
+    top = items[0]["score"]
+    note = (
+        f"<div class='warn'>Nothing scored above 20 in the last 24h - the best is "
+        f"{top:.1f}. This is a <b>quiet tape, not a blind one</b>: "
+        f"{len(items)} items were collected and linked in that window. "
+        f"The highest-scoring are below as background; none of them is a reason "
+        f"to act.</div>"
+    )
+    # One per name here: a dozen rows from one busy ticker would misrepresent a
+    # quiet basket as a busy one.
+    seen: set[str] = set()
+    shown = []
+    for item in items:
+        key = str(item.get("ticker") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        shown.append(item)
+    return note + _section("Feed (below threshold)", shown[:12])
 
 
 def _unexplained_section(alerts: list[dict[str, Any]]) -> str:
