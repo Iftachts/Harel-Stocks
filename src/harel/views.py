@@ -343,10 +343,39 @@ class Views:
                 f"ticker '{ticker}' is unresolved and is NOT being collected - "
                 f"{self.config.universe[ticker].resolution_hint}"
             )
+        # A source switched off in config disappeared from this panel entirely,
+        # so "24/29 sources live" could not be reconciled with what was on
+        # screen. A source that is off on purpose still has to be visible - the
+        # whole point of this panel is that silence and blindness look different.
+        for source in self.config.sources.values():
+            if source.enabled:
+                continue
+            note = " ".join((source.raw.get("notes") or "").split())
+            reason = note.split("OFF:", 1)[-1].strip() if "OFF:" in note else note
+            warnings.append(
+                f"source '{source.key}' is disabled in config"
+                + (f": {reason[:180]}" if reason else "")
+            )
+        # Failure counters are keyed "<source>:<url>" and survive a config edit,
+        # so a feed we have since fixed or switched off keeps reporting its old
+        # failures for ever. A warning nobody can act on trains you to ignore
+        # the panel, so only complain about feeds we are still actually polling.
+        live_urls = {u for s in self.config.sources.values() if s.enabled for u in s.feeds}
+        live_urls |= {u for t in self.config.active_tickers
+                      if self.config.ticker(t) for u in self.config.ticker(t).ir_feeds}
+
         for state in self.db.source_health():
-            if (state.get("consecutive_failures") or 0) >= 3:
-                warnings.append(
-                    f"source '{state['source']}' has failed "
-                    f"{state['consecutive_failures']} times: {state.get('last_error')}"
-                )
+            if (state.get("consecutive_failures") or 0) < 3:
+                continue
+            key = str(state["source"])
+            src_key, _, url = key.partition(":")
+            source = self.config.sources.get(src_key)
+            if source is None or not source.enabled:
+                continue                      # gone or already reported as disabled
+            if url and url not in live_urls:
+                continue                      # this URL is no longer configured
+            warnings.append(
+                f"source '{key}' has failed "
+                f"{state['consecutive_failures']} times: {state.get('last_error')}"
+            )
         return warnings

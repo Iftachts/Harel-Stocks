@@ -42,6 +42,33 @@ def ran(config, db):
     return report, Views(db=db, config=config)
 
 
+def test_a_source_switched_off_in_config_is_still_reported(ran):
+    """A disabled source used to vanish from the coverage panel entirely, so
+    "24/29 sources live" could not be reconciled with what was on screen. Off
+    on purpose still has to be visible - silence and blindness must look
+    different."""
+    report, views = ran
+    warnings = " | ".join(views._coverage_warnings())
+    disabled = [s.key for s in views.config.sources.values() if not s.enabled]
+    assert disabled, "the shipped config must have at least one disabled source"
+    for key in disabled:
+        assert key in warnings, f"disabled source {key} is invisible in the panel"
+
+
+def test_stale_failure_counters_do_not_warn_for_feeds_we_no_longer_poll(ran, db):
+    """Counters are keyed "<source>:<url>" and survive a config edit. A feed we
+    have since fixed or switched off would otherwise report its old failures for
+    ever, and a warning nobody can act on trains you to ignore the panel."""
+    report, views = ran
+    db.set_source_state("ema_news:https://www.ema.europa.eu/en/OLD-DEAD.xml",
+                        consecutive_failures=42, last_error="HTTP 404")
+    db.set_source_state("calcalist:https://www.calcalist.co.il/gone.xml",
+                        consecutive_failures=42, last_error="HTTP 403")
+    warnings = " | ".join(views._coverage_warnings())
+    assert "OLD-DEAD.xml" not in warnings, "stale URL should not raise a failure warning"
+    assert "has failed 42 times" not in warnings
+
+
 def test_last_session_close_tracks_the_bell_and_skips_weekends():
     from harel.views import MARKET_TZ, last_session_close
 

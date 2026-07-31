@@ -153,8 +153,14 @@ sources:
   ema_news:
     kind: rss
     label: EMA news & CHMP outcomes
+    # Verified live. The old /en/rss.xml 404s; EMA publishes one feed per topic
+    # and lists them at /en/news-events/rss-feeds. new-human-medicine is the
+    # valuable one for this basket: an EPAR for a rival molecule is read-across
+    # for TEVA/CGEN/ORMP/KMDA/OPK.
     feeds:
-      - https://www.ema.europa.eu/en/rss.xml
+      - https://www.ema.europa.eu/en/news.xml
+      - https://www.ema.europa.eu/en/new-human-medicine-new.xml
+      - https://www.ema.europa.eu/en/withdrawn-applications.xml
     trust: 1.0
     latency: daily
     poll_sec: 3600
@@ -204,12 +210,21 @@ sources:
   dsca_fms:
     kind: rss
     label: DSCA foreign military sale notifications
+    enabled: false
     feeds:
       - https://www.dsca.mil/major-arms-sales/rss.xml
     trust: 1.0
     latency: daily
     poll_sec: 7200
     fragile: true
+    notes: >
+      OFF: dsca.mil returns 403 to this host on every path, including the site
+      root and paths that do not exist - it is blocking the client, not missing
+      the feed, so no URL fixes it. Checked defense.gov's news RSS as a stand-in
+      and rejected it: it carries general DoD stories (chaplaincy, medicine),
+      which would inject noise into ESLT's sector-regulation lane rather than
+      arms-transfer signal. Re-enable if the block lifts; DoD contract awards
+      still arrive via dod_contracts.
 
   faa_ads:
     kind: federal_register
@@ -230,9 +245,12 @@ sources:
 
   ferc_filings:
     kind: rss
-    label: FERC news & orders
+    label: FERC accepted filings
+    # Verified live (~650 entries). The old news RSS 404s - FERC moved its feed
+    # to the eCollection API, which is the better source anyway: accepted
+    # filings rather than press releases, which is what moves KEN and ORA.
     feeds:
-      - https://www.ferc.gov/news-events/news/rss.xml
+      - https://ecollection.ferc.gov/api/rssfeed
     trust: 1.0
     latency: daily
     poll_sec: 7200
@@ -241,12 +259,18 @@ sources:
   echa_reach:
     kind: rss
     label: ECHA / EU REACH news
+    enabled: false
     feeds:
       - https://echa.europa.eu/-/asset_publisher/rss
     trust: 0.9
     latency: weekly
     poll_sec: 43200
     fragile: true
+    notes: >
+      OFF: echa.europa.eu returns 403 to this host on every path including the
+      root, so the client is blocked rather than the feed moved. ICL's bromine
+      and flame-retardant exposure is still covered through federal_register
+      (TSCA) and its themes.
 
   # --------------------------------------------------------------- markets ---
   prices_stooq:
@@ -305,12 +329,18 @@ sources:
   calcalist:
     kind: rss
     label: Calcalist (Hebrew business daily)
+    enabled: false
     feeds:
       - https://www.calcalist.co.il/GeneralRSS/0,16335,L-8,00.xml
     trust: 0.7
     latency: minutes
     poll_sec: 600
     fragile: true
+    notes: >
+      OFF: calcalist.co.il returns 403 to this host on every path including the
+      root. Tried the calcalistech.com feeds as an alternative - 404. Hebrew
+      business coverage still arrives via globes and google_news_he. Re-enable
+      if a working feed URL turns up.
 
   # ------------------------------------------------------- optional / paid ---
   courtlistener:
