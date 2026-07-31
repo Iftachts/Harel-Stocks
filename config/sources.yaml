@@ -218,9 +218,10 @@ sources:
     poll_sec: 7200
     fragile: true
     notes: >
-      OFF: dsca.mil returns 403 to this host on every path, including the site
-      root and paths that do not exist - it is blocking the client, not missing
-      the feed, so no URL fixes it. Checked defense.gov's news RSS as a stand-in
+      OFF: dsca.mil blocks this host. 403 on every path including the site root.
+      Retried with a full browser header set (Accept, Accept-Language,
+      Sec-Fetch-*): the feed path turns 404 but HTML pages still 403, so the
+      block is at the edge and no URL or header fixes it. Checked defense.gov's news RSS as a stand-in
       and rejected it: it carries general DoD stories (chaplaincy, medicine),
       which would inject noise into ESLT's sector-regulation lane rather than
       arms-transfer signal. Re-enable if the block lifts; DoD contract awards
@@ -267,8 +268,8 @@ sources:
     poll_sec: 43200
     fragile: true
     notes: >
-      OFF: echa.europa.eu returns 403 to this host on every path including the
-      root, so the client is blocked rather than the feed moved. ICL's bromine
+      OFF: echa.europa.eu blocks this host - 403 on every path including the
+      root, and unchanged by a full browser header set, so it is not the URL. ICL's bromine
       and flame-retardant exposure is still covered through federal_register
       (TSCA) and its themes.
 
@@ -337,8 +338,9 @@ sources:
     poll_sec: 600
     fragile: true
     notes: >
-      OFF: calcalist.co.il returns 403 to this host on every path including the
-      root. Tried the calcalistech.com feeds as an alternative - 404. Hebrew
+      OFF: calcalist.co.il blocks this host. 403 on every path including the
+      root; a full browser header set turns the feed path 404 but leaves pages
+      403. Tried the calcalistech.com feeds as an alternative - 404. Hebrew
       business coverage still arrives via globes and google_news_he. Re-enable
       if a working feed URL turns up.
 
@@ -363,9 +365,15 @@ sources:
     poll_sec: 300
     enabled: false
     notes: >
-      Analyst upgrades/downgrades are a top-3 intraday mover and have NO free,
-      reliable, licence-clean source. See docs/LIMITATIONS.md - this is the
-      single largest quality gap vs Bloomberg.
+      OFF: needs a PAID key. Analyst upgrades/downgrades are a top-3 intraday
+      mover, and this feed is the only way to get them completely and within
+      seconds. But "no free source at all" overstates it: the wires do carry
+      them, and google_news now asks for them by name for every ticker
+      ("<company> upgrade OR downgrade OR price target"), which took coverage
+      from 13 items across 5 names to 16 across 8 - including a Morgan Stanley
+      target cut on NICE and a Barclays cut on ICL that nothing had surfaced
+      before. What the paid feed buys is latency and completeness, not
+      existence. See docs/LIMITATIONS.md.
 
   finnhub:
     kind: finnhub
@@ -376,4 +384,11 @@ sources:
     latency: realtime
     poll_sec: 300
     enabled: false
-    notes: Free tier covers earnings calendar + basic news; ratings need a paid plan.
+    notes: >
+      OFF: no collector is implemented for kind=finnhub yet, so this entry is a
+      placeholder - enabling it would silently do nothing (build_collectors skips
+      an unknown kind). Worth building: the FREE tier covers the earnings
+      calendar, which is docs/LIMITATIONS.md gap 4 and still unfilled, because
+      MAYA's own report-schedule endpoint is behind the pending TASE
+      subscription. A free key takes a minute at finnhub.io. Ratings need a paid
+      plan and are partly covered free already - see benzinga_ratings.

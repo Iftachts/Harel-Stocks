@@ -100,6 +100,18 @@ class RssCollector(Collector):
             out.append((base.replace("{q}", quote_plus(query)), [ticker], "DIRECT",
                         f"{ticker} news"))
 
+            # Analyst actions are a top-3 intraday mover and the paid feed for
+            # them is the largest documented gap in this system. They do reach
+            # us free through the wires - 13 were already classified as
+            # rating_change - but only by accident, whenever an aggregator
+            # happened to surface one. Asking for them directly turns that from
+            # incidental into deliberate coverage for all 22 names.
+            if not hebrew:
+                rating_q = (f'"{tc.name}" (upgrade OR downgrade OR '
+                            f'"price target" OR "initiated coverage")')
+                out.append((base.replace("{q}", quote_plus(rating_q)), [ticker],
+                            "DIRECT", f"{ticker} analyst actions"))
+
             # Cross-read needs competitor CONTENT, not just competitor rules.
             # Every other query here is seeded from our own names, so the only
             # rival stories we ever saw were ones that already mentioned us -
