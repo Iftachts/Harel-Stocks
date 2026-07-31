@@ -141,6 +141,11 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="every source: trust, items last pass, last success")
     sr.set_defaults(handler=cmd_sources)
 
+    rs = sub.add_parser("rescore",
+                        help="re-apply the current config to what is already stored")
+    rs.add_argument("--hours", type=float, default=168.0)
+    rs.set_defaults(handler=cmd_rescore)
+
     sv = sub.add_parser("serve", help="REST API + HTML terminal")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
@@ -377,6 +382,23 @@ def cmd_moving(args) -> int:
     if not result["movers"]:
         print(f"{C.GREY}nothing moving more than {args.min_pct}%. "
               f"Run `harel collect --sources prices_stooq` first.{C.RESET}")
+    return 0
+
+
+def cmd_rescore(args) -> int:
+    """Apply the current scoring/universe config to already-collected items.
+
+    Without this, tuning is unfalsifiable: you tighten a noise cap because one
+    headline outranks real news, and that headline keeps its old score until it
+    is re-collected - which, for a filing, is never.
+    """
+    result = Pipeline(config=get_config(), db=Database(args.db),
+                      lookback_hours=args.hours).rescore(since_hours=args.hours)
+    if _emit(args, result):
+        return 0
+    print(f"examined {result['examined']} items, "
+          f"{C.AMBER}{result['rescored']}{C.RESET} changed score, "
+          f"{result['dropped']} no longer link to the universe")
     return 0
 
 

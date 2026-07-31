@@ -40,10 +40,41 @@ def test_every_active_ticker_can_do_cross_read(config):
     צולבת". peer_names and themes were already enforced; competitor_products was
     not, and 17 of 22 names shipped without it, which made PRODUCT_RIVAL
     read-across impossible for them by construction.
+
+    What has to hold is that a cross-read QUERY exists for every name - not that
+    it comes from one particular field. Demanding competitor_products from every
+    name is how KEN, a merchant power holding company with no product rivals,
+    ended up listing its peer companies as "products" and scoring an NRG
+    earnings preview as a Kenon product-rival event.
     """
-    missing = [t for t in config.active_tickers
-               if not config.ticker(t).competitor_products]
-    assert missing == [], f"no competitor_products for {missing} - no cross-read possible"
+    from harel.collect.rss import _cross_read_terms
+
+    missing = []
+    for ticker in config.active_tickers:
+        tc = config.ticker(ticker)
+        relation = "PRODUCT_RIVAL" if tc.competitor_products else "PEER"
+        if not _cross_read_terms(tc, relation):
+            missing.append(ticker)
+    assert missing == [], f"no cross-read query possible for {missing}"
+
+
+def test_peer_companies_are_not_declared_as_products(config):
+    """`competitor_products` means a rival PRODUCT - a molecule, a design socket,
+    a named platform - because it is tagged PRODUCT_RIVAL at 0.85, close to
+    DIRECT. Bare peer company names in that field are the same claim as PEER at
+    twice the weight, and a peer's routine quarterly then outranks real news."""
+    for ticker in config.active_tickers:
+        tc = config.ticker(ticker)
+        if not tc.competitor_products:
+            continue
+        peers = {p.lower() for p in tc.peer_names}
+        bare = [p for p in tc.competitor_products if p.lower() in peers]
+        # A device brand that is also the company name (NeuroStar, Magstim) is a
+        # legitimate product term, so allow a minority overlap and catch the
+        # case where the field is simply a copy of peer_names.
+        assert len(bare) < len(tc.competitor_products) * 0.6, (
+            f"{ticker}: competitor_products is mostly peer company names {bare}"
+        )
 
 
 def test_holdings_filler_is_noise_but_real_news_is_not(config):

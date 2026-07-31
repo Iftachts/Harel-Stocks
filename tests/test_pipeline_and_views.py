@@ -506,3 +506,143 @@ def test_detection_lag_measures_speed_not_the_backfill(db):
     stats = db.detection_lag(hours=6)["google_news"]
     assert stats["items"] == 2, "backfilled and future-stamped items must not count"
     assert stats["median_minutes"] == pytest.approx(6, abs=1)
+
+
+# --------------------------------------------------------------------------- #
+# Content classification: an effect is not a cause, and a marketing page is not
+# news. Every case below came off the live terminal.
+# --------------------------------------------------------------------------- #
+def test_a_story_published_midsession_is_not_after_the_bell(ran, db):
+    """The cutoff was always the last completed close, but the price on screen
+    is whatever the snapshot holds. Mid-session that is *today's* live move, so
+    a story published at 13:40 ET today - hours before the print it is compared
+    with - was stamped "after the bell, not a cause". The bell had not rung."""
+    from harel.models import PriceSnapshot
+
+    _, views = ran
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="TSEM", asof=now, last=100.0, prev_close=94.0,
+                                change_pct=6.4, session="regular", provider="yahoo"))
+    db.conn.execute(
+        "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, title, "
+        "url, published_at, collected_at, score, tier) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("midsession", "globes", "rss", "midsession", "Tower wins a foundry order",
+         "https://example.com/x", (now - timedelta(hours=1)).isoformat(),
+         now.isoformat(), 60.0, "HIGH"),
+    )
+    db.conn.execute(
+        "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, why, "
+        "score) VALUES (?,?,?,?,?,?)",
+        ("midsession", "TSEM", "DIRECT", 0.95, "test", 60.0),
+    )
+    db.conn.commit()
+
+    tsem = next(m for m in views.whats_moving(min_abs_pct=1.0)["movers"]
+                if m["ticker"] == "TSEM")
+    titles = [d["title"] for d in tsem["drivers"]]
+    assert "Tower wins a foundry order" in titles, tsem
+    assert not tsem["after_the_bell"], "nothing is after a bell that has not rung"
+
+
+def test_post_move_commentary_is_never_offered_as_the_cause(ran, db):
+    """Quiver and MarketBeat generate an article BECAUSE the stock moved, quote
+    the move back at you, then guess at reasons. Offering one as the driver of
+    the move it describes is circular."""
+    from harel.models import PriceSnapshot
+
+    _, views = ran
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="NICE", asof=now, last=100.0, prev_close=94.0,
+                                change_pct=6.4, session="regular", provider="yahoo"))
+    db.conn.execute(
+        "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, title, "
+        "url, published_at, collected_at, score, tier) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("recap", "google_news", "rss", "recap",
+         "NICE Shares Gap Up - What's Next for Investors?",
+         "https://example.com/r", (now - timedelta(hours=1)).isoformat(),
+         now.isoformat(), 40.0, "NORMAL"),
+    )
+    db.conn.execute(
+        "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, why, "
+        "score) VALUES (?,?,?,?,?,?)",
+        ("recap", "NICE", "DIRECT", 0.95, "test", 40.0),
+    )
+    db.conn.commit()
+
+    nice = next(m for m in views.whats_moving(min_abs_pct=1.0)["movers"]
+                if m["ticker"] == "NICE")
+    assert not any("Gap Up" in d["title"] for d in nice["drivers"])
+    assert any("Gap Up" in c["title"] for c in nice["post_move_commentary"])
+    assert nice["explained"] is False, "a recap must not mark a move as explained"
+
+
+def test_an_unexplained_move_clear_of_its_sector_raises_an_alert(ran, db):
+    """The feed is built from stories, so a day with no story produced no alert
+    however violently the tape moved. TSEM +6.2% against SOXX +1.2%, nothing
+    behind it, is exactly what has to be raised - and "0 alerts" was wrong."""
+    from harel.models import PriceSnapshot
+
+    _, views = ran
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="SOXX", asof=now, last=100.0, prev_close=98.8,
+                                change_pct=1.2, session="regular", provider="yahoo"))
+    db.save_price(PriceSnapshot(ticker="TSEM", asof=now, last=100.0, prev_close=94.2,
+                                change_pct=6.2, volume_multiple=0.6,
+                                session="regular", provider="yahoo"))
+    db.conn.commit()
+
+    alerts = views.whats_moving(min_abs_pct=1.0)["unexplained"]
+    tsem = next((a for a in alerts if a["ticker"] == "TSEM"), None)
+    assert tsem is not None, "an unexplained 5pp outperformance must raise an alert"
+    assert "UNEXPLAINED RELATIVE MOVE" in tsem["headline"]
+    assert "SOXX" in tsem["headline"] and "+5.0pp" in tsem["headline"]
+    assert tsem["checked"], "must say what was looked for and not found"
+    assert views.morning_brief(hours=24)["unexplained_moves"], "must reach the brief"
+
+
+def test_an_undated_feed_entry_cannot_masquerade_as_breaking_news(config, db):
+    """BrainsWay's site feed put an entry literally titled "Title" into the feed
+    as one-minute-old news at issuer trust, because an undated entry was stamped
+    "now" and nothing recorded that we had invented the timestamp."""
+    from harel.enrich.materiality import MaterialityScorer
+    from harel.models import Link, RawItem
+
+    scorer = MaterialityScorer(config)
+    now = datetime.now(timezone.utc)
+    item = RawItem(
+        source="company_ir_rss", source_kind="rss", external_id="undated",
+        title="Connecting Millions of People in Mexico", url="https://example.com/c",
+        summary="", published_at=now, meta={"undated": True},
+    )
+    scored = scorer.score(item, [Link("GILT", "DIRECT", 0.95, "test")], now=now)
+    assert scored.score <= MaterialityScorer.UNDATED_CAP, scored.reasons
+    assert scored.tier == "NOISE"
+
+
+def test_a_passive_13g_is_not_insider_activity(config):
+    """A 13G is an index fund crossing 5%; a 13D is an activist. EDGAR labels
+    them "SCHEDULE 13G", not "SC 13G", so the cap never fired and fourteen of
+    them scored 40 as insider moves."""
+    from harel.enrich.materiality import MaterialityScorer
+    from harel.models import Link, RawItem
+
+    scorer = MaterialityScorer(config)
+    now = datetime.now(timezone.utc)
+    for form in ("SCHEDULE 13G", "SCHEDULE 13G/A"):
+        item = RawItem(
+            source="sec_edgar_submissions", source_kind="edgar_submissions",
+            external_id=form, title=f"[{form}] ORMAT TECHNOLOGIES, INC.",
+            url="https://example.com/13g", summary="", published_at=now,
+            meta={"form_type": form},
+        )
+        scored = scorer.score(item, [Link("ORA", "DIRECT", 0.97, "test")], now=now)
+        assert scored.score <= 20, f"{form} scored {scored.score}: {scored.reasons}"
+
+    activist = RawItem(
+        source="sec_edgar_submissions", source_kind="edgar_submissions",
+        external_id="13d", title="[SC 13D] ORMAT TECHNOLOGIES, INC.",
+        url="https://example.com/13d", summary="", published_at=now,
+        meta={"form_type": "SC 13D"},
+    )
+    scored = scorer.score(activist, [Link("ORA", "DIRECT", 0.97, "test")], now=now)
+    assert scored.score > 25, "an activist stake IS material"

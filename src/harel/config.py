@@ -143,6 +143,10 @@ class ScoringConfig:
     events: list[EventRule]
     noise_form_types: dict[str, float]
     noise_title_patterns: list[NoisePattern]
+    # Articles written because the price already moved. Capped like noise, and
+    # separately used by `whats_moving` to keep an effect from being presented
+    # as a cause. One list, both uses.
+    reactive_patterns: list[NoisePattern]
     noise_hard_cap_default: float
     require_corroboration_below_trust: float
     corroboration_cap: float
@@ -330,17 +334,23 @@ def load_config(config_dir: Path | str | None = None) -> Config:
     events.sort(key=lambda e: e.base, reverse=True)
 
     noise = sco_raw.get("noise") or {}
-    noise_titles = [
-        NoisePattern(pattern=re.compile(np["pattern"], re.IGNORECASE | re.UNICODE),
-                     cap=float(np.get("cap", 12)))
-        for np in (noise.get("title_patterns") or [])
-    ]
+
+    def _noise_patterns(key: str) -> list[NoisePattern]:
+        return [
+            NoisePattern(pattern=re.compile(np["pattern"], re.IGNORECASE | re.UNICODE),
+                         cap=float(np.get("cap", 12)))
+            for np in (noise.get(key) or [])
+        ]
+
+    noise_titles = _noise_patterns("title_patterns")
+    reactive = _noise_patterns("reactive_patterns")
 
     scoring = ScoringConfig(
         tiers={k: float(v) for k, v in (sco_raw.get("tiers") or {}).items()},
         events=events,
         noise_form_types={k.upper(): float(v) for k, v in (noise.get("form_types") or {}).items()},
         noise_title_patterns=noise_titles,
+        reactive_patterns=reactive,
         noise_hard_cap_default=float(noise.get("hard_cap_default", 12)),
         require_corroboration_below_trust=float(
             noise.get("require_corroboration_below_trust", 0.7)

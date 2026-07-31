@@ -76,6 +76,10 @@ a:hover { text-decoration: underline; }
   padding: 6px 10px; margin-bottom: 6px; color: #ffcf7a; font-size: 12px;
 }
 .empty { color: #6b6b6b; font-style: italic; padding: 6px 0; }
+.tape {
+  border-left: 3px solid #ff4d4d; background: #170a0a;
+  padding: 6px 10px; margin-bottom: 6px; color: #ffb3b3; font-size: 12px;
+}
 .dig {
   color: #5fd7ff; font-size: 10px; border: 1px solid #24404a;
   border-radius: 2px; padding: 0 4px; margin-left: 6px; white-space: nowrap;
@@ -145,11 +149,16 @@ def render_terminal(views: Views) -> str:
             parts.append(f"<div class='warn'>{html.escape(short)}</div>")
         parts.append("</section>")
 
+    # Tape alerts come first. A move that outran its sector with nothing behind
+    # it is the most urgent thing on the page precisely BECAUSE there is no
+    # story - and a news feed, by construction, could never raise it.
+    parts.append(_unexplained_section(brief.get("unexplained_moves") or []))
+
     empty_alerts = (
-        "no alerts in the last 24h"
+        "no news alerts in the last 24h"
         if health["db"]["items"] else "database is empty - run `harel collect`"
     )
-    parts.append(_section("Alerts (last 24h)", brief["alerts"], empty=empty_alerts))
+    parts.append(_section("News alerts (last 24h)", brief["alerts"], empty=empty_alerts))
     parts.append(_movers_section(moving["movers"]))
     parts.append(_section(
         "Feed", feed["items"],
@@ -203,6 +212,28 @@ def _section(title: str, items: list[dict[str, Any]], empty: str | None = None) 
     return f"<section><h2>{html.escape(title)}</h2>{''.join(rows)}</section>"
 
 
+def _unexplained_section(alerts: list[dict[str, Any]]) -> str:
+    """The tape moved and we found nothing. Stated as a question, not a cause."""
+    if not alerts:
+        return ""
+    rows = []
+    for a in alerts:
+        catalyst = a.get("next_catalyst")
+        tail = f" &middot; {html.escape(a['checked'])}"
+        if catalyst:
+            tail += (f" &middot; next known date: {html.escape(catalyst['date'])} "
+                     f"{html.escape(catalyst['label'][:60])}")
+        rows.append(
+            f"<div class='tape'><b>{html.escape(a['headline'])}</b>"
+            f"<div class='why'>no verified catalyst{tail}</div></div>"
+        )
+    return ("<section><h2>Unexplained moves</h2>" + "".join(rows)
+            + "<p class='note'>These are questions, not findings. The tape moved "
+              "clear of its sector and nothing we read explains it: check the "
+              "order book, options flow and any pending catalyst before "
+              "assuming there is news we missed.</p></section>")
+
+
 def _movers_section(movers: list[dict[str, Any]]) -> str:
     if not movers:
         return ""
@@ -246,6 +277,15 @@ def _movers_section(movers: list[dict[str, Any]]) -> str:
                 f"<div class='why'>after the bell &middot; not a cause of this move: "
                 f"<a href='{html.escape(late.get('url') or '#')}' target='_blank' "
                 f"rel='noreferrer'>{html.escape(late['title'])[:120]}</a></div>"
+            )
+        # Written because the price moved. Shown, because a trader will find it
+        # anyway and needs to know we classified it rather than missed it.
+        for recap in (m.get("post_move_commentary") or [])[:1]:
+            driver += (
+                f"<div class='why'>post-move commentary &middot; reactive, not a catalyst: "
+                f"<a href='{html.escape(recap.get('url') or '#')}' target='_blank' "
+                f"rel='noreferrer'>{html.escape(recap['title'])[:120]}</a>"
+                f"{_dig(recap.get('uid'))}</div>"
             )
         rows.append(
             f"<tr class='item'><td class='tkr'>{html.escape(m['ticker'])}</td>"

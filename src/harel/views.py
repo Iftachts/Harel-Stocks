@@ -287,7 +287,6 @@ class Views:
     def whats_moving(self, min_abs_pct: float = 2.0) -> dict[str, Any]:
         """Price movers joined with their best explanation."""
         movers = []
-        cutoff = last_session_close()
         for ticker in self.config.active_tickers:
             price = self.db.latest_price(ticker)
             if not price or price.get("change_pct") is None:
@@ -306,9 +305,24 @@ class Views:
                 # circular, and it is not an after-hours catalyst either.
                 if (r.get("meta") or {}).get("kind") != "unexplained_move"
             ]
+            # Written *because* the price moved. An effect cannot be offered as
+            # the cause, so these leave the driver list entirely and are shown
+            # for what they are. Collected below the driver threshold on
+            # purpose: capping them as noise is what stops them ranking, and if
+            # that also made them invisible the reader would go looking for the
+            # article they can see on Twitter and conclude we had missed it.
+            commentary = [
+                r for r in self.db.feed(tickers=[ticker], min_score=0,
+                                        since_hours=30, limit=12)
+                if self._is_reactive(r)
+            ]
+            candidates = [r for r in candidates if not self._is_reactive(r)]
+
             # A story published after the closing bell cannot have caused the
             # move that bell ended. Keep it - it is tomorrow's catalyst - but
-            # never offer it as this move's explanation.
+            # never offer it as this move's explanation. Which bell, though,
+            # depends on the print we are explaining: see _driver_cutoff.
+            cutoff = self._driver_cutoff(price)
             drivers = [r for r in candidates
                        if (p := _published_utc(r)) is None or p <= cutoff]
             after_bell = [r for r in candidates
@@ -336,9 +350,65 @@ class Views:
                 "explained": bool(drivers),
                 "drivers": [_compact(r) for r in drivers[:3]],
                 "after_the_bell": [_compact(r) for r in after_bell[:3]],
+                "post_move_commentary": [_compact(r) for r in commentary[:3]],
             })
         movers.sort(key=lambda m: abs(m["change_pct"]), reverse=True)
-        return {"asof": datetime.now(timezone.utc).isoformat(), "movers": movers}
+        return {"asof": datetime.now(timezone.utc).isoformat(), "movers": movers,
+                "unexplained": self._unexplained_alerts(movers)}
+
+    # A move this far clear of its sector, with nothing to point at, is the
+    # question of the session - "what do they know?" - and it is not news, so
+    # nothing in a news feed was ever going to raise it.
+    UNEXPLAINED_RELATIVE_PCT = 3.0
+
+    def _unexplained_alerts(self, movers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Moves that outran their sector with no verified catalyst.
+
+        The feed is built from stories, so a day with no story produced no
+        alert - however violently the tape moved. TSEM +6.2% against SOXX +1.2%,
+        with nothing behind it and results four days out, is precisely what a
+        short-term trader needs raised, and "0 alerts" was the wrong answer.
+
+        Deliberately *not* scored: this is the absence of information, and a
+        materiality score computed from an absent story would be fiction.
+        """
+        out = []
+        for mover in movers:
+            if mover["drivers"]:
+                continue
+            relative = mover.get("relative_pct")
+            magnitude = abs(relative) if relative is not None else abs(mover["change_pct"])
+            if magnitude < self.UNEXPLAINED_RELATIVE_PCT:
+                continue
+
+            bits = [f"{mover['ticker']} {mover['change_pct']:+.1f}%"]
+            if relative is not None:
+                bits.append(f"{relative:+.1f}pp vs {mover['benchmark']} "
+                            f"({mover['benchmark_pct']:+.1f}%)")
+            if mover.get("volume_multiple"):
+                bits.append(f"{mover['volume_multiple']:.1f}x volume")
+            out.append({
+                "ticker": mover["ticker"],
+                "kind": "unexplained_relative_move",
+                "headline": "UNEXPLAINED RELATIVE MOVE - " + " | ".join(bits),
+                "change_pct": mover["change_pct"],
+                "relative_pct": relative,
+                "volume_multiple": mover.get("volume_multiple"),
+                "session": mover.get("session"),
+                # Say what we looked at and did not find, so this reads as a
+                # question rather than as a claim.
+                "checked": "no company story above score 20 in the last 30h",
+                "post_move_commentary": mover.get("post_move_commentary") or [],
+                "next_catalyst": self._next_catalyst(mover["ticker"]),
+            })
+        out.sort(key=lambda a: abs(a.get("relative_pct") or a["change_pct"]), reverse=True)
+        return out
+
+    def _next_catalyst(self, ticker: str) -> dict[str, Any] | None:
+        """The nearest known date. Positioning ahead of results is the most
+        common benign explanation for a move nobody can source."""
+        entries = self.db.calendar([ticker], days_ahead=21)
+        return entries[0] if entries else None
 
     # --------------------------------------------------- morning brief ---- #
     def morning_brief(self, hours: float = 16.0) -> dict[str, Any]:
@@ -358,13 +428,18 @@ class Views:
             r for r in self.db.feed(min_score=25, since_hours=hours, limit=60)
             if r["source"] == "maya_tase"
         ]
+        moving = self.whats_moving(min_abs_pct=2.5)
         return {
             "asof": datetime.now(timezone.utc).isoformat(),
             "window_hours": hours,
             "alerts": [_compact(r, include_reasons=True) for r in alerts],
+            # Tape alerts are not news alerts and were never going to come out
+            # of a news feed. A basket can be violently repriced on a day when
+            # nobody publishes anything.
+            "unexplained_moves": moving["unexplained"],
             "high": [_compact(r) for r in high[:20]],
             "tase_overnight": [_compact(r) for r in overnight_tase[:15]],
-            "movers": self.whats_moving(min_abs_pct=2.5)["movers"][:10],
+            "movers": moving["movers"][:10],
             "calendar_next_7d": self.db.calendar(days_ahead=7),
             "coverage_warnings": self._coverage_warnings(),
         }
@@ -509,6 +584,37 @@ class Views:
                 "meta": meta,
             },
         }
+
+    # ------------------------------------------------- driver plumbing ---- #
+    def _driver_cutoff(self, price: dict[str, Any]) -> datetime:
+        """The latest a story can have been published and still explain *this*
+        print.
+
+        The bug this fixes: the cutoff was always the last completed close, but
+        the price on screen is whatever the last snapshot holds. Mid-session
+        that snapshot is *today's* live move, so a story published at 13:40 ET
+        today - hours before the print it is being compared with - was stamped
+        "after the bell, not a cause". The bell in question had not rung.
+
+        While a session is running, everything published up to now precedes the
+        current print. Only once trading is over does "after the close" mean
+        anything.
+        """
+        if str(price.get("session") or "").lower() in ("premarket", "regular"):
+            return datetime.now(timezone.utc)
+        return last_session_close()
+
+    def _is_reactive(self, row: dict[str, Any]) -> bool:
+        """Was this written because the price moved?
+
+        Checked against the config patterns at read time rather than trusting
+        `meta.reactive_recap` alone, so it applies to everything already stored
+        instead of only to what has been re-scored since.
+        """
+        if (row.get("meta") or {}).get("reactive_recap"):
+            return True
+        title = row.get("title") or ""
+        return any(p.pattern.search(title) for p in self.config.scoring.reactive_patterns)
 
     def _verify_links(self, row: dict[str, Any], tickers: Sequence[str]) -> list[dict[str, str]]:
         """Outside places to confirm this, none of which are us."""

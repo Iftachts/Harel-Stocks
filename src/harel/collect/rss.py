@@ -66,14 +66,13 @@ class RssCollector(Collector):
         return plan
 
     def _required_terms(self, seed_tickers: list[str], seed_relation: str) -> list[str]:
-        """Terms a rival-product result must actually contain to keep its tag."""
-        if seed_relation != "PRODUCT_RIVAL" or len(seed_tickers) != 1:
+        """Terms a cross-read result must actually contain to keep its tag."""
+        if seed_relation not in ("PRODUCT_RIVAL", "PEER") or len(seed_tickers) != 1:
             return []
         tc = self.cfg.ticker(seed_tickers[0])
         if not tc:
             return []
-        return [r.lower() for r in tc.competitor_products
-                if len(r) >= 5][:MAX_RIVAL_TERMS_PER_QUERY]
+        return _cross_read_terms(tc, seed_relation)
 
     def _query_plan(self, base: str) -> list[tuple[str, list[str], str, str]]:
         hebrew = "hl=iw" in base or self.source.key.endswith("_he")
@@ -118,12 +117,20 @@ class RssCollector(Collector):
             # which is why PRODUCT_RIVAL stayed empty for every name whose
             # rivals do not file with the SEC or register trials.
             if not hebrew:
-                rivals = [r for r in tc.competitor_products
-                          if len(r) >= 5][:MAX_RIVAL_TERMS_PER_QUERY]
-                if rivals:
-                    rival_q = " OR ".join(f'"{r}"' for r in rivals)
+                # Named rival PRODUCTS where they exist. Where they do not - a
+                # merchant power generator has peers, not product rivals - fall
+                # back to the peer companies and label the result PEER, which
+                # carries a lower multiplier. The alternative, listing peer
+                # companies as "products", scored an NRG earnings preview as a
+                # Kenon product-rival event at 36.
+                relation = "PRODUCT_RIVAL" if tc.competitor_products else "PEER"
+                terms = _cross_read_terms(tc, relation)
+                if terms:
+                    rival_q = " OR ".join(f'"{t}"' for t in terms)
                     out.append((base.replace("{q}", quote_plus(rival_q)), [ticker],
-                                "PRODUCT_RIVAL", f"{ticker} rival products"))
+                                relation,
+                                f"{ticker} rival products" if relation == "PRODUCT_RIVAL"
+                                else f"{ticker} peer companies"))
 
         if not hebrew:
             for sector_key in {self.cfg.ticker(t).sector for t in self.active_tickers
@@ -185,15 +192,17 @@ class RssCollector(Collector):
                 continue
             if required:
                 haystack = f"{item.title} {item.summary}".lower()
-                hit = next((t for t in required if t in haystack), None)
+                hit = next((t for t in required if t.lower() in haystack), None)
                 if hit is None:
                     continue
                 # Record the term that earned the tag. Without it the link reads
                 # "collected from google_news as product_rival", which asks the
                 # reader to take the competitor claim on trust.
+                kind = ("a rival product" if seed_relation == "PRODUCT_RIVAL"
+                        else "a peer company")
                 item.meta["matched_term"] = hit
                 item.meta["seed_why"] = (
-                    f'the story names "{hit}", tracked as a rival product for '
+                    f'the story names "{hit}", tracked as {kind} for '
                     f'{seed_tickers[0]}'
                 )
             elif seed_tickers:
@@ -215,7 +224,7 @@ class RssCollector(Collector):
         if not title:
             return None
         link = entry.get("link") or entry.get("id") or ""
-        published = _entry_datetime(entry)
+        published, dated = _entry_datetime(entry)
 
         summary = entry.get("summary") or ""
         if not summary and entry.get("content"):
@@ -235,20 +244,39 @@ class RssCollector(Collector):
             meta={
                 "feed": feed_url,
                 "feed_label": label,
+                **({} if dated else {"undated": True}),
                 "publisher": (entry.get("source") or {}).get("title")
                 if isinstance(entry.get("source"), dict) else entry.get("author"),
             },
         )
 
 
-def _entry_datetime(entry) -> datetime:
+def _entry_datetime(entry) -> tuple[datetime, bool]:
+    """(timestamp, was_it_actually_dated).
+
+    An undated entry used to be stamped "now" and nothing recorded that we had
+    invented the timestamp. That is how BrainsWay's site feed put an entry
+    literally titled "Title" into the feed as breaking news, one minute old, at
+    issuer trust - and how any evergreen page becomes today's headline. We still
+    stamp it, so it is not silently dropped, but the flag travels with it and
+    the scorer caps it.
+    """
     for key in ("published_parsed", "updated_parsed", "created_parsed"):
         parsed = entry.get(key)
         if parsed:
-            return datetime.fromtimestamp(calendar.timegm(parsed), tz=timezone.utc)
-    # No date at all: assume "now" so a live item is not silently dropped by the
-    # lookback filter. Marked in meta so the scorer can distrust it if needed.
-    return datetime.fromtimestamp(time.time(), tz=timezone.utc)
+            return datetime.fromtimestamp(calendar.timegm(parsed), tz=timezone.utc), True
+    return datetime.fromtimestamp(time.time(), tz=timezone.utc), False
+
+
+def _cross_read_terms(tc, relation: str) -> list[str]:
+    """The search terms behind a cross-read query, in their original case so the
+    stated reason can quote them back.
+
+    Terms shorter than five characters are dropped: a three-letter brand is a
+    false-positive machine in a headline.
+    """
+    source = tc.competitor_products if relation == "PRODUCT_RIVAL" else tc.peer_names
+    return [t for t in source if len(t) >= 5][:MAX_RIVAL_TERMS_PER_QUERY]
 
 
 def _is_hebrew(text: str) -> bool:

@@ -108,6 +108,18 @@ The same applies to insider trades. An executive being *granted* shares as part
 of their pay is routine and is pushed down; an executive *buying or selling on
 the open market* is a real signal and is kept.
 
+### Articles written *because* the price moved
+
+A whole industry of automated articles appears the moment a share moves: "Shares
+Gap Up — What's Next?", "Gains as Investors Weigh…", and in Hebrew the market
+wrap that reports the day's move back at you. They quote the move and then guess
+at reasons.
+
+These are effects, not causes. Offering one as the explanation for the move it
+describes is circular — so they never appear as a driver. They are still shown,
+labelled **"post-move commentary — reactive, not a catalyst"**, because you will
+see them elsewhere and should know we classified them rather than missed them.
+
 ---
 
 ## 5. Three ideas that make the output different
@@ -134,11 +146,17 @@ The web page has four parts, top to bottom:
 
 1. **Coverage warnings** — anything switched off or not working, and why. Read
    this first. If it is empty, silence elsewhere really does mean quiet.
-2. **Alerts** — anything urgent in the last 24 hours.
-3. **Movers** — every share that moved, with how unusual the trading volume was,
+2. **Unexplained moves** — a share that moved clear of its own sector with
+   nothing behind it. This is the one alert that is *not* built from news: a
+   news feed can only raise something when somebody publishes, and the days
+   that matter most are often the days nobody does. It is phrased as a question
+   ("what do they know?"), never as a finding, and it says what was looked for
+   and not found.
+3. **News alerts** — anything urgent in the last 24 hours.
+4. **Movers** — every share that moved, with how unusual the trading volume was,
    how much of the move was just its sector, and the best available explanation.
    If there is no explanation, it says so rather than inventing one.
-4. **Feed** — the ranked news, most likely to matter first, each line saying
+5. **Feed** — the ranked news, most likely to matter first, each line saying
    which company it concerns and how.
 
 Then a calendar of known dates coming up.

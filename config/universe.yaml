@@ -72,7 +72,7 @@ tickers:
     sector: semiconductors_foundry
     float_class: mid
     ir_feeds:
-      - https://towersemi.com/feed/
+      - https://ir.towersemi.com/rss/news-releases.xml
     peers: [GFS, UMC, SMIC, VIS, SKYT, TSM, INTC, X-FAB]
     peer_names: ["GlobalFoundries", "UMC", "United Microelectronics", "SMIC",
                  "Vanguard International Semiconductor", "SkyWater", "X-FAB",
@@ -105,7 +105,11 @@ tickers:
     sector: semicap_metrology
     float_class: mid
     ir_feeds:
-      - https://www.novami.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [KLAC, ONTO, ASML, AMAT, LRCX, TER, ACMR]
     peer_names: ["KLA", "KLA-Tencor", "Onto Innovation", "ASML", "Applied Materials",
                  "Lam Research", "Hitachi High-Tech", "Screen Holdings"]
@@ -139,7 +143,11 @@ tickers:
     sector: semicap_inspection
     float_class: small
     ir_feeds:
-      - https://www.camtek.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [ONTO, KLAC, NVMI, ASMPT, TER]
     peer_names: ["Onto Innovation", "KLA", "Nova", "ASMPT", "Besi",
                  "Amkor", "ASE Technology", "JCET"]
@@ -229,7 +237,11 @@ tickers:
     sector: adtech
     float_class: small
     ir_feeds:
-      - https://perion.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [TBLA, OB, CRTO, MGNI, PUBM, TTD, DV, IAS, APPS, ZETA, GOOGL, META]
     peer_names: ["Taboola", "Outbrain", "Teads", "Criteo", "Magnite", "PubMatic",
                  "The Trade Desk", "DoubleVerify", "Integral Ad Science",
@@ -321,7 +333,7 @@ tickers:
     sector: specialty_chemicals_fertilizer
     float_class: mid
     ir_feeds:
-      - https://www.icl-group.com/feed/
+      - https://investors.icl-group.com/rss/pressrelease.aspx
     peers: [NTR, MOS, CF, YAR.OL, SQM, CMP, ALB, IPI]
     peer_names: ["Nutrien", "Mosaic", "K+S", "Yara", "Uralkali", "Belaruskali",
                  "Arab Potash", "SQM", "Compass Minerals", "Albemarle", "OCP",
@@ -353,7 +365,11 @@ tickers:
     sector: defense
     float_class: mid
     ir_feeds:
-      - https://elbitsystems.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [RTX, LMT, GD, NOC, LHX, RHM.DE, BA.L, LDO.MI, HO.PA, KOG.OL, SAABB.ST]
     peer_names: ["RTX", "Lockheed Martin", "General Dynamics", "Northrop Grumman",
                  "L3Harris", "Rheinmetall", "BAE Systems", "Leonardo", "Thales",
@@ -388,7 +404,7 @@ tickers:
     sector: aerospace_mro
     float_class: micro
     ir_feeds:
-      - https://www.tat-technologies.com/feed/
+      - https://www.tat-technologies.com/category/press-releases/feed/
     peers: [HEI, TDG, AIR, DCO, RTX, HON, GE, SPR]
     peer_names: ["HEICO", "TransDigm", "AAR Corp", "Ducommun", "Collins Aerospace",
                  "Honeywell Aerospace", "Safran", "StandardAero", "MTU Aero Engines"]
@@ -417,7 +433,11 @@ tickers:
     sector: satcom
     float_class: small
     ir_feeds:
-      - https://www.gilat.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [VSAT, SATS, CMTL, ASTS, IRDM, SES.PA, RKLB]
     peer_names: ["Viasat", "EchoStar", "Hughes Network Systems", "Comtech",
                  "ST Engineering iDirect", "SES", "Intelsat", "Eutelsat", "OneWeb",
@@ -447,7 +467,7 @@ tickers:
     sector: network_security
     float_class: micro
     ir_feeds:
-      - https://www.allot.com/feed/
+      - https://investors.allot.com/rss/news-releases.xml
     peers: [RDWR, CHKP, CSCO, NOK, ERIC, JNPR]
     peer_names: ["Radware", "Check Point", "Sandvine", "Cisco", "Nokia Deepfield",
                  "Ericsson", "Juniper", "Palo Alto Networks", "Netscout"]
@@ -476,7 +496,11 @@ tickers:
     sector: voice_networking
     float_class: small
     ir_feeds:
-      - https://www.audiocodes.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [RBBN, CSCO, MSFT, ZM, FIVN, AVYA, NICE]
     peer_names: ["Ribbon Communications", "Cisco", "Microsoft Teams", "Zoom",
                  "Avaya", "Mitel", "Oracle Communications", "Five9", "Genesys"]
@@ -534,7 +558,7 @@ tickers:
     sector: biotech_clinical
     float_class: micro
     ir_feeds:
-      - https://oramed.com/feed/
+      - https://oramed.com/category/press-releases/feed/
     peers: [NVO, LLY, BIOX, SCLX, MNKD]
     peer_names: ["Novo Nordisk", "Eli Lilly", "Biocon", "Scilex", "MannKind",
                  "Diasome", "Generex"]
@@ -563,7 +587,11 @@ tickers:
     sector: plasma_biopharma
     float_class: micro
     ir_feeds:
-      - https://www.kamada.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [GRFS, ADMA, TAK, CSL.AX, EBS]
     peer_names: ["Grifols", "ADMA Biologics", "Takeda", "CSL Behring",
                  "Emergent BioSolutions", "Octapharma", "Kedrion", "BioLife Plasma"]
@@ -629,7 +657,7 @@ tickers:
     sector: medical_devices
     float_class: micro
     ir_feeds:
-      - https://www.brainsway.com/feed/
+      - https://investors.brainsway.com/rss/news-releases.xml
     peers: [STIM, CMPS, JNJ, NUVA]
     peer_names: ["Neuronetics", "NeuroStar", "Magstim", "MagVenture",
                  "Compass Pathways", "Johnson & Johnson", "Spravato", "Greenbrook TMS"]
@@ -670,9 +698,14 @@ tickers:
       OPC_ENERGY: ["OPC Energy", "OPC Rotem", "OPC Hadera"]
       CPV_GROUP: ["CPV Group", "Competitive Power Ventures"]
     # A rival's launch, approval or design win here reads across.
-    competitor_products:
-      ["Talen Energy", "Vistra Energy", "NRG Energy", "Constellation Energy",
-       "Israel Electric Corporation"]
+    # Deliberately empty. This field means "a rival PRODUCT whose fate reads
+    # across to ours" - a molecule, a design socket, a named platform. It was
+    # filled with the peer *companies* already listed above, which promoted an
+    # NRG quarterly earnings preview to PRODUCT_RIVAL at 0.85 and scored it 36.
+    # A merchant power generator has no product rival; it has peers, and those
+    # belong in peer_names, where the read-across is labelled PEER and weighted
+    # for what it is. The rival query falls back to peer_names for this name.
+    competitor_products: []
     structure_note: >
       Holding company: value driven by OPC Energy (TASE: OPCE) and CPV.
       OPC's TASE disclosures and PJM/ERCOT auction results are effectively

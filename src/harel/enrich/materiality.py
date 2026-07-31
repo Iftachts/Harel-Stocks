@@ -170,8 +170,16 @@ class MaterialityScorer:
 
         return base, reason
 
+    # An entry whose feed gave no date is stamped "now" so it is not dropped.
+    # That invented timestamp makes an evergreen marketing page look like it
+    # broke a minute ago, at full issuer trust, so it must not be rankable.
+    UNDATED_CAP = 10.0
+
     def _noise_cap(self, item: RawItem) -> float | None:
         caps: list[float] = []
+
+        if item.meta.get("undated"):
+            caps.append(self.UNDATED_CAP)
 
         form = str(item.meta.get("form_type") or "").upper()
         if form and form in self.scoring.noise_form_types:
@@ -181,6 +189,15 @@ class MaterialityScorer:
         for noise in self.scoring.noise_title_patterns:
             if noise.pattern.search(text):
                 caps.append(noise.cap)
+
+        # Post-move commentary: written because the price already moved, so it
+        # cannot be evidence of why. Matched on the TITLE only - a real filing
+        # whose body happens to quote the day's move must not be demoted.
+        for noise in self.scoring.reactive_patterns:
+            if noise.pattern.search(item.title):
+                caps.append(noise.cap)
+                item.meta["reactive_recap"] = True
+                break
 
         return min(caps) if caps else None
 

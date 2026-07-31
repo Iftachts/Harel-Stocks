@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .collect import CollectorContext, build_collectors
@@ -15,7 +16,7 @@ from .dedupe import Clusterer
 from .enrich.linker import EntityLinker
 from .enrich.materiality import MaterialityScorer, PriceContext
 from .http import HttpClient
-from .models import CalendarEntry, ScoredItem
+from .models import CalendarEntry, RawItem, ScoredItem
 
 log = logging.getLogger("harel.pipeline")
 
@@ -145,6 +146,54 @@ class Pipeline:
             deduped=report.deduped, errors=report.errors[:50],
         )
         return report
+
+    # ------------------------------------------------------------- rescore --
+    def rescore(self, since_hours: float = 168.0) -> dict[str, Any]:
+        """Re-run linking and scoring over what is already stored.
+
+        Scores are computed at collection time, so a change to scoring.yaml or
+        universe.yaml only reaches items collected afterwards. That makes tuning
+        impossible to judge: you change a noise cap because one headline is
+        ranked too high, and that exact headline keeps its old score until it
+        happens to be re-collected - which for a filing is never.
+
+        Clustering is left alone. Dedupe keys are assigned across a run, and
+        recomputing them here would split clusters that were correctly merged
+        when their members arrived together.
+        """
+        since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+        rows = self.db.conn.execute(
+            "SELECT * FROM items WHERE published_at >= ?", (since,)
+        ).fetchall()
+        prices = self._price_context()
+        changed = dropped = 0
+
+        for row in rows:
+            item = RawItem(
+                source=row["source"], source_kind=row["source_kind"],
+                external_id=row["external_id"], title=row["title"],
+                url=row["url"] or "", summary=row["summary"] or "",
+                body=row["body"] or "", lang=row["lang"] or "en",
+                published_at=datetime.fromisoformat(row["published_at"]),
+                meta=json.loads(row["meta_json"] or "{}"),
+            )
+            links = self.linker.link(item)
+            if not links:
+                self.db.conn.execute("DELETE FROM items WHERE uid = ?", (row["uid"],))
+                dropped += 1
+                continue
+            scored = self.scorer.score(
+                item, links,
+                price_by_ticker={ln.ticker: prices[ln.ticker]
+                                 for ln in links if ln.ticker in prices},
+                cluster_max_trust=self._cluster_trust(row["cluster_id"], row["source"]),
+            )
+            if abs((scored.score or 0) - (row["score"] or 0)) > 0.05:
+                changed += 1
+            self.db.upsert_item(scored, row["dedupe_key"], row["cluster_id"])
+
+        self.db.conn.commit()
+        return {"examined": len(rows), "rescored": changed, "dropped": dropped}
 
     # -------------------------------------------------------------- process --
     def _process(self, item, clusterer: Clusterer, prices: dict[str, PriceContext],
