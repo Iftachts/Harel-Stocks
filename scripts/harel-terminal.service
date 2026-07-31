@@ -17,7 +17,13 @@ Type=simple
 User=%i
 WorkingDirectory=/opt/harel
 EnvironmentFile=/opt/harel/.env
-ExecStart=/opt/harel/.venv/bin/harel watch --interval 120 --hours 12
+# Belt and braces: the CLI flushes its own output, but this also unbuffers the
+# library logging so `journalctl -fu harel-collect` is live rather than chunked.
+Environment=PYTHONUNBUFFERED=1
+# A full pass measures ~250s (about 100 Google News queries plus EDGAR, all
+# politely rate-limited). An interval shorter than the pass means the loop never
+# sleeps and just hammers the sources, so keep this above the measured cycle.
+ExecStart=/opt/harel/.venv/bin/harel watch --interval 300 --hours 12
 Restart=always
 RestartSec=30
 # The pipeline is I/O bound; keep it out of the way of anything interactive.

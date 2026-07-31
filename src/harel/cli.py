@@ -231,21 +231,27 @@ def cmd_collect(args) -> int:
 def cmd_watch(args) -> int:
     only = [s.strip() for s in args.sources.split(",")] if args.sources else None
     pipeline = Pipeline(db=Database(args.db), lookback_hours=args.hours)
-    print(f"{C.AMBER}watching{C.RESET} every {args.interval}s - Ctrl-C to stop")
+    # This loop is meant to run as a service, where stdout is a pipe and Python
+    # block-buffers it. Without an explicit flush the per-pass line and, worse,
+    # the ALERT lines sit in a 4KB buffer instead of reaching the operator - the
+    # one output in this whole program that must never be delayed.
+    print(f"{C.AMBER}watching{C.RESET} every {args.interval}s - Ctrl-C to stop",
+          flush=True)
     while True:
         try:
             report = pipeline.run(only=only)
             stamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
             print(f"[{stamp}] {report.collected} collected, {report.stored} stored, "
-                  f"{len(report.alerts)} alerts, {len(report.errors)} errors")
+                  f"{len(report.alerts)} alerts, {len(report.errors)} errors",
+                  flush=True)
             for alert in report.alerts[:5]:
                 print(f"  {C.RED}ALERT{C.RESET} {alert['ticker']:<6} "
-                      f"{alert['title'][:110]}")
+                      f"{alert['title'][:110]}", flush=True)
         except KeyboardInterrupt:
-            print("\nstopped")
+            print("\nstopped", flush=True)
             return 0
         except Exception as exc:
-            print(f"{C.RED}pass failed:{C.RESET} {exc}")
+            print(f"{C.RED}pass failed:{C.RESET} {exc}", flush=True)
         time.sleep(args.interval)
 
 
