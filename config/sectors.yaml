@@ -12,6 +12,35 @@
 #   peer_read_across  Same, but for a story about a named peer company
 # =============================================================================
 
+# Benchmark per sector. A move only means something relative to what the rest of
+# the group did: TSEM +12.4% on a day the semis index rose 8% is a 4pp
+# stock-specific move, not a 12% one, and the movers board said "no matching
+# news" for the whole basket because it was reading absolute moves with nothing
+# to compare them to.
+benchmarks:
+  default: SPY
+  by_sector:
+    semiconductors_foundry: SOXX
+    semicap_metrology: SOXX
+    semicap_inspection: SOXX
+    pharma_generics_branded: XPH
+    biotech_clinical: XBI
+    plasma_biopharma: XBI
+    diagnostics_pharma: XBI
+    medical_devices: IHI
+    defense: ITA
+    aerospace_mro: ITA
+    cybersecurity_platform: QQQ
+    network_security: QQQ
+    enterprise_software_cx: IGV
+    voice_networking: IGV
+    adtech: QQQ
+    fintech_payments: QQQ
+    satcom: QQQ
+    renewable_power: ICLN
+    power_holding: XLU
+    specialty_chemicals_fertilizer: XLB
+
 sectors:
 
   pharma_generics_branded:

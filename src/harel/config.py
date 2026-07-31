@@ -169,6 +169,26 @@ class Config:
     sources: dict[str, SourceConfig]
     scoring: ScoringConfig
     defaults: dict[str, Any]
+    benchmarks: dict[str, Any] = field(default_factory=dict)
+
+    def benchmark_for(self, sector_key: str) -> str | None:
+        """Index proxy a name should be judged against.
+
+        A move only means something relative to its group: +12% on a day the
+        semis index rose 8% is a 4pp stock-specific move, not a 12% one.
+        """
+        by_sector = (self.benchmarks or {}).get("by_sector") or {}
+        return by_sector.get(sector_key) or (self.benchmarks or {}).get("default")
+
+    @property
+    def benchmark_symbols(self) -> list[str]:
+        out = []
+        for t in self.active_tickers:
+            tc = self.ticker(t)
+            sym = self.benchmark_for(tc.sector) if tc else None
+            if sym and sym not in out:
+                out.append(sym)
+        return out
 
     # -- convenience ------------------------------------------------------- #
     @property
@@ -341,6 +361,7 @@ def load_config(config_dir: Path | str | None = None) -> Config:
         sources=sources,
         scoring=scoring,
         defaults=dict(src_raw.get("defaults") or {}),
+        benchmarks=dict(sec_raw.get("benchmarks") or {}),
     )
 
 

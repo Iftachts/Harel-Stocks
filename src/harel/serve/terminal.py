@@ -177,14 +177,32 @@ def _movers_section(movers: list[dict[str, Any]]) -> str:
     if not movers:
         return ""
     rows = ["<table><tr><th class='tkr'>SYM</th><th class='score'>CHG</th>"
-            "<th class='rel'>VOL</th><th>DRIVER</th></tr>"]
+            "<th class='rel'>VOL</th><th class='rel'>vs SECTOR</th>"
+            "<th>DRIVER</th></tr>"]
     for m in movers:
         cls = "up" if m["change_pct"] >= 0 else "dn"
         vol = f"{m['volume_multiple']:.1f}x" if m.get("volume_multiple") else "-"
+
+        rel_pct = m.get("relative_pct")
+        if rel_pct is None:
+            rel_cell = "<span class='muted'>-</span>"
+        else:
+            rel_cls = "up" if rel_pct >= 0 else "dn"
+            rel_cell = (f"<span class='{rel_cls}'>{rel_pct:+.1f}pp</span>"
+                        f"<div class='why'>{html.escape(str(m.get('benchmark') or ''))} "
+                        f"{m.get('benchmark_pct', 0):+.1f}%</div>")
+
         if m["drivers"]:
             top = m["drivers"][0]
             driver = (f"<a href='{html.escape(top.get('url') or '#')}' target='_blank' "
                       f"rel='noreferrer'>{html.escape(top['title'])[:150]}</a>")
+        elif rel_pct is not None and abs(rel_pct) < 2.0:
+            # Most of the move is the group. Saying "no matching news" here
+            # invites you to hunt for a company story that does not exist.
+            driver = ("<span class='muted'>tracks its sector - "
+                      f"{html.escape(str(m.get('benchmark') or ''))} "
+                      f"{m.get('benchmark_pct', 0):+.1f}%, no stock-specific news"
+                      "</span>")
         else:
             driver = "<span class='muted'>no matching news - flow, technical, or a gap in coverage</span>"
         # Published after the bell: cannot explain today's move, but it is the
@@ -198,7 +216,8 @@ def _movers_section(movers: list[dict[str, Any]]) -> str:
         rows.append(
             f"<tr class='item'><td class='tkr'>{html.escape(m['ticker'])}</td>"
             f"<td class='score {cls}'>{m['change_pct']:+.1f}%</td>"
-            f"<td class='rel'>{vol}</td><td>{driver}</td></tr>"
+            f"<td class='rel'>{vol}</td><td class='rel'>{rel_cell}</td>"
+            f"<td>{driver}</td></tr>"
         )
     rows.append("</table>")
     return f"<section><h2>Movers</h2>{''.join(rows)}</section>"

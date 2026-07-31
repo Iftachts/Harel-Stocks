@@ -229,9 +229,20 @@ class Views:
                        if (p := _published_utc(r)) is None or p <= cutoff]
             after_bell = [r for r in candidates
                           if (p := _published_utc(r)) is not None and p > cutoff]
+            # What the group did, and what is left over once you subtract it.
+            tc = self.config.ticker(ticker)
+            bench_sym = self.config.benchmark_for(tc.sector) if tc else None
+            bench = self.db.latest_price(bench_sym) if bench_sym else None
+            bench_pct = bench.get("change_pct") if bench else None
+            relative = (round(price["change_pct"] - bench_pct, 2)
+                        if bench_pct is not None else None)
+
             movers.append({
                 "ticker": ticker,
                 "change_pct": round(price["change_pct"], 2),
+                "benchmark": bench_sym,
+                "benchmark_pct": round(bench_pct, 2) if bench_pct is not None else None,
+                "relative_pct": relative,
                 "volume_multiple": (round(price["vol_mult"], 2)
                                     if price.get("vol_mult") else None),
                 "session": price.get("session"),

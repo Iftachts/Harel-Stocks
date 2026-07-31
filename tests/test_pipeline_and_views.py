@@ -42,6 +42,36 @@ def ran(config, db):
     return report, Views(db=db, config=config)
 
 
+def test_every_name_has_a_sector_benchmark(config):
+    """A move only means something relative to its group. Without a benchmark
+    every mover reads as unexplained, which is how a day when the semis index
+    ran 8% produced sixteen rows of "no matching news"."""
+    for ticker in config.active_tickers:
+        sector = config.ticker(ticker).sector
+        assert config.benchmark_for(sector), f"{ticker} ({sector}) has no benchmark"
+    assert config.benchmark_symbols, "nothing to fetch"
+
+
+def test_movers_report_the_move_left_after_the_sector(ran, db):
+    """CAMT +8.1% on a day SOXX rose 8.5% is a -0.4pp stock-specific move, not
+    an 8% one - the difference between a company event and being carried."""
+    report, views = ran
+    from harel.models import PriceSnapshot
+
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="SOXX", asof=now, last=100.0,
+                                prev_close=92.17, change_pct=8.5))
+    db.save_price(PriceSnapshot(ticker="CAMT", asof=now, last=100.0,
+                                prev_close=92.51, change_pct=8.1))
+
+    camt = next((m for m in views.whats_moving(min_abs_pct=1.0)["movers"]
+                 if m["ticker"] == "CAMT"), None)
+    assert camt is not None, "CAMT should appear as a mover"
+    assert camt["benchmark"] == "SOXX"
+    assert camt["benchmark_pct"] == pytest.approx(8.5, abs=0.1)
+    assert camt["relative_pct"] == pytest.approx(-0.4, abs=0.1)
+
+
 def test_the_json_api_declares_utf8(tmp_path):
     """Bare `application/json` leaves the encoding unstated, and a client that
     falls back to ISO-8859-1 turns every Hebrew headline into mojibake - which

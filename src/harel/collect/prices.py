@@ -38,6 +38,18 @@ AFTERHOURS_END = dtime(20, 0)
 class PriceCollector(Collector):
     def collect(self) -> Iterator[RawItem]:
         use_yahoo = "finance.yahoo.com" in self.source.base_url
+        # Index proxies first, so a name's move can be read against its group.
+        # Absolute moves alone made the whole basket look unexplained on a day
+        # the semis index ran 8%.
+        if use_yahoo:
+            for symbol in self.cfg.benchmark_symbols:
+                try:
+                    snap = self._yahoo_snapshot(symbol)
+                    if snap is not None:
+                        self.db.save_price(snap)
+                except Exception as exc:
+                    self.warn(f"benchmark {symbol}: {type(exc).__name__}: {exc}")
+
         for ticker in self.active_tickers:
             try:
                 snap = (
