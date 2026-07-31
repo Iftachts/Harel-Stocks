@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -785,3 +787,91 @@ def test_benchmarks_are_the_actual_sector(config):
     stock-specific when it is the security group moving."""
     assert config.benchmark_for("cybersecurity_platform") == "CIBR"
     assert config.benchmark_for("semiconductors_foundry") == "SOXX"
+
+
+def test_rescore_purges_a_retired_feed_but_never_a_search_result(config, db):
+    """The purge exists because retiring a feed in config did nothing to what it
+    had already collected - Gilat's marketing stayed in the ranked feed at trust
+    1.0. But Google News items carry their SEARCH URL as meta.feed, which is in
+    no static list, so a naive "not configured => retired" rule reads every
+    aggregator item as orphaned. It did, and deleted 978 rows."""
+    now = datetime.now(timezone.utc)
+
+    def add(uid, source, feed, title="A real headline about Teva"):
+        db.conn.execute(
+            "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, "
+            "title, url, published_at, collected_at, score, tier, meta_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (uid, source, "rss", uid, title, "https://example.com/x",
+             now.isoformat(), now.isoformat(), 30.0, "NORMAL",
+             json.dumps({"feed": feed})),
+        )
+        db.conn.execute(
+            "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, "
+            "why, score) VALUES (?,?,?,?,?,?)", (uid, "TEVA", "DIRECT", 0.9, "t", 30.0))
+
+    live_ir = config.ticker("TEVA").ir_feeds[0]
+    add("keep_ir", "company_ir_rss", live_ir)
+    add("drop_ir", "company_ir_rss", "https://www.gilat.com/feed/")
+    add("keep_query", "google_news",
+        "https://news.google.com/rss/search?q=%22Teva%22&hl=en-US")
+    add("drop_junk", "company_ir_rss", live_ir, title="Title")
+    db.conn.commit()
+
+    Pipeline(config=config, db=db, lookback_hours=48).rescore(since_hours=48)
+    alive = {r["uid"] for r in db.conn.execute("SELECT uid FROM items").fetchall()}
+    assert "keep_ir" in alive
+    assert "keep_query" in alive, "a search result must never be read as orphaned"
+    assert "drop_ir" not in alive, "a retired feed's items must not stand"
+    assert "drop_junk" not in alive
+
+
+def test_rescore_never_deletes_an_item_it_merely_failed_to_relink(config, db):
+    """Re-linking is a re-derivation from LESS information than the collector
+    had: the seed ("I polled TEVA's CIK", "this came off the rival query") is
+    not in the text. Treating "no links now" as "should not exist" deleted 185
+    items whose only tie to a ticker was the query that found them."""
+    now = datetime.now(timezone.utc)
+    db.conn.execute(
+        "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, title, "
+        "url, published_at, collected_at, score, tier, meta_json) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("seeded", "google_news", "rss", "seeded",
+         "A headline that never names the company", "https://example.com/s",
+         now.isoformat(), now.isoformat(), 25.0, "NORMAL",
+         json.dumps({"feed": "https://news.google.com/rss/search?q=x",
+                     "seed_tickers": ["TEVA"], "seed_relation": "DIRECT"})),
+    )
+    db.conn.execute(
+        "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, why, "
+        "score) VALUES (?,?,?,?,?,?)", ("seeded", "TEVA", "DIRECT", 0.92, "t", 25.0))
+    db.conn.commit()
+
+    # An issuer feed is authoritative even when a post never spells the name
+    # out, so its seed must survive re-linking.
+    db.conn.execute(
+        "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, title, "
+        "url, published_at, collected_at, score, tier, meta_json) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("from_issuer", "company_ir_rss", "rss", "from_issuer",
+         "A headline that never names the company", "https://example.com/i",
+         now.isoformat(), now.isoformat(), 25.0, "NORMAL",
+         json.dumps({"feed": config.ticker("TEVA").ir_feeds[0],
+                     "seed_tickers": ["TEVA"], "seed_relation": "DIRECT"})),
+    )
+    db.conn.execute(
+        "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, why, "
+        "score) VALUES (?,?,?,?,?,?)",
+        ("from_issuer", "TEVA", "DIRECT", 0.92, "t", 25.0))
+    db.conn.commit()
+
+    Pipeline(config=config, db=db, lookback_hours=48).rescore(since_hours=48)
+
+    assert db.conn.execute("SELECT uid FROM items WHERE uid='seeded'").fetchone(), \
+        "rescore deleted an item it simply could not re-link"
+    # The row stays; the unsupported CLAIM does not. A per-ticker search seeds
+    # DIRECT on the strength of the query alone, which is how "PH, US allot P42b
+    # for anti-TB drive" became news about Allot Communications.
+    assert db.tickers_for("seeded") == [], "an unevidenced search seed must be withdrawn"
+    assert [l["ticker"] for l in db.tickers_for("from_issuer")] == ["TEVA"], \
+        "an issuer feed's own seed is authoritative and must survive"

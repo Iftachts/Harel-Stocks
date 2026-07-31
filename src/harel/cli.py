@@ -398,7 +398,9 @@ def cmd_rescore(args) -> int:
         return 0
     print(f"examined {result['examined']} items, "
           f"{C.AMBER}{result['rescored']}{C.RESET} changed score, "
-          f"{result['dropped']} no longer link to the universe")
+          f"{result['dropped']} no longer re-link (kept), "
+          f"{C.AMBER}{result['purged']}{C.RESET} purged "
+          f"(retired feed or empty headline)")
     return 0
 
 

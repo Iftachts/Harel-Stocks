@@ -38,6 +38,17 @@ AMBIGUOUS_TICKERS = {
     "GILT",
 }
 
+# Company NAMES that are also ordinary English words. Same failure as an
+# ambiguous symbol, one level up - and worse, because a name match carries
+# higher confidence than a symbol match.
+AMBIGUOUS_NAMES = {
+    "allot",    # a verb: "PH, US allot P42b for anti-TB drive" -> Allot, DIRECT
+    "nice",     # an adjective, and a French city
+    "nova",     # a star, a region, a hundred product names
+    "orbit",
+    "one",
+}
+
 _TICKER_CONTEXT = r"(?:NASDAQ|NYSE|NYSE American|TASE|TLV|Nasdaq|Nyse)\s*[:\-]?\s*"
 
 
@@ -78,15 +89,30 @@ class EntityLinker:
                 continue
             if len(name) < 4:
                 continue
+            # A company name that is also an ordinary word needs corporate
+            # context. "PH, US allot P42b for anti-TB, HIV drive" was linked
+            # DIRECT to Allot Communications at confidence 0.97, because "allot"
+            # is a verb. Same failure mode as the ambiguous symbols below, one
+            # level up: the string is right and the entity is not.
+            if name.lower() in AMBIGUOUS_NAMES:
+                pattern = _word_re_with_context(name)
+                confidence = 0.9
+            else:
+                pattern = _word_re(name)
+                confidence = 0.88
             self.rules.append(_Rule(
-                pattern=_word_re(name), ticker=t, relation="DIRECT",
-                why=f'names "{name}"', base_confidence=0.88, title_only_bonus=0.09,
-                probe=_probe(name),
+                pattern=pattern, ticker=t, relation="DIRECT",
+                why=f'names "{name}"', base_confidence=confidence,
+                title_only_bonus=0.09, probe=_probe(name),
             ))
 
-        # 2. The symbol. Ambiguous symbols need an exchange prefix or a $ sigil.
+        # 2. The symbol. An ambiguous symbol needs context - an exchange prefix,
+        # a $ sigil, or a corporate verb / financial noun immediately after it.
+        # Prefix-or-sigil alone was too strict: "NICE Price Target Cut to
+        # $111.00 by Morgan Stanley" is unmistakably about NICE and carried
+        # neither.
         if t in AMBIGUOUS_TICKERS:
-            pattern = re.compile(rf"(?:{_TICKER_CONTEXT}|\$){re.escape(t)}(?!\w)")
+            pattern = _word_re_with_context(t)
             confidence = 0.9
         else:
             pattern = re.compile(rf"(?<![\w.]){re.escape(t)}(?!\w)")
@@ -116,11 +142,16 @@ class EntityLinker:
                     probe=_probe(term),
                 ))
 
-        # 5. Named competitors.
+        # 5. Named competitors. Same ordinary-word trap as our own names: with a
+        # bare match, "Nova Scotia announces an energy plan" is a Camtek peer
+        # story and "a nice day in Nice" is a LivePerson one.
         for name in tc.peer_names:
             if len(name) >= 4:
+                ambiguous = name.lower() in AMBIGUOUS_NAMES
                 self.rules.append(_Rule(
-                    pattern=_word_re(name), ticker=t, relation="PEER",
+                    pattern=(_word_re_with_context(name) if ambiguous
+                             else _word_re(name)),
+                    ticker=t, relation="PEER",
                     why=f'competitor "{name}"', base_confidence=0.7,
                     probe=_probe(name),
                 ))
@@ -283,10 +314,81 @@ def _probe(term: str) -> str:
     return max(words, key=len).lower() if words else ""
 
 
+_DIRECT_EVIDENCE_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def direct_evidence(tc, text: str) -> bool:
+    """Does this text actually name the company, by name, alias or symbol?
+
+    Google News answers a query loosely, so the per-ticker search returns
+    stories that mention nobody: "PH, US allot P42b for anti-TB, HIV drive" came
+    back from the Allot query and was tagged DIRECT at 0.92 on the strength of
+    the query alone. The same ambiguity rules as the linker apply here - an
+    ordinary-word name needs corporate context - so this asks exactly the
+    question the linker would ask, before the seed is trusted.
+    """
+    pattern = _DIRECT_EVIDENCE_CACHE.get(tc.ticker)
+    if pattern is None:
+        parts = []
+        for name in tc.match_names:
+            if name == tc.ticker or len(name) < 4:
+                continue
+            builder = (_word_re_with_context if name.lower() in AMBIGUOUS_NAMES
+                       else _word_re)
+            parts.append(builder(name).pattern)
+        parts.append(_word_re_with_context(tc.ticker).pattern
+                     if tc.ticker in AMBIGUOUS_TICKERS
+                     else rf"(?<![\w.]){re.escape(tc.ticker)}(?!\w)")
+        pattern = re.compile("|".join(f"(?:{p})" for p in parts), re.IGNORECASE)
+        _DIRECT_EVIDENCE_CACHE[tc.ticker] = pattern
+    return bool(pattern.search(text or ""))
+
+
 def _word_re(term: str) -> re.Pattern[str]:
     """Whole-word, case-insensitive, punctuation-tolerant match."""
     escaped = re.escape(term).replace(r"\ ", r"\s+")
     return re.compile(rf"(?<!\w){escaped}(?!\w)", re.IGNORECASE)
+
+
+# What an ordinary word has to be doing to read as a company.
+#
+# Requiring a corporate suffix was too strict and withdrew real stories:
+# "Allot to Release Second Quarter 2026 Results", "NICE Price Target Cut to
+# $111.00 by Morgan Stanley", "Nova slides as semiconductor selloff outweighs
+# momentum". Headlines drop the "Ltd". What actually separates those from
+# "Supreme Court directs the state to allot adjacent land" is the word that
+# FOLLOWS - a corporate verb or a financial noun - and the word before, since
+# "to allot" is an infinitive and never a company.
+_CORP_SUFFIX = (r"Ltd|Ltd\.|Limited|Inc|Inc\.|Corp|Corp\.|Communications|"
+                r"Technologies|Systems|Networks|Pharmaceutical[s]?|Industries|"
+                r"Holdings|Group|Energy|Semiconductor[s]?|plc|N\.V\.|S\.A\.")
+_CORP_VERB = (r"to\s+(?:release|report|announce|host|acquire|launch|present|hold|"
+              r"buy|sell|merge|invest|expand)|announce[sd]?|report[sd]?|posts?|"
+              r"posted|beats?|misses?|raises?|lowers?|cuts?|slides?|slid|jumps?|"
+              r"gains?|falls?|fell|rises?|rose|soars?|plunges?|drops?|climbs?|"
+              r"wins?|won|secures?|signs?|signed|expands?|names?|named|appoints?|"
+              r"completes?|completed|launches?|launched|acquires?|acquired|"
+              r"receives?|received|is\s+up|is\s+down|was\s+up|was\s+down")
+_FIN_NOUN = (r"stock|shares?|share\s+price|price\s+target|earnings|revenue[s]?|"
+             r"guidance|results|outlook|dividend|buyback|CEO|CFO|board|"
+             r"Q[1-4]|first|second|third|fourth|FY\d{2,4}|investors?|analysts?")
+# "to allot", "will allot", "should allot" - an infinitive is never a company.
+_NOT_A_COMPANY_BEFORE = r"(?<!\bto\s)(?<!\bwill\s)(?<!\bshall\s)(?<!\bmust\s)(?<!\bmay\s)"
+
+
+def _word_re_with_context(term: str) -> re.Pattern[str]:
+    """Match an ordinary-word company name only where it reads as a company."""
+    escaped = re.escape(term).replace(r"\ ", r"\s+")
+    return re.compile(
+        # NASDAQ: ALLT / $ALLT - unambiguous on its own.
+        rf"(?:(?:{_TICKER_CONTEXT}|\$)\s*{escaped}(?!\w))"
+        # Allot Ltd / Allot Communications
+        rf"|(?:(?<!\w){escaped}\s+(?:{_CORP_SUFFIX})(?!\w))"
+        # Allot to Release… / Nova slides… / Allot's results
+        rf"|(?:{_NOT_A_COMPANY_BEFORE}(?<!\w){escaped}(?:'s|’s)?\s+"
+        rf"(?:{_CORP_VERB}|{_FIN_NOUN})(?!\w))",
+        re.IGNORECASE,
+    )
 
 
 # Capitalised words that are not company names and would over-match.

@@ -97,7 +97,7 @@ tickers:
 
   NVMI:
     name: Nova Ltd
-    aliases: ["Nova Ltd", "Nova Measuring Instruments", "נובה", "Nova Metrology"]
+    aliases: ["Nova", "Nova Ltd", "Nova Measuring Instruments", "נובה", "Nova Metrology"]
     cik: "0001109345"
     tase_id: "1084557"
     tase_issuer_id: 2177

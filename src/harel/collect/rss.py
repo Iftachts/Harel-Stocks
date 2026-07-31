@@ -20,6 +20,7 @@ from urllib.parse import quote_plus
 
 import feedparser
 
+from ..enrich.linker import direct_evidence
 from ..http import HttpError
 from ..models import RawItem
 from .base import Collector, register
@@ -195,6 +196,10 @@ class RssCollector(Collector):
         # those PRODUCT_RIVAL would assert a competitor link that does not
         # exist, so require the term to actually appear.
         required = self._required_terms(seed_tickers, seed_relation)
+        # Only for the query-driven per-ticker searches. An issuer's own feed is
+        # authoritative even when a post never spells the company's name out.
+        query_direct = (seed_relation == "DIRECT" and len(seed_tickers) == 1
+                        and "{q}" in (self.source.base_url or ""))
 
         count = 0
         for entry in parsed.entries:
@@ -220,6 +225,14 @@ class RssCollector(Collector):
                     f'the story names "{hit}", tracked as {kind} for '
                     f'{seed_tickers[0]}'
                 )
+            elif query_direct:
+                # A search engine answering loosely is not evidence. Without
+                # this the Allot query's "PH, US allot P42b for anti-TB, HIV
+                # drive" was DIRECT news about Allot Communications at 0.92.
+                tc = self.cfg.ticker(seed_tickers[0])
+                if tc and not direct_evidence(tc, f"{item.title} {item.summary}"):
+                    continue
+                item.meta["seed_why"] = f'found by our "{label}" search'
             elif seed_tickers:
                 item.meta["seed_why"] = f'found by our "{label}" search'
             count += 1

@@ -161,3 +161,28 @@ def test_a_uk_gilt_is_not_gilat_satellite(config):
     bond = item("REG - FTSE Russell - 0 1/8% Index-linked Treasury Gilt 2041")
     links = EntityLinker(config).link(bond)
     assert "GILT" not in {ln.ticker for ln in links}, links
+
+
+@pytest.mark.parametrize("ticker,headline,expected", [
+    # Real stories that the first, stricter guard wrongly withdrew. Headlines
+    # drop the "Ltd"; demanding a corporate suffix loses the news.
+    ("ALLT", "Allot to Release Second Quarter 2026 Results", True),
+    ("ALLT", "Allot's second-quarter results arrive before an Aug. 12 webcast", True),
+    ("NICE", "NICE Price Target Cut to $111.00/Share From $130.00 by Morgan Stanley", True),
+    ("NVMI", "Nova slides as semiconductor selloff outweighs recent momentum", True),
+    ("ICL", "ICL Announces Second Quarter 2026 Earnings Call", True),
+    # Ordinary-word uses. Google News returned every one of these from the
+    # per-ticker query, and each was tagged DIRECT at 0.92 on the query alone.
+    ("ALLT", "PH, US allot P42b for anti-TB, HIV drive", False),
+    ("ALLT", "Orchid Pharma to allot shares to Dhanuka Labs shareholders", False),
+    ("ALLT", "Supreme Court directs the state to allot adjacent land", False),
+    ("ALLT", "Allot time for debates on Punjab's critical issues", False),
+    ("NICE", "It was a nice day in Nice, France", False),
+    ("NVMI", "Nova Scotia announces new energy plan", False),
+    ("KEN", "Ken Griffin buys a stake in something", False),
+])
+def test_an_ordinary_word_is_only_a_company_when_it_reads_as_one(
+        config, ticker, headline, expected):
+    from harel.enrich.linker import direct_evidence
+
+    assert direct_evidence(config.ticker(ticker), headline) is expected, headline

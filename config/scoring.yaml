@@ -347,8 +347,28 @@ noise:
       cap: 14
     - pattern: '(נעילה|מסחר) (חיובי|שלילי|מעורב)'
       cap: 14
+    # "<Company> Is Up 14.1% After ..." - the same recap without the word
+    # "shares", which is how OPKO's got through.
+    - pattern: "\\b(is|are|was|were) (up|down) [0-9.]+ ?%"
+      cap: 14
+    - pattern: "\\b(soars?|plunges?|tumbles?|surges?|spikes?|slumps?) [0-9.]+ ?%"
+      cap: 14
 
   title_patterns:
+    # --- Automated stock-analysis content ---------------------------------- #
+    # Generated per ticker, on a schedule, from the price series alone:
+    # "Technical Analysis: Support, Resistance, Indicators", "Risk Assessment:
+    # Volatility", "Price Prediction", "Is Further Upside Left?". They contain
+    # nothing that did not come from the chart - and one of them, on base 28
+    # with no event and a tape-confirmation bonus, outranked a Teva guidance
+    # raise carrying base 86.
+    - pattern: "\\b(technical analysis|risk assessment|valuation analysis|price prediction|stock forecast|price forecast|chart analysis)\\b"
+      cap: 10
+    - pattern: "\\b(support,? resistance|moving averages?|RSI|MACD|fibonacci)\\b.{0,40}\\b(indicator|level|signal)"
+      cap: 10
+    - pattern: "\\b(is (further )?upside left|should you (buy|sell|own)|is it a (buy|sell)|worth (buying|watching)|hidden gem)\\b"
+      cap: 12
+
     - pattern: "\\b(annual general meeting|extraordinary general meeting|AGM|EGM|proxy statement|notice of meeting)\\b"
       cap: 15
     - pattern: "\\b(to (present|participate)|will (present|host|participate)|investor conference|webcast (of|will))\\b"

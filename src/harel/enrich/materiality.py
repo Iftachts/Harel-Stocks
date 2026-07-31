@@ -257,7 +257,13 @@ class MaterialityScorer:
                 score += boost
                 reasons.append(f"+{boost:.0f} ticker keyword boost")
 
-        score += self._price_boost(price, reasons)
+        # Tape confirmation only means something for an item that is actually
+        # news. "News the tape is already confirming outranks news nothing
+        # reacted to" - but a chart-generated article that matched no event at
+        # all is not news, and +8 for coinciding with the move it was generated
+        # from is how it climbed above a guidance raise.
+        if hits:
+            score += self._price_boost(price, reasons)
         return score, reasons
 
     def _price_boost(self, price: PriceContext | None, reasons: list[str]) -> float:

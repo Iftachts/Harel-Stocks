@@ -13,8 +13,9 @@ from typing import Any
 from .collect import CollectorContext, build_collectors
 from .config import Config, get_config
 from .db import Database
+from .collect.rss import _is_placeholder_title
 from .dedupe import Clusterer
-from .enrich.linker import EntityLinker
+from .enrich.linker import EntityLinker, direct_evidence
 from .enrich.materiality import MaterialityScorer, PriceContext
 from .http import HttpClient
 from .models import CalendarEntry, RawItem, ScoredItem
@@ -167,20 +168,54 @@ class Pipeline:
             "SELECT * FROM items WHERE published_at >= ?", (since,)
         ).fetchall()
         prices = self._price_context()
-        changed = dropped = 0
+        live_feeds = self._configured_feed_urls()
+        changed = dropped = purged = 0
 
         for row in rows:
+            # Retiring a feed in config did nothing to what it had already
+            # collected. Gilat's site feed was removed for publishing marketing
+            # as issuer news, and its case studies stayed in the ranked feed at
+            # trust 1.0 regardless - as did an entry whose headline was the word
+            # "Title". A source we have decided not to believe must not keep
+            # its old items standing, and a headline that says nothing was never
+            # a story.
+            meta = json.loads(row["meta_json"] or "{}")
+            feed_url = meta.get("feed")
+            known = live_feeds.get(row["source"])
+            if _is_placeholder_title(row["title"]) or (
+                    feed_url and known and feed_url not in known):
+                self.db.conn.execute("DELETE FROM items WHERE uid = ?", (row["uid"],))
+                purged += 1
+                continue
+
             item = RawItem(
                 source=row["source"], source_kind=row["source_kind"],
                 external_id=row["external_id"], title=row["title"],
                 url=row["url"] or "", summary=row["summary"] or "",
                 body=row["body"] or "", lang=row["lang"] or "en",
                 published_at=datetime.fromisoformat(row["published_at"]),
-                meta=json.loads(row["meta_json"] or "{}"),
+                meta=meta,
+                # The collector's own knowledge - "I polled TEVA's CIK", "this
+                # came off the KEN rival-product query" - is half the linking
+                # input and is not a property of the text. Rebuilding without it
+                # silently unlinks every item whose only tie to a ticker was the
+                # query that found it.
+                seed_tickers=self._trusted_seeds(row, meta),
+                seed_relation=meta.get("seed_relation") or "DIRECT",
             )
             links = self.linker.link(item)
             if not links:
-                self.db.conn.execute("DELETE FROM items WHERE uid = ?", (row["uid"],))
+                # Do NOT delete the row. Re-linking is a re-derivation from less
+                # information than the collector had, so "no links now" does not
+                # mean "should not have been stored": treating it that way took
+                # 185 items whose only tie was the collector's seed and deleted
+                # them. Deletion is reserved for the two explicit purges above.
+                #
+                # The false CLAIM does go, though. An item with no links is
+                # simply invisible, which is the right outcome for "PH, US allot
+                # P42b" having been filed under Allot Communications.
+                self.db.conn.execute(
+                    "DELETE FROM item_tickers WHERE uid = ?", (row["uid"],))
                 dropped += 1
                 continue
             scored = self.scorer.score(
@@ -199,11 +234,60 @@ class Pipeline:
             self._extract_calendar(scored)
 
         self.db.conn.commit()
-        return {"examined": len(rows), "rescored": changed, "dropped": dropped}
+        return {"examined": len(rows), "rescored": changed, "dropped": dropped,
+                "purged": purged}
+
+    def _trusted_seeds(self, row, meta: dict[str, Any]) -> list[str]:
+        """The collector's seeds, minus any a search engine merely guessed at.
+
+        A per-ticker Google query seeds DIRECT on the strength of the query
+        alone. That is fine at collection time - the collector now checks the
+        text before emitting - but items collected before that check still hold
+        seeds the text never supported.
+        """
+        seeds = list(meta.get("seed_tickers") or [])
+        source = self.config.sources.get(row["source"])
+        if not seeds or not source or "{q}" not in (source.base_url or ""):
+            return seeds
+        if (meta.get("seed_relation") or "DIRECT") != "DIRECT":
+            return seeds
+        text = f"{row['title']} {row['summary'] or ''}"
+        return [t for t in seeds
+                if (tc := self.config.ticker(t)) and direct_evidence(tc, text)]
+
+    def _configured_feed_urls(self) -> dict[str, set[str]]:
+        """Per source, the feed URLs we still poll - but ONLY for sources whose
+        feed list is finite and knowable.
+
+        Query-driven sources (Google News: one request per ticker per theme,
+        `base_url` with `{q}`) are deliberately absent. Their `meta.feed` is the
+        search URL, which never appears in any static list, so treating absence
+        as "retired" reads every single aggregator item as orphaned. It did
+        exactly that here and deleted 978 rows before the count gave it away.
+        """
+        out: dict[str, set[str]] = {}
+        for source in self.config.sources.values():
+            if not source.enabled or "{q}" in (source.base_url or ""):
+                continue
+            urls = set(source.feeds)
+            if source.raw.get("feeds_from") == "universe.ir_feeds":
+                for ticker in self.config.active_tickers:
+                    tc = self.config.ticker(ticker)
+                    if tc:
+                        urls |= set(tc.ir_feeds)
+            if urls:
+                out[source.key] = urls
+        return out
 
     # -------------------------------------------------------------- process --
     def _process(self, item, clusterer: Clusterer, prices: dict[str, PriceContext],
                  report: RunReport) -> bool:
+        # Persist what the collector knew, so a later rescore can rebuild the
+        # same links instead of re-deriving them from the text alone.
+        if item.seed_tickers:
+            item.meta.setdefault("seed_tickers", list(item.seed_tickers))
+            item.meta.setdefault("seed_relation", item.seed_relation)
+
         links = self.linker.link(item)
         if not links:
             # Nothing in our universe is touched - correct behaviour is to drop

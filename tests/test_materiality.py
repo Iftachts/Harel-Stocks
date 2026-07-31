@@ -151,13 +151,28 @@ def test_high_trust_source_can_reach_alert(parts):
 
 
 # ---------------------------------------------------------------- price -- #
-def test_tape_confirmation_boosts_the_score(parts):
-    plain = score(parts, "Perion Network updates its outlook for the full year")
-    confirmed = score(
-        parts, "Perion Network updates its outlook for the full year",
-        prices={"PERI": PriceContext(change_pct=-9.4, volume_multiple=5.1)},
-    )
+def test_tape_confirmation_boosts_a_real_story(parts):
+    headline = "Perion Network cuts its full-year revenue guidance"
+    plain = score(parts, headline)
+    confirmed = score(parts, headline,
+                      prices={"PERI": PriceContext(change_pct=-9.4, volume_multiple=5.1)})
+    assert plain.events, "the fixture headline must classify as an event"
     assert confirmed.per_ticker_score["PERI"] > plain.per_ticker_score["PERI"]
+
+
+def test_tape_confirmation_does_not_promote_a_chart_generated_article(parts):
+    """"News the tape is confirming outranks news nothing reacted to" - but an
+    article generated FROM the chart is not news. A "Technical Analysis:
+    Support, Resistance, Indicators" piece on base 28 with no event collected
+    +8 for coinciding with the move it was generated from, and outranked a
+    guidance raise carrying base 86."""
+    headline = "Perion Network Ltd (PERI) Technical Analysis: Support, Resistance"
+    plain = score(parts, headline)
+    confirmed = score(parts, headline,
+                      prices={"PERI": PriceContext(change_pct=-9.4, volume_multiple=5.1)})
+    assert not plain.events, "this headline must not classify as an event"
+    assert confirmed.per_ticker_score["PERI"] == plain.per_ticker_score["PERI"]
+    assert confirmed.per_ticker_score["PERI"] <= 12, confirmed.reasons
 
 
 # ------------------------------------------------------------ 8-K items -- #
