@@ -895,3 +895,38 @@ def test_edgar_full_text_link_cannot_be_upgraded_to_direct(config, db):
     links = EntityLinker(config).link(item)
     teva = next(l for l in links if l.ticker == "TEVA")
     assert teva.relation == "PEER", links
+
+
+def test_maya_refusing_every_name_is_not_a_quiet_day(config, db):
+    """Twenty HTTP 403s in a row left `harel doctor` reporting the source
+    healthy, with a fresh last_ok_at and no error.
+
+    The sibling fix covered a schema break - `_find_records` matching nothing -
+    but an HTTP failure took a different branch that only warned, and warnings
+    live in the run report while doctor reads source_state. The 403s here are
+    known and documented (the MAYA 2.0.0 feed is pending approval), which is
+    exactly why this mattered: the panel was only reporting the failures
+    somebody had already thought to look for.
+    """
+    from harel.collect.maya import MayaCollector
+    from harel.http import Response
+
+    class RefusingClient(FakeHttpClient):
+        def get(self, url, **kwargs):
+            self.calls.append(url)
+            return Response(403, "", b"", {}, url)
+
+    collector = MayaCollector(
+        config.sources["maya_tase"],
+        CollectorContext(config=config, client=RefusingClient({}), db=db,
+                         lookback_hours=72),
+    )
+    assert list(collector.collect()) == []
+
+    state = db.get_source_state("maya_tase")
+    assert state.get("last_error"), \
+        "a source that refused every request must not read as a quiet day"
+    assert "403" in state["last_error"]
+
+    # And a warning a human actually sees, not only a state column.
+    assert any("403" in w for w in collector.warnings)

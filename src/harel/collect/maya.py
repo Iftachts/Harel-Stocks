@@ -69,6 +69,7 @@ class MayaCollector(Collector):
         # Names whose response held nothing we could parse. Collected here and
         # reported once at the end of the pass - see collect().
         self.unparseable: list[str] = []
+        self.http_failures: list[tuple[str, int]] = []
 
     def collect(self) -> Iterator[RawItem]:
         official = bool(self.source.api_key)
@@ -134,6 +135,20 @@ class MayaCollector(Collector):
             )
             self.save_state(last_error=f"0 parseable records for {names}")
 
+        if self.http_failures and len(self.http_failures) == len(targets):
+            # Every name refused, which is not a quiet day. The 403s are known
+            # and documented - the MAYA 2.0.0 feed is pending approval - but
+            # `harel doctor` read the source as healthy through all twenty of
+            # them, because warnings live in the run report and doctor reads
+            # source_state. A source that failed 100% of its requests must not
+            # be indistinguishable from one that was simply asked on a quiet
+            # day, whatever the reason, or the panel only reports the failures
+            # somebody already thought to look for.
+            statuses = sorted({status for _, status in self.http_failures})
+            self.save_state(last_error=(
+                f"HTTP {'/'.join(str(s) for s in statuses)} for all "
+                f"{len(targets)} names"))
+
     # -- fetching ---------------------------------------------------------- #
     def _collect_company(self, ticker: str, tc: Any,
                          issuer_id: Any = None) -> Iterator[RawItem]:
@@ -142,6 +157,7 @@ class MayaCollector(Collector):
                                allow_status=(400, 401, 403, 404, 500))
         if resp.status >= 400:
             self.warn(f"{ticker}: MAYA returned HTTP {resp.status}")
+            self.http_failures.append((ticker, resp.status))
             return
 
         try:
