@@ -186,6 +186,25 @@ def _detection_lag_he(lag: int | None) -> str:
     return f"{_ltr(lag)} דקות אחרי הפרסום{late}"
 
 
+def _public_lag_he(minutes: int | None) -> str:
+    """How long we were blind, measured from the moment the document became
+    readable by anyone rather than from the date it publishes under.
+
+    This is the honest one. `_detection_lag_he` above measures against
+    `published_at`, which for a Federal Register document is a *scheduled* date -
+    so it reports lead time, and a document sitting unfetched on public
+    inspection since Friday still looked early. Rendered as a duration, not in
+    minutes: the gap that prompted this is 2,340 of them.
+    """
+    if minutes is None:
+        return "-"
+    if minutes < 0:
+        return (f"{html.escape(he.duration(-minutes))} <b>לפני</b> שהמסמך "
+                f"היה זמין לציבור &middot; זמן קדימה, לא פיגור")
+    late = "" if minutes < 30 else " <span class='bad'>&mdash; באיחור</span>"
+    return f"{html.escape(he.duration(minutes))} אחרי שהמסמך היה זמין לציבור{late}"
+
+
 def _auto(text: str, cut: int | None = None) -> str:
     """Text that may be Hebrew or Latin: let the browser decide per string."""
     value = text or ""
@@ -558,7 +577,7 @@ def render_item(views: Views, uid: str,
         bell = (f"פורסם אחרי נעילת {_ltr((when.get('last_close_et') or '') + ' ET')} — "
                 f"זה הסטאפ של הסשן הבא, ולא יכול להיות הגורם לתנועה ההיא")
 
-    parts.append(_kv("מתי", [
+    when_rows = [
         ("תאריך הפרסום", pub_date),
         ("פורסם", f"{_ltr(str(when.get('published_utc') or 'לא ידוע')[:16] + ' UTC')} "
                   f"&middot; {_ltr(when.get('published_et') or '')} "
@@ -568,10 +587,28 @@ def render_item(views: Views, uid: str,
             str(when.get("session_at_publication") or ""),
             str(when.get("session_at_publication") or "-")))),
         ("מול הפעמון", bell),
+    ]
+    # Above "ראינו לראשונה" on purpose: it is the earlier of the two moments,
+    # and the pair only reads as a gap when they are in order.
+    if when.get("first_public_at"):
+        when_rows.append((
+            "זמין לציבור לראשונה",
+            f"{_ltr(str(when['first_public_at'])[:16] + ' UTC')} &middot; "
+            f"{_ltr(he.eastern_label(when['first_public_at']))}"))
+    when_rows.append(
         ("ראינו לראשונה",
-         _ltr(str(when.get('first_seen_by_us_utc') or '')[:16] + " UTC")),
-        ("פיגור זיהוי", lag_html),
-    ]))
+         _ltr(str(when.get('first_seen_by_us_utc') or '')[:16] + " UTC")))
+    from_public = when.get("detection_lag_minutes_from_public")
+    # On a public-inspection document `published_at` IS the filing moment, so
+    # the two lags are the same number under two names and printing both invites
+    # the reader to look for a difference that is not there. They diverge only
+    # for a published document, where the filing came days before the date it
+    # publishes under - which is the case the second row exists for.
+    if from_public is None or from_public != when.get("detection_lag_minutes"):
+        when_rows.append(("פיגור זיהוי", lag_html))
+    if from_public is not None:
+        when_rows.append(("פיגור גילוי", _public_lag_he(from_public)))
+    parts.append(_kv("מתי", when_rows))
 
     link_rows = []
     for link in data["who_it_is_about"]:
@@ -944,6 +981,32 @@ def _quote_label(quote: dict[str, Any] | None) -> str:
             f"{_ltr(he.eastern_label(printed))} &middot; {fetched} &middot; מושהה")
 
 
+def _first_public_he(item: dict[str, Any]) -> str:
+    """The two clocks that bracket a coverage gap: when the document became
+    readable by anyone, and when we actually fetched it.
+
+    "נודע לנו לפני 5 שעות" is our collection time, and on its own it reads as a
+    fresh item. The UFLPA entity list had been on public inspection since Friday
+    08:45 ET and was not collected until Sunday: the cell reported the 5 hours
+    and hid the 39. Both clocks are shown in ET so the gap between them is the
+    obvious thing on the line.
+    """
+    public = item.get("first_public_at")
+    if not public:
+        return ""
+    line = f"<div class='why'>זמין לציבור {_ltr(he.eastern_label(public))}"
+    collected = item.get("discovered_at")
+    if collected:
+        lag = he.minutes_between(public, collected)
+        # A negative gap here would mean we hold it before it was public, which
+        # is not something this source can do - the PI filing IS the moment it
+        # became public. Say nothing rather than print a lag backwards.
+        tail = (f" &middot; פיגור גילוי {html.escape(he.duration(lag))}"
+                if lag is not None and lag >= 0 else "")
+        line += f"<br>נאסף {_ltr(he.eastern_label(collected))}{tail}"
+    return line + "</div>"
+
+
 def _time_cell(item: dict[str, Any]) -> str:
     """When it was published - or, honestly, when we merely found it."""
     if item.get("published_unknown"):
@@ -955,8 +1018,17 @@ def _time_cell(item: dict[str, Any]) -> str:
         # Dating it by that future date made it "הרגע"; dating it by when we
         # found it would hide the lead time, which is the only reason we hold
         # the document at all. Say both.
+        head = (f"<span class='muted'>מתפרסם "
+                f"{_ltr(he.day_label(item['publishes_on']))}</span>")
+        public = _first_public_he(item)
+        if public:
+            return head + public
         seen = he.ago(item.get("discovered_at") or item["t"])
-        return (f"<span class='muted'>מתפרסם "
-                f"{_ltr(he.day_label(item['publishes_on']))}</span>"
-                f"<div class='why'>נודע לנו {html.escape(seen)}</div>")
-    return html.escape(he.ago(item["t"]))
+        return head + f"<div class='why'>נודע לנו {html.escape(seen)}</div>"
+    # A published Federal Register document was on public inspection days before
+    # the date it publishes under, so `t` understates how long the market has had
+    # it. Only worth a line when that is materially earlier than `t` - on an
+    # already-published PI copy the two are the same instant.
+    gap = he.minutes_between(item.get("first_public_at"), item["t"])
+    extra = _first_public_he(item) if gap is not None and gap >= 60 else ""
+    return html.escape(he.ago(item["t"])) + extra

@@ -1446,3 +1446,60 @@ def test_a_source_with_no_collector_says_so_instead_of_asking_for_a_key(db, conf
     if orphans:
         english = " ".join(views._coverage_warnings())
         assert "no collector implements" in english
+
+
+def test_a_move_can_qualify_on_its_sector_alone(config, db):
+    """CGEN rose 1.9% on a day XBI fell 3.1% - a 5pp divergence from its own
+    sector, on 1.4x volume, with nothing behind it. It never appeared, because
+    1.9% did not clear the absolute gate and the relative move was therefore
+    never computed at all. A name holding up while its sector sells off is the
+    "what do they know?" question this panel exists to raise.
+    """
+    from harel.models import PriceSnapshot
+
+    now = datetime.now(timezone.utc)
+    # Small absolute move, large move against the sector, real volume.
+    db.save_price(PriceSnapshot(ticker="CGEN", asof=now, last=2.35, prev_close=2.335,
+                                change_pct=0.64, volume_multiple=1.42,
+                                session="closed", provider="yahoo"))
+    db.save_price(PriceSnapshot(ticker="XBI", asof=now, last=147.0, prev_close=151.5,
+                                change_pct=-2.94, session="closed", provider="yahoo"))
+    db.conn.commit()
+
+    views = Views(db=db, config=config)
+    # 2.5 is what morning_brief uses, and it is what hid this.
+    movers = views.whats_moving(min_abs_pct=2.5)["movers"]
+    cgen = next((m for m in movers if m["ticker"] == "CGEN"), None)
+
+    assert cgen is not None, "a 3.6pp divergence from its sector must be examined"
+    assert cgen["relative_pct"] == pytest.approx(3.58, abs=0.01)
+
+
+def test_a_quiet_name_drifting_on_no_volume_is_not_a_signal(config, db):
+    """The volume floor is what stops the relative path firing on a spread."""
+    from harel.models import PriceSnapshot
+
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="CGEN", asof=now, last=2.35, prev_close=2.335,
+                                change_pct=0.64, volume_multiple=0.1,
+                                session="closed", provider="yahoo"))
+    db.save_price(PriceSnapshot(ticker="XBI", asof=now, last=147.0, prev_close=151.5,
+                                change_pct=-2.94, session="closed", provider="yahoo"))
+    db.conn.commit()
+
+    movers = Views(db=db, config=config).whats_moving(min_abs_pct=2.5)["movers"]
+    assert not any(m["ticker"] == "CGEN" for m in movers)
+
+
+def test_a_peers_own_price_recap_is_not_commentary_on_our_move(ran):
+    """"Palo Alto Networks Stock Price Up 1.9%" was offered under ALLT as
+    post-move commentary, and a Neurocrine earnings reaction under TEVA. Both
+    are real articles; neither describes the move on the row it sat in. Only a
+    recap of THIS company's own move is the circular-reasoning case that list
+    exists to name."""
+    _, views = ran
+    for mover in views.whats_moving(min_abs_pct=0.0)["movers"]:
+        for item in mover.get("post_move_commentary") or []:
+            assert (item.get("relation") or "") in ("DIRECT", "SUBSIDIARY"), (
+                f"{item['title'][:60]!r} is a {item.get('relation')} story, "
+                f"not commentary on {mover['ticker']}'s move")

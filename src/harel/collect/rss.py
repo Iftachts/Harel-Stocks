@@ -15,7 +15,7 @@ import html
 import re
 import time
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 
 import feedparser
@@ -35,6 +35,26 @@ MAX_THEME_QUERIES_PER_SECTOR = 3
 MAX_RIVAL_TERMS_PER_QUERY = 6
 # A feed emitting placeholders must not turn one pass into a hundred fetches.
 MAX_TITLE_LOOKUPS_PER_RUN = 5
+# How far back an ISSUER feed is read for calendar purposes only. An issuer
+# announces its reporting date weeks ahead and then goes quiet until the results
+# themselves: Ormat published "to Host Conference Call Announcing Second Quarter
+# 2026 Financial Results" on 1 July for a 5 August report, and no news window -
+# 12 hours in `watch`, 72 in `collect` - ever reached back that far, so the date
+# was invisible on every pass in between. Entries this old are kept ONLY when
+# they announce a date still ahead of us; see `_read_feed`.
+IR_CALENDAR_LOOKBACK_DAYS = 75
+# Q4's `pressrelease.aspx` feeds (TEVA, ORA, ICL, CGEN) carry a headline and
+# nothing else - no summary, no content - so for those four names the issuer's
+# own reporting date could never be read at all. Same reason as
+# MAX_TITLE_LOOKUPS_PER_RUN: a feed of title-only entries must not turn one
+# collection pass into forty page fetches. Sized off what those four feeds
+# actually hold - this quarter's announcement and last quarter's, seven in total
+# on 2026-08-02 - with room to spare, because the budget is spent in universe
+# order and a tight one starves whichever name is last (CGEN).
+MAX_BODY_LOOKUPS_PER_RUN = 12
+# Enough for the lede, where a release states its reporting date. Storing the
+# whole page would put a navigation menu into the full-text index.
+MAX_BODY_CHARS = 4000
 
 # Headlines that carry no information - CMS templating leftovers, almost always.
 _PLACEHOLDER_TITLES = {
@@ -51,21 +71,29 @@ _HTML_TITLE = re.compile(r"<title[^>]*>([^<]{4,300})</title>", re.IGNORECASE)
 class RssCollector(Collector):
     def collect(self) -> Iterator[RawItem]:
         self._title_lookups = 0
-        for feed_url, seed_tickers, seed_relation, label in self._feed_plan():
+        self._body_lookups = 0
+        for feed_url, seed_tickers, seed_relation, label, issuer in self._feed_plan():
             try:
-                yield from self._read_feed(feed_url, seed_tickers, seed_relation, label)
+                yield from self._read_feed(feed_url, seed_tickers, seed_relation,
+                                           label, issuer)
             except HttpError as exc:
                 self.warn(f"{label}: {exc}")
             except Exception as exc:  # a single broken feed must not kill the run
                 self.warn(f"{label}: unexpected {type(exc).__name__}: {exc}")
 
     # -- planning ---------------------------------------------------------- #
-    def _feed_plan(self) -> list[tuple[str, list[str], str, str]]:
+    def _feed_plan(self) -> list[tuple[str, list[str], str, str, bool]]:
+        """(url, seed tickers, relation, label, is_this_the_issuer_speaking).
+
+        The last flag buys an issuer feed two things a stranger's feed must not
+        have: a calendar-length read-back window, and permission to fetch the
+        release body when the feed withholds it.
+        """
         raw = self.source.raw
-        plan: list[tuple[str, list[str], str, str]] = []
+        plan: list[tuple[str, list[str], str, str, bool]] = []
 
         for url in self.source.feeds:
-            plan.append((url, [], "SECTOR_THEME", url))
+            plan.append((url, [], "SECTOR_THEME", url, False))
 
         if raw.get("feeds_from") == "universe.ir_feeds":
             for ticker in self.active_tickers:
@@ -73,11 +101,11 @@ class RssCollector(Collector):
                 if not tc:
                     continue
                 for url in tc.ir_feeds:
-                    plan.append((url, [ticker], "DIRECT", f"{ticker} IR"))
+                    plan.append((url, [ticker], "DIRECT", f"{ticker} IR", True))
 
         base = self.source.base_url
         if base and "{q}" in base:
-            plan.extend(self._query_plan(base))
+            plan.extend((*entry, False) for entry in self._query_plan(base))
 
         return plan
 
@@ -163,13 +191,19 @@ class RssCollector(Collector):
 
     # -- fetching ---------------------------------------------------------- #
     def _read_feed(self, url: str, seed_tickers: list[str], seed_relation: str,
-                   label: str) -> Iterator[RawItem]:
+                   label: str, issuer: bool = False) -> Iterator[RawItem]:
         state_key = f"{self.source.key}:{url}"
         prev = self.db.get_source_state(state_key)
+        # An issuer feed is read unconditionally. "Nothing new" is the right
+        # answer for news and the wrong one for the calendar: Ormat's feed has
+        # not changed since the release that announced its 5 August report, so
+        # honouring the ETag meant that date could never be re-read - only
+        # missed, once, on the pass that happened not to be running that day.
+        # Eleven feeds of ten entries; the bytes are not worth the blind spot.
         resp = self.client.get(
             url,
-            etag=prev.get("etag"),
-            last_modified=prev.get("last_modified"),
+            etag=None if issuer else prev.get("etag"),
+            last_modified=None if issuer else prev.get("last_modified"),
             allow_status=(404, 403, 410),
         )
         now = datetime.now(timezone.utc).isoformat()
@@ -201,6 +235,11 @@ class RssCollector(Collector):
         query_direct = (seed_relation == "DIRECT" and len(seed_tickers) == 1
                         and "{q}" in (self.source.base_url or ""))
 
+        # How far back this feed is worth reading at all. Only an issuer gets the
+        # longer window, and only announcements survive it - see below.
+        calendar_since = (datetime.now(timezone.utc)
+                          - timedelta(days=IR_CALENDAR_LOOKBACK_DAYS))
+
         count = 0
         for entry in parsed.entries:
             try:
@@ -208,8 +247,19 @@ class RssCollector(Collector):
             except Exception as exc:
                 self.warn(f"{label}: bad entry ({type(exc).__name__}: {exc})")
                 continue
-            if item is None or item.published_at < self.ctx.since:
+            if item is None:
                 continue
+            if issuer:
+                self._add_release_body(item, label)
+            if item.published_at < self.ctx.since:
+                # Too old to be news. An issuer feed is still read this far back
+                # for exactly one thing: a reporting date that has not happened
+                # yet. Anything else at this age is a release we either already
+                # have or have deliberately aged out, so it stays dropped.
+                if not (issuer and item.published_at >= calendar_since
+                        and _future_results_date(item)):
+                    continue
+                item.meta["calendar_backfill"] = True
             if required:
                 haystack = f"{item.title} {item.summary}".lower()
                 hit = next((t for t in required if t.lower() in haystack), None)
@@ -296,6 +346,33 @@ class RssCollector(Collector):
             },
         )
 
+    def _add_release_body(self, item: RawItem, label: str) -> None:
+        """Fetch the release when the issuer's feed hands over only a headline.
+
+        TEVA, ORA, ICL and CGEN all publish through Q4's `pressrelease.aspx`,
+        which emits a title and an empty summary. Everything a release says is
+        therefore off-feed, and the reporting date most of all: Ormat's 1 July
+        announcement is a bare headline here, while the page behind it says
+        "results ... will be issued on Wednesday, August 5, 2026". Restricted to
+        entries whose headline already reads like a results announcement, so a
+        title-only feed costs one fetch per announcement and not one per entry.
+        """
+        if item.summary or item.body or not item.url:
+            return
+        if self._body_lookups >= MAX_BODY_LOOKUPS_PER_RUN:
+            return
+        if not _announces_results(item.title):
+            return
+        self._body_lookups += 1
+        try:
+            resp = self.client.get(item.url, allow_status=(403, 404, 410))
+        except Exception as exc:
+            self.warn(f"{label}: could not read the release behind "
+                      f"{item.title[:60]!r} ({type(exc).__name__}: {exc})")
+            return
+        if resp.status >= 400:
+            return
+        item.body = _page_text(resp.text or "")[:MAX_BODY_CHARS]
 
     def _title_from_page(self, url: str) -> str | None:
         """Last resort for an entry with no usable headline: ask the page.
@@ -319,6 +396,46 @@ class RssCollector(Collector):
                 if not _is_placeholder_title(candidate):
                     return candidate[:300]
         return None
+
+
+# Chrome that surrounds a release, dropped so the lede is near the top. NOT
+# `form`: an .aspx page wraps its entire body in one <form runat="server">, and
+# every issuer feed that needs this fetch is a `pressrelease.aspx` feed - so
+# stripping it deleted the release and left 123 characters of <title>.
+_STRIPPED_TAGS = re.compile(
+    r"(?is)<(script|style|nav|footer|header|noscript)[^>]*>.*?</\1>")
+# `<[^>]+>` does not remove a comment - it stops at the first ">", so the prose
+# inside survives as text. Harmless on most pages and not on this one: a build
+# stamp or an editor's note left in the markup becomes a sentence the date
+# extractor then reads.
+_HTML_COMMENT = re.compile(r"(?s)<!--.*?-->")
+
+
+def _page_text(html_text: str) -> str:
+    """Readable text out of a press-release page. Crude on purpose: the caller
+    wants a sentence containing a date, not a faithful rendering."""
+    stripped = _STRIPPED_TAGS.sub(" ", _HTML_COMMENT.sub(" ", html_text))
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", stripped)).split())
+
+
+# The two helpers below defer their import because `pipeline` imports THIS
+# module. Deliberately imported rather than reimplemented: a second, drifting
+# copy of "what an earnings announcement looks like" is how the collector would
+# start fetching bodies for releases the calendar then ignores, or worse, stop
+# fetching them for releases it wants.
+def _announces_results(text: str) -> bool:
+    """Does this headline read like "we will report on <date>"?"""
+    from ..pipeline import _EARNINGS_ANNOUNCEMENT, _EARNINGS_SUBJECT
+
+    return bool(_EARNINGS_ANNOUNCEMENT.search(text)
+                and _EARNINGS_SUBJECT.search(text))
+
+
+def _future_results_date(item: RawItem) -> bool:
+    """…and does it name a date that has not happened yet?"""
+    from ..pipeline import _earnings_date
+
+    return _earnings_date(item) is not None
 
 
 def _is_placeholder_title(title: str) -> bool:

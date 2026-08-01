@@ -220,6 +220,13 @@ def _compact(row: dict[str, Any], include_reasons: bool = False) -> dict[str, An
         # inspection filing before the publication. That is when the clock
         # actually started, and lead time is why the early copy is collected.
         out["first_published_at"] = row["first_published_at"]
+    if meta.get("first_public_at"):
+        # When the document first became readable by anyone: the public
+        # inspection filing, not the Register publication and not our fetch.
+        # For a system explaining a Friday move that is the moment which decides
+        # whether it could have been known, and the drill-down was showing our
+        # collection time instead - hiding a 39-hour gap behind "seen 5h ago".
+        out["first_public_at"] = meta["first_public_at"]
     # Whether a publication date is still ahead of us is a question about now,
     # so it is answered now. `meta.forthcoming` was decided once, at collection
     # time, and nothing ever cleared it - and a public-inspection copy leaves the
@@ -399,6 +406,18 @@ class Views:
             "prev_close": row.get("prev_close"),
             "change_pct": (round(row["change_pct"], 2)
                            if row.get("change_pct") is not None else None),
+            # Named so the two cannot be confused with each other. `change_pct`
+            # is the regular session, close against prior close, and it stops
+            # moving when the bell rings; these three are what happened after
+            # it. Blending them into one number made a finished session keep
+            # drifting, and made "this name against its sector index" compare
+            # hours the index did not trade.
+            "session_change_pct": (round(row["change_pct"], 2)
+                                   if row.get("change_pct") is not None else None),
+            "extended_last": row.get("extended_last"),
+            "extended_change_pct": (round(row["extended_change_pct"], 2)
+                                    if row.get("extended_change_pct") is not None else None),
+            "extended_time": row.get("extended_time"),
             "volume": row.get("volume"),
             "adv20": row.get("adv20"),
             "volume_multiple": (round(row["vol_mult"], 2)
@@ -423,6 +442,51 @@ class Views:
         }
 
     # ---------------------------------------------------- what's moving ---- #
+    # A move can be worth explaining for either of two reasons, and an absolute
+    # threshold only sees one of them.
+    #
+    # CGEN rose 1.9% on a day XBI fell 3.1% - a 5.0pp divergence from its own
+    # sector, on 1.4x volume, with nothing behind it. That is at least as odd as
+    # several moves that did make the list, and it was invisible because 1.9%
+    # never cleared the 2.5% absolute gate, so its relative move was never
+    # computed at all. A name holding up while its sector sells off is exactly
+    # the "what do they know?" question this panel exists to raise.
+    #
+    # The volume floor is what keeps the second path from firing on noise: a
+    # quiet name drifting against a moving index on a tenth of its usual volume
+    # is a spread, not a signal.
+    #
+    # The bar itself is UNEXPLAINED_RELATIVE_PCT and not a number of its own,
+    # because a second threshold here would silently outrank it: set the gate
+    # above the alert bar and a move that qualifies as unexplained can never be
+    # examined to find out. Anything that could be flagged has to get in.
+    RELATIVE_ENTRY_MIN_VOL_RATIO = 0.8
+
+    def _worth_explaining(self, ticker: str, price: dict[str, Any],
+                          min_abs_pct: float) -> bool:
+        if abs(price["change_pct"]) >= min_abs_pct:
+            return True
+        relative = self._relative_move(ticker, price)
+        if relative is None or abs(relative) < self.UNEXPLAINED_RELATIVE_PCT:
+            return False
+        vol_ratio = price.get("vol_mult")
+        return vol_ratio is not None and vol_ratio >= self.RELATIVE_ENTRY_MIN_VOL_RATIO
+
+    def _relative_move(self, ticker: str, price: dict[str, Any]) -> float | None:
+        """This name's session return minus its sector proxy's, in points.
+
+        Both sides are regular-session returns, which is the only basis on which
+        they are comparable: a small-cap's post-market drift and an ETF's are
+        different hours and different liquidity.
+        """
+        tc = self.config.ticker(ticker)
+        bench_sym = self.config.benchmark_for(tc.sector) if tc else None
+        bench = self.db.latest_price(bench_sym) if bench_sym else None
+        bench_pct = bench.get("change_pct") if bench else None
+        if bench_pct is None or price.get("change_pct") is None:
+            return None
+        return round(price["change_pct"] - bench_pct, 2)
+
     def whats_moving(self, min_abs_pct: float = 2.0) -> dict[str, Any]:
         """Price movers joined with their best explanation."""
         movers = []
@@ -430,7 +494,7 @@ class Views:
             price = self.db.latest_price(ticker)
             if not price or price.get("change_pct") is None:
                 continue
-            if abs(price["change_pct"]) < min_abs_pct:
+            if not self._worth_explaining(ticker, price, min_abs_pct):
                 continue
             candidates = [
                 # Must not be stricter than the feed's own threshold, or the
@@ -450,11 +514,21 @@ class Views:
             # purpose: capping them as noise is what stops them ranking, and if
             # that also made them invisible the reader would go looking for the
             # article they can see on Twitter and conclude we had missed it.
-            commentary = [
+            reactive = [
                 r for r in self.db.feed(tickers=[ticker], min_score=0,
                                         since_hours=30, limit=12)
                 if self._is_reactive(r)
             ]
+            # A recap of a PEER's move is not commentary on ours. "Palo Alto
+            # Networks Stock Price Up 1.9%" was being offered under ALLT as
+            # post-move commentary, and a Neurocrine earnings reaction under
+            # TEVA - both true articles, neither one a description of the move
+            # on the row it sat in. Only a recap of THIS company's own move is
+            # the circular-reasoning case this list exists to name; the rest is
+            # peer tape, kept but not presented as though it were about us.
+            commentary = [r for r in reactive
+                          if (r.get("relation") or "") in ("DIRECT", "SUBSIDIARY")]
+            peer_commentary = [r for r in reactive if r not in commentary]
             candidates = [r for r in candidates if not self._is_reactive(r)]
 
             # Sector-level regulatory reading, gathered on its own terms. It is
@@ -494,8 +568,9 @@ class Views:
             bench_sym = self.config.benchmark_for(tc.sector) if tc else None
             bench = self.db.latest_price(bench_sym) if bench_sym else None
             bench_pct = bench.get("change_pct") if bench else None
-            relative = (round(price["change_pct"] - bench_pct, 2)
-                        if bench_pct is not None else None)
+            # Through the same helper the entry gate uses, so a name cannot be
+            # admitted on one arithmetic and reported on another.
+            relative = self._relative_move(ticker, price)
 
             # Relevance got an item this far. Causation is a second question,
             # and it is asked here: a sector-level match may only explain a move
@@ -537,6 +612,10 @@ class Views:
                 "possible_context": [_compact(r) for r in context[:3]],
                 "after_the_bell": [_compact(r) for r in after_bell[:3]],
                 "post_move_commentary": [_compact(r) for r in commentary[:3]],
+                # A peer's own price recap. Reported apart so the agent can say
+                # "the sector was being written about" without claiming anyone
+                # wrote about this name.
+                "peer_commentary": [_compact(r) for r in peer_commentary[:3]],
             })
         movers.sort(key=lambda m: abs(m["change_pct"]), reverse=True)
         return {"asof": datetime.now(timezone.utc).isoformat(), "movers": movers,
@@ -796,6 +875,18 @@ class Views:
             # the system is fast enough to trade on, and nothing else reports it.
             timing["detection_lag_minutes"] = round(
                 (collected - pub).total_seconds() / 60)
+
+        # The honest version of the same number. `published_at` for a Federal
+        # Register document is the date it publishes UNDER, which is scheduled -
+        # so a lag measured against it reports lead time, and a document that
+        # sat unfetched on public inspection since Friday morning still looked
+        # early. `first_public_at` is when anyone could have read it.
+        first_public = _published_utc({"published_at": meta.get("first_public_at")})
+        if first_public:
+            timing["first_public_at"] = meta["first_public_at"]
+            if collected:
+                timing["detection_lag_minutes_from_public"] = round(
+                    (collected - first_public).total_seconds() / 60)
 
         links = [
             {

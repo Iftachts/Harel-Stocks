@@ -134,7 +134,19 @@ class PriceSnapshot:
     market_time: datetime | None = None
     last: float | None = None
     prev_close: float | None = None
+    # THE session return: regular close against the prior close, and nothing
+    # else. It was the last print against the prior close, which silently
+    # changed meaning at 16:00 - after the bell a post-market tick kept moving
+    # it, so the same finished session reported +0.1% and then -0.8% an hour
+    # later. A session that is over has one return, and comparing a name to its
+    # benchmark only means something when both are measured over the same hours.
     change_pct: float | None = None
+    # The move since that close, in pre- or post-market. Kept apart rather than
+    # blended in: it is real and a trader wants it, but it is thin, it is not
+    # what the sector index did, and it is not the session.
+    extended_last: float | None = None
+    extended_change_pct: float | None = None
+    extended_time: datetime | None = None
     volume: float | None = None
     adv20: float | None = None
     volume_multiple: float | None = None
@@ -154,6 +166,11 @@ class PriceSnapshot:
             "last": self.last,
             "prev_close": self.prev_close,
             "change_pct": round(self.change_pct, 2) if self.change_pct is not None else None,
+            "extended_last": self.extended_last,
+            "extended_change_pct": (round(self.extended_change_pct, 2)
+                                    if self.extended_change_pct is not None else None),
+            "extended_time": (self.extended_time.isoformat()
+                              if self.extended_time else None),
             "volume": self.volume,
             "adv20": self.adv20,
             "volume_multiple": (

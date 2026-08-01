@@ -185,6 +185,17 @@ tickers:
     sector: enterprise_software_cx
     float_class: large
     ir_feeds:
+      # None exists. Checked 2026-08-02: neither nice.com/press-releases nor
+      # nice.com/company/investors declares a feed, the IR site IS nice.com (Q4
+      # hosts only the webcasts, at events.q4inc.com), and no ir./investors.
+      # host answers for this domain. NICE distributes through Business Wire.
+      # Consequence, and it is the reported one: the 5 August reporting date was
+      # published on 22 July as "NiCE Provides Webcast and Dial-in Details for
+      # its Second Quarter 2026 Results Teleconference", and google_news never
+      # returned it - our query anchors on "NICE Ltd" / "NICE Systems" and that
+      # headline says only "NiCE". A bare "NICE" alias is not the answer; it is
+      # an ordinary English word, which is why the ticker is already on
+      # rss._ENGLISH_WORD_TICKERS.
     peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, LPSN, PEGA]
     # Amazon Connect is AWS's contact-centre PRODUCT, so it belongs in
     # competitor_products; the company here is Amazon.
@@ -450,11 +461,16 @@ tickers:
     sector: satcom
     float_class: small
     ir_feeds:
-      # No press-release feed exists on this domain: /feed/ is the
-      # site-wide WordPress feed (marketing, case studies, blog) or is
-      # empty. At trust 1.0 that is worse than nothing - it published
-      # evergreen collateral as breaking company news. EDGAR, Google
-      # News and MAYA still cover this name.
+      # None exists, re-checked 2026-08-02. /feed/ is the site-wide WordPress
+      # feed and is exactly as advertised - "Exceptional In-Flight Online
+      # Experience", "Phillips 66 Protecting Oil Pipelines" - marketing
+      # collateral that at trust 1.0 published as breaking company news. The
+      # real releases live under /pressreleases/, which has no feed of its own
+      # (/pressreleases/feed/ and /press-releases/feed/ both 404) and sits
+      # behind a Sucuri JS challenge that answers 307 to anything without a
+      # browser, wp-json included. So GILT's reporting date can only reach us
+      # second-hand: it arrives via google_news at confidence 0.8, labelled
+      # "(reported by google_news)" rather than as the issuer's own word.
     peers: [VSAT, SATS, CMTL, ASTS, IRDM, SES.PA, RKLB]
     peer_names: ["Viasat", "EchoStar", "Hughes Network Systems", "Comtech",
                  "ST Engineering iDirect", "SES", "Intelsat", "Eutelsat", "OneWeb",
@@ -517,11 +533,15 @@ tickers:
     sector: voice_networking
     float_class: small
     ir_feeds:
-      # No press-release feed exists on this domain: /feed/ is the
-      # site-wide WordPress feed (marketing, case studies, blog) or is
-      # empty. At trust 1.0 that is worse than nothing - it published
-      # evergreen collateral as breaking company news. EDGAR, Google
-      # News and MAYA still cover this name.
+      # None exists, re-checked 2026-08-02. audiocodes.com declares no feed on
+      # the newsroom (/news/press-releases), the financial sub-section, or the
+      # IR lobby, and no ir./investors. host resolves. AudioCodes distributes
+      # through GlobeNewswire, whose per-organisation feed for this issuer
+      # (globenewswire.com/RssFeed/organization/8898/feed.xml) cannot be used:
+      # the host never answers us at all - every request read-times out, the
+      # same wall as dsca.mil and echa.europa.eu. The 4 August date reaches us
+      # through google_news instead; see the `_EARNINGS_SUBJECT` note in
+      # pipeline.py for why it was being dropped on arrival.
     peers: [RBBN, CSCO, MSFT, ZM, FIVN, AVYA, NICE]
     peer_names: ["Ribbon Communications", "Cisco", "Microsoft Teams", "Zoom",
                  "Avaya", "Mitel", "Oracle Communications", "Five9", "Genesys"]

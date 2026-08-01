@@ -269,6 +269,40 @@ def eastern_label(iso: str) -> str:
     return f"{weekday(et)} {et:%H:%M} ET"
 
 
+def duration(minutes: float) -> str:
+    """A span of time, for a gap rather than an age - no "לפני", no "בעוד".
+
+    Hours run to 48 here rather than 24. The gap this was written for is the 39
+    hours between a Federal Register document appearing on public inspection and
+    our fetching it, and "39 שעות" is the complaint; "יום" rounds it away.
+
+    Returns bare Hebrew, so a caller must escape it and must NOT wrap it in an
+    LTR island: the dual carries no digit at all ("שעתיים"), and there is
+    nothing Latin in it to isolate.
+    """
+    total = int(round(minutes))
+    if total < 60:
+        # No dual for minutes: Hebrew has שעתיים and יומיים but no "דקותיים".
+        return f"{total} דק׳"
+    hours = total // 60
+    if hours < 48:
+        return "שעה" if hours == 1 else _count(hours, "שעות")
+    return _count(hours // 24, "ימים")
+
+
+def minutes_between(earlier: str | None, later: str | None) -> float | None:
+    """Minutes from one ISO stamp to another, or None if either is unreadable.
+
+    Negative when they arrive out of order, which the caller has to decide about
+    - for the Federal Register that ordering is the difference between a
+    detection lag and the lead time the source exists to buy.
+    """
+    start, end = _parse(earlier or ""), _parse(later or "")
+    if start is None or end is None:
+        return None
+    return (end - start).total_seconds() / 60
+
+
 # ------------------------------------------------- explanations & traces --- #
 # Every rule was written against the strings actually present in the database,
 # not against the code that emits them - which is how the "in headline" /

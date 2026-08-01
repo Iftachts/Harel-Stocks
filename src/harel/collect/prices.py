@@ -273,14 +273,24 @@ class PriceCollector(Collector):
         # regularMarketTime. TEVA closing 19.80, reporting after the bell and
         # trading 22.50 at 19:34 ET was published as 19.80 / +10% / "afterhours":
         # the whole after-hours move invisible, under an after-hours label.
-        extended = _last_extended_print(result[0], market_ts)
-        if extended is not None:
-            last, market_time = extended
-
+        # The session's own return, measured close-to-close and nothing else.
+        # Overwriting `last` with the post-market print - which is what this did
+        # - made `change_pct` mean "regular session plus whatever has happened
+        # since", so a finished session kept moving: SOXX read +0.07% at the
+        # bell and -0.77% once a thin post-market print landed. Worse, the
+        # relative-move comparison then measured a small-cap's post-market drift
+        # against an ETF's, which are not the same hours or the same liquidity.
         change_pct = (
             (last - prev_close) / prev_close * 100
             if last and prev_close else None
         )
+
+        extended_last = extended_change = extended_time = None
+        extended = _last_extended_print(result[0], market_ts)
+        if extended is not None:
+            extended_last, extended_time = extended
+            if last:
+                extended_change = (extended_last - last) / last * 100
         adv20 = self._adv_from_bars(ticker)
         volume = meta.get("regularMarketVolume")
 
@@ -291,6 +301,9 @@ class PriceCollector(Collector):
             last=last,
             prev_close=prev_close,
             change_pct=change_pct,
+            extended_last=extended_last,
+            extended_change_pct=extended_change,
+            extended_time=extended_time,
             volume=volume,
             adv20=adv20,
             volume_multiple=(volume / adv20) if (volume and adv20) else None,
@@ -311,7 +324,15 @@ class PriceCollector(Collector):
         if not conf.get("enabled", True):
             return None
         threshold = float(conf.get("unexplained_move_pct", 5.0))
-        if snap.change_pct is None or abs(snap.change_pct) < threshold:
+        # The repricing a trader is actually looking at, which is the whole way
+        # from the prior close to the latest print - through the extended
+        # session when there is one. `change_pct` is deliberately the regular
+        # session alone, because that is the only basis on which a name and its
+        # sector index compare; but a name that closed flat and then went 25%
+        # bid on an after-hours leak has moved 25%, and an alert measuring the
+        # session would never say so.
+        move = _total_move(snap)
+        if move is None or abs(move) < threshold:
             return None
 
         # Only "unexplained" if nothing decent landed for this name recently.
@@ -322,17 +343,20 @@ class PriceCollector(Collector):
         if recent:
             return None
 
-        direction = "up" if snap.change_pct > 0 else "down"
+        direction = "up" if move > 0 else "down"
         return self.make_item(
             external_id=f"unexplained:{snap.ticker}:{snap.asof.date().isoformat()}:{direction}",
             title=(
-                f"[TAPE] {snap.ticker} {direction} {abs(snap.change_pct):.1f}% "
+                f"[TAPE] {snap.ticker} {direction} {abs(move):.1f}% "
                 f"with no matching news"
             ),
             url="",
             summary=(
-                f"{snap.ticker} moved {snap.change_pct:+.2f}% "
-                f"(session: {snap.session}"
+                f"{snap.ticker} moved {move:+.2f}% from the prior close "
+                f"(regular session {snap.change_pct:+.2f}%"
+                + (f", then {snap.extended_change_pct:+.2f}% after the bell"
+                   if snap.extended_change_pct else "")
+                + f"; now: {snap.session}"
                 + (f", volume {snap.volume_multiple:.1f}x ADV20"
                    if snap.volume_multiple else "")
                 + "). No item scoring >=45 was collected in the last 18 hours. "
@@ -344,12 +368,22 @@ class PriceCollector(Collector):
             meta={
                 "synthetic": True,
                 "kind": "unexplained_move",
-                "change_pct": snap.change_pct,
+                "change_pct": move,
+                "session_change_pct": snap.change_pct,
+                "extended_change_pct": snap.extended_change_pct,
                 "volume_multiple": snap.volume_multiple,
                 "session": snap.session,
                 "forced_score": float(conf.get("unexplained_alert_score", 70)),
             },
         )
+
+
+def _total_move(snap: PriceSnapshot) -> float | None:
+    """Prior close to the latest print, extended hours included."""
+    last = snap.extended_last if snap.extended_last is not None else snap.last
+    if not last or not snap.prev_close:
+        return None
+    return (last - snap.prev_close) / snap.prev_close * 100
 
 
 def current_session(now: datetime | None = None) -> str:

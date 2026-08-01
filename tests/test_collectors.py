@@ -380,6 +380,156 @@ def test_rss_survives_a_dead_feed(config, db):
     assert collector.warnings
 
 
+# ------------------------------------------- issuer feeds and the calendar -- #
+def _issuer_routes(published_days_ago: int = 32, report_in_days: int = 20):
+    """An ORA-shaped title-only feed plus the release page behind it.
+
+    Dates are rendered relative to today rather than recorded, because both ends
+    of what is under test are relative: the entry has to be older than the news
+    window, and the date it announces has to be inside the 120-day horizon.
+    """
+    published = datetime.now(timezone.utc) - timedelta(days=published_days_ago)
+    report = datetime.now(timezone.utc) + timedelta(days=report_in_days)
+    call = report + timedelta(days=1)
+    prior = published - timedelta(days=60)
+    # %-d and %-m are not portable to Windows; build the day number by hand.
+    page = fixture_text("ir_release_aspx.html").replace(
+        "{PRIOR_DATE}", f"{prior:%B} {prior.day}, {prior.year}"
+    ).replace(
+        "{RELEASE_DAY}", f"{published.month}/{published.day}/{published.year}"
+    ).replace(
+        "{RELEASE_LONG}", f"{published:%B} {published.day}, {published.year}"
+    ).replace(
+        "{REPORT_DATE}", f"{report:%A}, {report:%B} {report.day}, {report.year}"
+    ).replace(
+        "{CALL_DATE}", f"{call:%A}, {call:%B} {call.day}, {call.year}"
+    )
+    feed = fixture_text("ir_feed_title_only.xml").replace(
+        "{PUBLISHED}", published.strftime("%a, %d %b %Y %H:%M:%S +0000"))
+    return {"investor.ormat.com/rss": feed,
+            "investor.ormat.com/news-events": page}, report.date().isoformat()
+
+
+def _ir_collector(config, db, routes, lookback_hours=12.0):
+    """The `watch` window - twelve hours - which is where this went wrong."""
+    return RssCollector(
+        config.sources["company_ir_rss"],
+        CollectorContext(config=config, client=FakeHttpClient(routes), db=db,
+                         lookback_hours=lookback_hours),
+    )
+
+
+def test_an_issuer_is_read_back_far_enough_to_see_its_own_reporting_date(config, db):
+    """Ormat announced on 1 July that it would report on 5 August, then its feed
+    went quiet. Every pass in between ran a 12- or 72-hour news window, so the
+    one item carrying the date was always too old to collect and the calendar
+    had no entry for ORA at all - while the issuer had published it five weeks
+    earlier."""
+    from harel.pipeline import _earnings_date
+
+    routes, expected = _issuer_routes()
+    collector = _ir_collector(config, db, routes)
+    items = [i for i in collector.collect() if "ORA" in i.seed_tickers]
+
+    assert len(items) == 1, [i.title for i in items]
+    announcement = items[0]
+    assert announcement.meta["calendar_backfill"] is True
+    assert _earnings_date(announcement) == (expected, "Q2 results")
+
+
+def test_only_a_future_date_survives_the_longer_issuer_window(config, db):
+    """The wider window is for one thing: a date that has not happened yet. The
+    same feed's storage-facility release is exactly as old and stays dropped -
+    otherwise "read further back" quietly means "re-collect stale news"."""
+    routes, _ = _issuer_routes()
+    items = list(_ir_collector(config, db, routes).collect())
+    titles = " ".join(i.title for i in items)
+    assert "Shirk Energy Storage" not in titles
+
+    # And an announcement whose date has already passed is not a schedule.
+    stale, _ = _issuer_routes(published_days_ago=200, report_in_days=-170)
+    assert [i for i in _ir_collector(config, db, stale).collect()
+            if "ORA" in i.seed_tickers] == []
+
+
+def test_the_release_body_is_fetched_because_the_feed_withholds_it(config, db):
+    """TEVA, ORA, ICL and CGEN all publish through `pressrelease.aspx`, which
+    emits a headline and an empty description. The date is in the page - and the
+    page is an .aspx, so it wraps its whole body in one <form>. Stripping that
+    as chrome left 123 characters of <title> and no date at all."""
+    routes, expected = _issuer_routes()
+    collector = _ir_collector(config, db, routes)
+    item = next(i for i in collector.collect() if "ORA" in i.seed_tickers)
+
+    assert item.summary == "", "the fixture must keep the feed's empty description"
+    assert "after the market closes" in item.body
+    assert expected.split("-")[0] in item.body
+
+    # The decoy - the replay of the quarter just gone - survives into the body,
+    # so it is the extractor and not the scraper that has to reject it.
+    prior = datetime.now(timezone.utc) - timedelta(days=92)
+    assert f"{prior:%B} {prior.day}, {prior.year}" in item.body
+    fetched = [c for c in collector.client.calls if "news-events" in c]
+    assert len(fetched) == 1, "one fetch per announcement, not one per entry"
+
+
+def test_a_feed_that_hands_over_a_summary_is_not_fetched_again(config, db):
+    """The page fetch is a repair for a feed that withholds the release, not a
+    routine second request. CGEN's fixture carries its own summaries."""
+    routes = {"ir.cgen.com": fixture_text("ir_feed.xml")}
+    collector = _ir_collector(config, db, routes, lookback_hours=max(LOOKBACK_HOURS, 72))
+    list(collector.collect())
+    assert not [c for c in collector.client.calls if "news-details" in c]
+
+
+def test_a_strangers_feed_gets_no_calendar_window(config, db):
+    """The longer read-back is the issuer's alone. A regulator or aggregator
+    feed re-reading five weeks of entries every pass would republish old news as
+    today's, which is the failure `_entry_datetime` already exists to prevent."""
+    old = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+        "%a, %d %b %Y %H:%M:%S +0000")
+    feed = f"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <title>FDA</title><link>https://fda.gov</link><description>x</description>
+      <item><title>FDA to Report Second Quarter 2026 Financial Results</title>
+      <link>https://www.fda.gov/x</link><description>on August 5, 2026</description>
+      <pubDate>{old}</pubDate></item></channel></rss>"""
+    collector = RssCollector(
+        config.sources["fda_press"],
+        CollectorContext(config=config, client=FakeHttpClient({"fda.gov": feed}),
+                         db=db, lookback_hours=12.0),
+    )
+    assert list(collector.collect()) == []
+
+
+def test_an_announcement_that_never_names_the_quarter_still_carries_its_date():
+    """AudioCodes has no reachable IR feed, so its 4 August date arrived only as
+    "Earnings Preview: AudioCodes to Report Financial Results Pre-market on
+    August 04" - an announcing verb, a day of the month, and not one word saying
+    which quarter. The subject leg demanded a quarter and threw the date away."""
+    from harel.models import RawItem
+    from harel.pipeline import _earnings_date
+
+    ahead = datetime.now(timezone.utc) + timedelta(days=20)
+
+    def item(title):
+        return RawItem(source="google_news", source_kind="rss", external_id=title,
+                       title=title, url="", published_at=datetime.now(timezone.utc))
+
+    got = _earnings_date(item(
+        f"Earnings Preview: AudioCodes to Report Financial Results Pre-market "
+        f"on {ahead:%B} {ahead.day}"))
+    assert got and got[0] == ahead.date().isoformat(), got
+
+    # Still three legs. A results report is not an announcement of one, and a
+    # conference appearance is not about results at all.
+    assert _earnings_date(item(
+        f"AudioCodes Reports Financial Results for the Period Ended "
+        f"{ahead:%B} {ahead.day}")) is None
+    assert _earnings_date(item(
+        f"AudioCodes to Present at an Investor Conference on {ahead:%B} "
+        f"{ahead.day}")) is None
+
+
 # ----------------------------------------------------------------- MAYA -- #
 def test_maya_parses_hebrew_reports_and_converts_to_utc(config, db):
     routes = {"mayaapi.tase.co.il": fixture_json("maya_reports.json")}
@@ -667,8 +817,12 @@ def test_phrase_queries_drop_the_agency_filter_but_faa_keeps_it(config, db):
         config.sources["faa_ads"],
         CollectorContext(config=config, client=faa_client, db=db, lookback_hours=72),
     ).collect())
-    assert faa_client.calls, "faa_ads must still issue queries"
-    for call in faa_client.calls:
+    # Document *searches* only. The collector also fetches public-inspection
+    # filing times by document number, and a lookup keyed by the number a search
+    # already returned has no agency to bind.
+    faa_searches = [c for c in faa_client.calls if "api/v1/documents.json" in c]
+    assert faa_searches, "faa_ads must still issue queries"
+    for call in faa_searches:
         assert "federal-aviation-administration" in call, \
             "faa_ads must always bind its own agency"
 
@@ -930,3 +1084,216 @@ def test_maya_refusing_every_name_is_not_a_quiet_day(config, db):
 
     # And a warning a human actually sees, not only a state column.
     assert any("403" in w for w in collector.warnings)
+
+
+# ===================================================================== #
+# Federal Register: when a document FIRST became readable by anyone.
+#
+# The rendering tests live in this file rather than with the other
+# presentation tests because they are the same change: a first-public
+# moment the collector records and the terminal does not show buys
+# nothing. Appended as one block - another agent appends here too.
+# ===================================================================== #
+def test_published_documents_learn_when_they_first_went_public(config, db):
+    """A published document's `publication_date` is when it appeared in the
+    Register; the same document number sat on public inspection days earlier,
+    and that earlier moment is the one a reader is entitled to. documents.json
+    cannot carry it - `filed_at` is an invalid field there - so it is joined
+    from the per-document PI endpoint.
+    """
+    routes = {
+        "federalregister.gov/api/v1/documents.json":
+            fixture_json("federal_register.json"),
+        "public-inspection-documents/2026-14321.json":
+            fixture_json("federal_register_pi_lookup.json"),
+    }
+    client = FakeHttpClient(routes)
+    collector = FederalRegisterCollector(
+        config.sources["federal_register"],
+        CollectorContext(config=config, client=client, db=db,
+                         lookback_hours=max(LOOKBACK_HOURS, 72)),
+    )
+    items = list(collector.collect())
+    assert items
+
+    doc = next(i for i in items if i.meta["document_number"] == "2026-14321")
+    # 08:45 ET on 2026-07-15, two weeks before it published on 2026-07-29.
+    assert doc.meta["first_public_at"] == "2026-07-15T12:45:00+00:00"
+    assert doc.meta["first_public_at"] < doc.published_at.isoformat()
+
+
+def test_the_public_inspection_join_costs_one_request_for_the_whole_pass(config, db):
+    """The endpoint takes a comma-separated batch. One request per document
+    would add hundreds per pass to a collector that already runs one query per
+    sector per term."""
+    routes = {
+        "federalregister.gov/api/v1/documents.json":
+            fixture_json("federal_register.json"),
+        "public-inspection-documents/":
+            fixture_json("federal_register_pi_lookup.json"),
+    }
+    client = FakeHttpClient(routes)
+    collector = FederalRegisterCollector(
+        config.sources["federal_register"],
+        CollectorContext(config=config, client=client, db=db,
+                         lookback_hours=max(LOOKBACK_HOURS, 72)),
+    )
+    documents = list(collector.collect())
+    assert documents
+
+    lookups = [c for c in client.calls if "public-inspection-documents/" in c]
+    assert len(lookups) == 1, f"expected one batched lookup, made {len(lookups)}"
+
+
+def test_public_inspection_records_the_filing_as_the_first_public_moment(config, db):
+    """On this path there is nothing to join: `filed_at` IS the moment the
+    document became readable, and it is now stated rather than left implicit in
+    `published_at`."""
+    routes = {"public-inspection-documents/current.json":
+              fixture_json("federal_register_pi.json")}
+    collector = FederalRegisterPublicInspectionCollector(
+        config.sources["federal_register_public_inspection"], ctx(config, db, routes)
+    )
+    items = list(collector.collect())
+    assert items
+
+    fda = next(i for i in items if i.meta["document_number"] == "2026-15701")
+    assert fda.meta["first_public_at"] == "2026-07-31T12:45:00+00:00"
+    assert fda.meta["first_public_at"] == fda.published_at.isoformat()
+
+
+def test_a_document_never_on_public_inspection_gets_no_invented_timestamp(config, db):
+    """Unknown document numbers come back under `errors.not_found`. A document
+    with no earlier public moment must report none - deriving one from the
+    publication date would be the same lie in a new field."""
+    routes = {
+        "federalregister.gov/api/v1/documents.json":
+            fixture_json("federal_register.json"),
+        "public-inspection-documents/":
+            {"count": 0, "results": [], "errors": {"not_found": ["2026-14321"]}},
+    }
+    collector = FederalRegisterCollector(
+        config.sources["federal_register"], ctx(config, db, routes)
+    )
+    items = list(collector.collect())
+    assert items, "documents must survive a lookup that finds nothing"
+    assert all(i.meta.get("first_public_at") is None for i in items)
+
+
+def test_a_failing_public_inspection_lookup_does_not_lose_the_documents(config, db):
+    """The join is an enrichment. Losing every Federal Register document because
+    a secondary endpoint was down would be a far worse failure than missing the
+    lead-time label."""
+    routes = {"federalregister.gov/api/v1/documents.json":
+              fixture_json("federal_register.json")}
+    collector = FederalRegisterCollector(
+        config.sources["federal_register"], ctx(config, db, routes)
+    )
+    items = list(collector.collect())
+    assert items
+    assert all(i.meta.get("first_public_at") is None for i in items)
+
+
+# ------------------------------------------------------------- rendering --- #
+def test_a_gap_is_spoken_as_a_gap_and_not_as_an_age():
+    """`ago` says "before X"; a coverage gap is a span between two moments and
+    must not borrow that word."""
+    from harel.serve import hebrew as he
+
+    assert he.duration(2355) == "39 שעות"
+    assert he.duration(45) == "45 דק׳"
+    assert he.duration(60) == "שעה"
+    # The dual is not optional politeness, and carries no digit at all - so a
+    # caller must not wrap it in a numeric LTR island.
+    assert he.duration(120) == "שעתיים"
+    assert he.duration(60 * 48) == "יומיים"
+    assert he.duration(60 * 24 * 3) == "3 ימים"
+    assert "לפני" not in he.duration(2355)
+    # Hours run past 24: the incident is 39 hours, and a day rounds it away.
+    assert he.duration(60 * 39) == "39 שעות"
+
+
+def test_minutes_between_survives_what_the_feed_actually_carries():
+    from harel.serve import hebrew as he
+
+    assert he.minutes_between("2026-07-31T12:45:00+00:00",
+                              "2026-08-02T04:00:00+00:00") == 2355
+    assert he.minutes_between(None, "2026-08-02T04:00:00+00:00") is None
+    assert he.minutes_between("2026-08-02T04:00:00+00:00", None) is None
+    assert he.minutes_between("not a date", "2026-08-02T04:00:00+00:00") is None
+
+
+def test_the_feed_cell_shows_the_coverage_gap_it_used_to_hide():
+    """The UFLPA entity list was on public inspection from Friday 08:45 ET and
+    was not collected until Sunday. The cell reported only our collection time,
+    which showed the 5 hours and hid the 39."""
+    from harel.serve.terminal import _time_cell
+
+    cell = _time_cell({
+        "t": "2026-07-31T12:45:00+00:00",
+        "forthcoming": True,
+        "publishes_on": "2026-08-03",
+        "first_public_at": "2026-07-31T12:45:00+00:00",
+        "discovered_at": "2026-08-02T04:00:00+00:00",
+    })
+
+    assert "זמין לציבור" in cell
+    assert "ו׳ 08:45 ET" in cell, "Friday, on the exchange's own clock"
+    assert "א׳ 00:00 ET" in cell, "collected Sunday, on the same clock"
+    assert "פיגור גילוי" in cell
+    assert "39 שעות" in cell
+    # Still says when it publishes: the lead time is why we hold it at all.
+    assert "מתפרסם" in cell
+    # Latin runs stay isolated from the bidi algorithm, page-wide rule.
+    assert "class='ltr'" in cell
+    assert "<script" not in cell.lower()
+
+
+def test_a_forthcoming_document_with_no_filing_time_keeps_the_old_line():
+    """Not every forthcoming document has a public-inspection record. Where
+    there is no better answer, when we found it is still the honest one."""
+    from harel.serve.terminal import _time_cell
+
+    cell = _time_cell({
+        "t": "2026-08-02T04:00:00+00:00",
+        "forthcoming": True,
+        "publishes_on": "2026-08-03",
+        "discovered_at": "2026-08-02T04:00:00+00:00",
+    })
+    assert "נודע לנו" in cell
+    assert "זמין לציבור" not in cell
+
+
+def test_an_already_published_copy_does_not_repeat_its_own_timestamp():
+    """On a public-inspection item that has since published, `t` and the first
+    public moment are the same instant - a public-availability line there
+    restates the cell above it and says nothing."""
+    from harel.serve.terminal import _time_cell
+
+    public = "זמין לציבור"
+    same = "2026-07-31T12:45:00+00:00"
+    assert public not in _time_cell({"t": same, "first_public_at": same})
+
+    # But a published document that was readable two weeks earlier must say so.
+    cell = _time_cell({"t": "2026-07-29T00:00:00+00:00",
+                       "first_public_at": "2026-07-15T12:45:00+00:00"})
+    assert public in cell
+    assert "ד׳ 08:45 ET" in cell
+
+
+def test_the_honest_lag_is_measured_from_public_availability():
+    """`_detection_lag_he` measures against `published_at`, which for a Federal
+    Register document is a *scheduled* date - so a document sitting unfetched on
+    public inspection since Friday still scored as lead time."""
+    from harel.serve.terminal import _public_lag_he
+
+    late = "באיחור"
+    assert _public_lag_he(None) == "-"
+    assert "39 שעות" in _public_lag_he(2355)
+    assert late in _public_lag_he(2355)
+    assert "2355" not in _public_lag_he(2355), "nobody reads a lag in minutes"
+    assert late not in _public_lag_he(12)
+    # Ahead of the document being public is not something this source can do,
+    # but if the clocks disagree it must not read as a negative age.
+    assert "זמן קדימה" in _public_lag_he(-90)
+    assert "-90" not in _public_lag_he(-90)

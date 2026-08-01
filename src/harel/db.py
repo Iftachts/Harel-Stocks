@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS prices (
     ticker      TEXT NOT NULL,
     asof        TEXT NOT NULL,   -- when we fetched
     market_time TEXT,            -- when the exchange printed
+    extended_last       REAL,    -- last pre/post-market print
+    extended_change_pct REAL,    -- that print against the regular close
+    extended_time       TEXT,
     last        REAL,
     prev_close  REAL,
     change_pct  REAL,
@@ -173,6 +176,12 @@ class Database:
             # existed read back None, which the surfaces render as "the print
             # time was not recorded" rather than inventing one.
             ("prices", "market_time", "TEXT"),
+            # The extended-hours print, kept apart from the session return.
+            # Rows written before these existed read back None, which the
+            # surfaces render as "no post-market print" rather than as zero.
+            ("prices", "extended_last", "REAL"),
+            ("prices", "extended_change_pct", "REAL"),
+            ("prices", "extended_time", "TEXT"),
         ]
         for table, column, decl in added:
             cols = {r["name"] for r in
@@ -269,13 +278,16 @@ class Database:
         self.conn.execute(
             """INSERT OR REPLACE INTO prices
                (ticker, asof, market_time, last, prev_close, change_pct, volume,
-                adv20, vol_mult, day_high, day_low, session, provider)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                adv20, vol_mult, day_high, day_low, session, provider,
+                extended_last, extended_change_pct, extended_time)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (snap.ticker, snap.asof.isoformat(),
              snap.market_time.isoformat() if snap.market_time else None,
              snap.last, snap.prev_close,
              snap.change_pct, snap.volume, snap.adv20, snap.volume_multiple,
-             snap.day_high, snap.day_low, snap.session, snap.provider),
+             snap.day_high, snap.day_low, snap.session, snap.provider,
+             snap.extended_last, snap.extended_change_pct,
+             snap.extended_time.isoformat() if snap.extended_time else None),
         )
 
     def save_bars(self, ticker: str, bars: Iterable[dict[str, Any]]) -> int:

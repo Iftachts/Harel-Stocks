@@ -472,7 +472,14 @@ _EARNINGS_ANNOUNCEMENT = re.compile(
 _EARNINGS_SUBJECT = re.compile(
     r"\b((first|second|third|fourth)[- ]quarter|q[1-4]|full[- ]year|annual|"
     r"half[- ]year)\b.{0,40}?\b(results|earnings)\b|"
-    r"\b(results|earnings)\b.{0,40}?\b((first|second|third|fourth)[- ]quarter|q[1-4])\b",
+    r"\b(results|earnings)\b.{0,40}?\b((first|second|third|fourth)[- ]quarter|q[1-4])\b|"
+    # An announcement that never names the quarter. AudioCodes' 4 August date
+    # reached us only as "Earnings Preview: AudioCodes to Report Financial
+    # Results Pre-market on August 04" - announcing verb, day of the month, and
+    # not one word saying WHICH quarter, so the subject leg failed and the date
+    # was thrown away. "Financial results" is specific enough on its own; the
+    # announcement leg and the 120-day horizon still have to agree.
+    r"\b(financial|quarterly)\s+results\b",
     re.IGNORECASE | re.DOTALL)
 _MONTH = ("january february march april may june july august september october "
           "november december").split()
@@ -523,7 +530,15 @@ def _earnings_date(item) -> tuple[str, str] | None:
     is worse than no earnings date: it invites a trader to hold through what
     they think is a quiet session.
     """
-    text = f"{item.title}\n{item.summary}"[:1500]
+    # The body is read too. Four of the eleven issuer feeds (TEVA, ORA, ICL,
+    # CGEN - all Q4's `pressrelease.aspx`) publish a headline and nothing else,
+    # so the reporting date is only ever in the release itself: Ormat's feed
+    # said "to Host Conference Call Announcing Second Quarter 2026 Financial
+    # Results" and the "Wednesday, August 5, 2026" was in the first paragraph
+    # of the page. The collector fetches that body; this is where it is spent.
+    # Still capped, and a press release states its reporting date in the lede -
+    # reading further only invites some other future date to be picked up.
+    text = f"{item.title}\n{item.summary}\n{item.body}"[:2000]
     if not (_EARNINGS_ANNOUNCEMENT.search(text) and _EARNINGS_SUBJECT.search(text)):
         return None
 

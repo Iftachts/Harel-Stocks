@@ -42,10 +42,18 @@ def test_an_after_hours_print_is_the_last_price_not_the_four_oclock_close(config
     payload = fixture_json("yahoo_teva_afterhours.json")
     snap = collector(config, db, {"interval=5m": payload})._yahoo_snapshot("TEVA")
 
-    assert snap.last == pytest.approx(22.50)
-    assert snap.change_pct == pytest.approx(25.0, abs=0.1)
-    # The observation time is that bar's, not the closing print's.
-    assert snap.market_time.astimezone(ET).strftime("%H:%M") == "16:55"
+    # The after-hours print is captured - but beside the session, not blended
+    # into it. Folding it into `change_pct` made a finished session keep moving:
+    # SOXX read +0.07% at the bell and -0.77% once a thin post-market print
+    # landed, and a name's "relative to sector" then compared its own
+    # post-market drift against an ETF's.
+    assert snap.extended_last == pytest.approx(22.50)
+    assert snap.extended_change_pct == pytest.approx(13.64, abs=0.1)
+    assert snap.extended_time.astimezone(ET).strftime("%H:%M") == "16:55"
+
+    # The session itself is the close against the prior close, and nothing else.
+    assert snap.last == pytest.approx(19.80)
+    assert snap.change_pct == pytest.approx(10.0, abs=0.1)
 
 
 def test_a_quote_with_no_extended_hours_bars_keeps_the_regular_close(config, db):
@@ -76,13 +84,24 @@ def test_a_bar_inside_the_regular_session_is_not_an_extended_hours_print(config,
 
 def test_the_tape_alert_measures_the_move_a_trader_can_still_trade(config, db):
     """`_unexplained_move_item` tested its threshold against the stale 16:00
-    number, so the print that actually moved never reached the alert text."""
+    number, so the print that actually moved never reached the alert text.
+
+    The alert measures the whole repricing - prior close to the latest print,
+    through the extended session - while `change_pct` stays the regular session
+    alone. The two answer different questions: a name that closed flat and then
+    went 25% bid on an after-hours leak has moved 25% and must be flagged, but
+    it has not moved 25% against its sector index, which did not trade.
+    """
     payload = fixture_json("yahoo_teva_afterhours.json")
     items = list(collector(config, db, {"interval=5m": payload}).collect())
 
     alert = next(i for i in items
                  if i.meta.get("kind") == "unexplained_move" and "TEVA" in i.title)
     assert alert.meta["change_pct"] == pytest.approx(25.0, abs=0.1)
+    assert "25." in alert.title, "the headline number is the tradeable one"
+    # Both halves stay legible, so the reader can see where the move happened.
+    assert alert.meta["session_change_pct"] == pytest.approx(10.0, abs=0.1)
+    assert alert.meta["extended_change_pct"] == pytest.approx(13.64, abs=0.1)
 
 
 # --------------------------------------------------------------- sessions -- #
@@ -165,3 +184,23 @@ def test_todays_bar_keeps_up_with_the_session_it_is_recording(config, db):
     # …and none of it cost a second request against an endpoint that
     # rate-limits aggressively: the second pass only fetched the quote.
     assert [c for c in later.client.calls if "interval=1d" in c] == []
+
+
+def test_a_finished_session_stops_moving(config, db):
+    """The bug the user caught: SOXX reported +0.1% at the bell and -0.8% an
+    hour later, on a session that had been over the whole time.
+
+    `change_pct` was the LAST print against the prior close, and after 16:00
+    the last print is a post-market tick. So the number kept drifting, and the
+    relative-move comparison measured a small-cap's thin post-market against an
+    ETF's - different hours, different liquidity, not a comparison.
+    """
+    payload = fixture_json("yahoo_teva_afterhours.json")
+    snap = collector(config, db, {"interval=5m": payload})._yahoo_snapshot("TEVA")
+
+    regular, prior = snap.last, snap.prev_close
+    assert snap.change_pct == pytest.approx((regular - prior) / prior * 100)
+    # Every post-market print in the fixture is above the close, so a blended
+    # number would be strictly larger. The session number must not have moved.
+    assert snap.extended_last > snap.last
+    assert snap.change_pct < snap.extended_last / prior * 100 - 100 + 100

@@ -23,6 +23,10 @@ from .base import Collector, register
 
 DOCS_URL = "https://www.federalregister.gov/api/v1/documents.json"
 PI_URL = "https://www.federalregister.gov/api/v1/public-inspection-documents/current.json"
+# The per-document public-inspection endpoint. It takes a comma-separated batch
+# of document numbers, which is what makes `first_public_at` affordable for the
+# published collector - see `_attach_first_public_at`.
+PI_LOOKUP_URL = "https://www.federalregister.gov/api/v1/public-inspection-documents/{}.json"
 
 FIELDS = [
     "document_number", "title", "abstract", "html_url", "publication_date",
@@ -45,6 +49,9 @@ PI_FIELDS = [
 ]
 
 MAX_PER_QUERY = 40
+# 200 document numbers in one URL is ~2.3KB and answers fine; 100 keeps the
+# request comfortably short and still costs a single round trip for a whole pass.
+PI_LOOKUP_CHUNK = 100
 
 
 def _as_phrase(term: str) -> str:
@@ -68,14 +75,76 @@ def _as_phrase(term: str) -> str:
 @register("federal_register")
 class FederalRegisterCollector(Collector):
     def collect(self) -> Iterator[RawItem]:
+        # Buffered rather than streamed, because the public-inspection join below
+        # is worth one request for the whole pass and cannot be batched until
+        # every document number is known.
+        items: list[RawItem] = []
         for agencies, terms, tickers, label in self._query_plan():
             for term in terms:
                 try:
-                    yield from self._query(agencies, term, tickers, label)
+                    items.extend(self._query(agencies, term, tickers, label))
                 except HttpError as exc:
                     self.warn(f"{label} / {term}: {exc}")
                 except Exception as exc:
                     self.warn(f"{label} / {term}: unexpected {type(exc).__name__}: {exc}")
+        self._attach_first_public_at(items)
+        yield from items
+
+    def _attach_first_public_at(self, items: list[RawItem]) -> None:
+        """Record when each published document first became readable by anyone.
+
+        A published document's `publication_date` is the day it appeared in the
+        Register, but the same document number sat on public inspection for days
+        before that: the UFLPA entity list was readable Friday 08:45 ET and
+        published the following Monday, and dating it Monday hides the whole gap
+        a reader is entitled to see. documents.json cannot carry that moment -
+        `filed_at` is rejected there as an invalid field, and the one
+        public-inspection field it does expose, `public_inspection_pdf_url`, is a
+        URL with no time in it.
+
+        So it comes from the per-document PI endpoint, which accepts a
+        comma-separated batch: one request per 100 documents for a whole pass,
+        not one per document. It also keeps answering long after a document
+        leaves the current PI list - a 2026-06-01 publication still returns its
+        2026-05-29 filing. Document numbers it has never seen come back under
+        `errors.not_found` without failing the request, so a presidential
+        document that never went on inspection costs nothing. Verified against
+        the live API on 2026-08-02.
+        """
+        numbers = sorted({
+            str(i.meta.get("document_number")) for i in items
+            if i.meta.get("document_number")
+        })
+        filed: dict[str, datetime] = {}
+        for start in range(0, len(numbers), PI_LOOKUP_CHUNK):
+            chunk = numbers[start:start + PI_LOOKUP_CHUNK]
+            try:
+                resp = self.client.get(
+                    PI_LOOKUP_URL.format(",".join(chunk)),
+                    params=[("fields[]", "document_number"), ("fields[]", "filed_at")],
+                    allow_status=(400, 404),
+                )
+            except HttpError as exc:
+                self.warn(f"public-inspection lookup: {exc}")
+                continue
+            except Exception as exc:
+                self.warn(f"public-inspection lookup: unexpected "
+                          f"{type(exc).__name__}: {exc}")
+                continue
+            if resp.status >= 400:
+                continue
+            for row in (resp.json() or {}).get("results") or []:
+                when = _parse_iso(row.get("filed_at"))
+                if when and row.get("document_number"):
+                    filed[str(row["document_number"])] = when
+
+        for item in items:
+            when = filed.get(str(item.meta.get("document_number")))
+            # Only when it is genuinely earlier. A document that never went on
+            # inspection has no earlier public moment to report, and inventing
+            # one from the publication date would be the same lie in a new place.
+            if when and when < item.published_at:
+                item.meta["first_public_at"] = when.isoformat()
 
     def _query_plan(self) -> list[tuple[list[str], list[str], list[str], str]]:
         """One query set per sector that is actually represented in the universe."""
@@ -194,6 +263,10 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
     now = datetime.now(timezone.utc)
     forthcoming = False
     scheduled = doc.get("publication_date") if public_inspection else None
+    # When the document first became readable by anyone. On this path that is
+    # `filed_at`; on the published path it is filled in afterwards from the PI
+    # endpoint. See `_attach_first_public_at`.
+    first_public: datetime | None = None
 
     if public_inspection:
         # `publication_date` on a public-inspection document is the date it is
@@ -201,7 +274,8 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
         # as the publication time hands the item a future timestamp, a negative
         # age and a recency bonus it has not earned. `filed_at` is the moment it
         # became public, which is where the lead time actually starts.
-        published = _parse_iso(doc.get("filed_at")) or now
+        first_public = _parse_iso(doc.get("filed_at"))
+        published = first_public or now
         forthcoming = bool(scheduled and scheduled > now.date().isoformat())
         # No abstract in this schema; the table-of-contents pair is the closest
         # thing to one, and excerpts carries the real text when present.
@@ -279,6 +353,11 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
             # will hit the Federal Register, kept out of published_at above.
             "filing_type": doc.get("filing_type") if public_inspection else None,
             "scheduled_publication_date": scheduled,
+            # The moment the clock a reader cares about actually starts. The
+            # feed was reporting only `collected_at` ("נודע לנו לפני 5 שעות")
+            # for a document that had been on public inspection since Friday
+            # 08:45 ET, which made 39 hours of blindness look like 5.
+            "first_public_at": first_public.isoformat() if first_public else None,
             # True while the document exists but has not published yet. The
             # surfaces must say "publishes Monday", never date it as news.
             "forthcoming": forthcoming,
