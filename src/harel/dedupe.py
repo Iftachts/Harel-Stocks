@@ -55,7 +55,19 @@ def normalize_title(title: str) -> str:
 
 
 def dedupe_key(item: RawItem) -> str:
-    """Exact-match fingerprint: normalized title + publication day."""
+    """Exact-match fingerprint: normalized title + publication day.
+
+    Unless the source hands us a stable identifier for the underlying event, in
+    which case that identifier is the fingerprint and nothing else needs to
+    agree. The Federal Register publishes the same document twice - once on
+    public inspection, days early, and once on publication - under one document
+    number, with a different title prefix and a different date. Title-and-day
+    made those two stories. They are one document with one lifecycle, and the
+    number says so.
+    """
+    stable = str((item.meta or {}).get("dedupe_id") or "").strip()
+    if stable:
+        return hashlib.sha1(f"id|{stable}".encode("utf-8")).hexdigest()
     norm = normalize_title(item.title)
     day = item.published_at.date().isoformat()
     return hashlib.sha1(f"{norm}|{day}".encode("utf-8")).hexdigest()

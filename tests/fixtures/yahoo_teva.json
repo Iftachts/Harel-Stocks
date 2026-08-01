@@ -1,0 +1,30 @@
+{
+  "chart": {
+    "result": [
+      {
+        "meta": {
+          "symbol": "TEVA",
+          "currency": "USD",
+          "regularMarketPrice": 19.8,
+          "previousClose": 18.0,
+          "chartPreviousClose": 18.3,
+          "regularMarketVolume": 41000000,
+          "regularMarketDayHigh": 20.1,
+          "regularMarketDayLow": 17.95
+        },
+        "timestamp": [1784923200, 1785009600, 1785268800, 1785355200, 1785441600],
+        "indicators": {
+          "quote": [
+            {
+              "open": [18.1, 18.3, 18.5, 18.2, 18.0],
+              "high": [18.4, 18.55, 18.6, 18.3, 20.1],
+              "low": [18.0, 18.2, 18.1, 17.9, 17.95],
+              "close": [18.3, 18.5, 18.2, 18.0, 19.8],
+              "volume": [9000000, 9500000, 8800000, 10200000, 41000000]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

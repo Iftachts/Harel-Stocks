@@ -277,11 +277,21 @@ sources:
   prices_stooq:
     kind: prices
     label: Stooq daily + intraday OHLCV
+    enabled: false
     base_url: https://stooq.com/q/d/l/?s={symbol}&i=d
     trust: 0.8
     latency: eod
     poll_sec: 900
-    notes: Free, no key, daily bars. Used for ADV / gap / range context.
+    notes: >
+      OFF: stooq now answers the CSV endpoint with a JavaScript browser
+      challenge - HTTP 200 carrying an HTML page that says "This site requires
+      JavaScript to verify your browser", and 404 without a browser User-Agent.
+      Checked 2026-08-01 on stooq.com and stooq.pl, daily and quote endpoints:
+      there is no header combination that returns CSV, only a headless browser
+      would, and working around bot protection is not something this system
+      should do. It was costing 22 warnings a pass and returning nothing.
+      Nothing is lost: prices_yahoo writes the same daily bars through
+      _yahoo_backfill_bars, so ADV20 and relative volume still have their data.
 
   prices_yahoo:
     kind: prices

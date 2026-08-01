@@ -101,6 +101,8 @@ class PriceCollector(Collector):
         self.db.save_bars(ticker, bars)
 
         last_bar, prev_bar = bars[-1], bars[-2]
+        bar_date = datetime.strptime(last_bar["date"], "%Y-%m-%d").replace(
+            tzinfo=timezone.utc)
         adv20 = _mean([b["volume"] for b in bars[-21:-1]]) or None
         change_pct = (
             (last_bar["close"] - prev_bar["close"]) / prev_bar["close"] * 100
@@ -108,7 +110,10 @@ class PriceCollector(Collector):
         )
         return PriceSnapshot(
             ticker=ticker,
-            asof=datetime.strptime(last_bar["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc),
+            asof=bar_date,
+            # A daily bar's observation time is the session it closed, which is
+            # the bar date itself.
+            market_time=bar_date,
             last=last_bar["close"],
             prev_close=prev_bar["close"],
             change_pct=change_pct,
@@ -210,9 +215,18 @@ class PriceCollector(Collector):
         adv20 = self._adv_from_bars(ticker)
         volume = meta.get("regularMarketVolume")
 
+        # The exchange's own timestamp for the last print. Without it the only
+        # time we had was our fetch time, so a Friday close pulled on Saturday
+        # was presented as a two-minute-old price - an observation time and a
+        # fetch time are not the same number and must not share a field.
+        market_ts = meta.get("regularMarketTime")
+        market_time = (datetime.fromtimestamp(market_ts, timezone.utc)
+                       if isinstance(market_ts, (int, float)) and market_ts else None)
+
         return PriceSnapshot(
             ticker=ticker,
             asof=datetime.now(timezone.utc),
+            market_time=market_time,
             last=last,
             prev_close=prev_close,
             change_pct=change_pct,

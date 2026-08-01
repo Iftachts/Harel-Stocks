@@ -14,7 +14,7 @@
   │ clinicaltrials            │   │   what kind of news? │   └──────────────────┘
   │ maya (TASE)               │   │ materiality          │            ▲
   │ rss (IR, wires, Hebrew)   │   │   how much can it    │            │
-  │ prices (stooq / yahoo)    │   │   move the print?    │      ┌───────────┐
+  │ prices (yahoo)            │   │   move the print?    │      ┌───────────┐
   └───────────────────────────┘   └──────────────────────┘      │  SQLite   │
                 │                            │                  │  + FTS5   │
                 └────────► RawItem ──────────┴─► ScoredItem ────▶└───────────┘
@@ -71,9 +71,45 @@ Three details that took real care:
 - **Synthetic items.** A `[TAPE] NVMI up 10%` alert links only to NVMI. Camtek
   lists NVMI as a peer, and without the guard the alert would read across.
 
+- **Regulator documents seed nothing.** The Federal Register collectors query
+  per sector, and `conditions[term]` searches the *full document text*. Seeding
+  every ticker in the queried sector — which the linker honoured at 0.92 —
+  turned a passing mention into a high-confidence link: a Family Violence
+  Prevention rule became LivePerson and NICE news, a hospice wage index became
+  BrainsWay news, both at score 45. The collector now emits `seed_tickers=[]`
+  and keeps the queried tickers in `meta.queried_for` for the drill-down;
+  `_link_sector_regulatory` establishes the link, and it reads only the title
+  and abstract — the parts that say what a document is about.
+
 Hot-path cost matters — 1,000 regexes × every item, every couple of minutes — so
 each rule carries a literal `probe` string tested with a plain `in` before the
 regex runs. That is ~4× on the full pipeline.
+
+#### Relevance is not causation
+
+`causal_eligible` is a separate axis from the score, and `whats_moving` gates
+drivers on it rather than on any threshold.
+
+A link is causally eligible when the document carries evidence about the
+*company*: DIRECT, SUBSIDIARY, PRODUCT_RIVAL, CUSTOMER, PEER or SUPPLIER — all
+of which exist because something named the company, its product, or a specific
+counterparty we track for it. `SECTOR_REG`, `SECTOR_THEME` and `MACRO` are
+evidence about a group and are not eligible.
+
+The case that forced this: on 2026-07-31 one UFLPA entity-list notice was
+offered as the reason TSEM rose 4.0% *and* as the reason CAMT fell 3.5%, with
+SOXX flat. A document that explains a move and its opposite explains neither.
+
+Sector-level matches are not suppressed — the entity list genuinely matters to a
+foundry, and hiding it would be the same failure pointing the other way. They
+surface as `possible_context` on the mover and on the unexplained-move alert,
+stated at low confidence with "no company-specific exposure found", and the move
+stays an open question.
+
+One escalation exists. A sector-wide document predicts a sector-wide move, so if
+at least 60% of a sector (minimum three names) moved in the same direction as
+this name, with a median move of at least 1%, the item is promoted to a driver
+and carries `causal_basis` saying why. A split basket corroborates nothing.
 
 ### 2. `enrich/events.py` — what
 
@@ -113,6 +149,11 @@ score = base(event)
 
 Two layers in `dedupe.py`:
 
+0. **`meta.dedupe_id`** — a stable identifier from the source, when one exists.
+   The Federal Register publishes one document twice, days apart, under one
+   number: on public inspection and again on publication. Different title
+   prefix, different date, so title-and-day made two stories out of one. The
+   document number says otherwise and wins outright.
 1. **`dedupe_key`** — normalised title (wire boilerplate stripped) + publication
    day. Exact collision ⇒ same story.
 2. **SimHash** over word bigrams, 64-bit, Hamming ≤ 6, within a 36-hour window —
@@ -121,6 +162,14 @@ Two layers in `dedupe.py`:
 The feed collapses a cluster to its highest-scoring member and attaches the rest
 as `also[]`. `corroboration` = independent sources carrying the story, which the
 agent is told to weigh.
+
+**One event has one beginning.** `first_published_at` is the earliest
+`published_at` across the whole cluster — asked of the cluster in the database,
+not of the rows that happen to fall inside the query window, because the two
+copies of one document sit days apart and a 30-hour feed window sees only the
+later one. `views._event_start` uses it for the closing-bell test: the winning
+row is usually the *later* copy, and testing that copy put a document readable
+on Friday morning "after the bell" on Friday night.
 
 ---
 

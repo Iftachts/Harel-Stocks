@@ -25,13 +25,17 @@ ROUTES = {
     "clinicaltrials.gov/api/v2/studies": fixture_json("clinicaltrials.json"),
     "api.fda.gov/drug/enforcement.json": fixture_json("openfda_enforcement.json"),
     "mayaapi.tase.co.il": fixture_json("maya_reports.json"),
-    "stooq.com": fixture_text("stooq_teva.csv"),
+    # Same bars and the same +10% close as stooq_teva.csv, in Yahoo's shape.
+    # The end-to-end test has to run the price path that production runs, and
+    # prices_stooq is switched off: stooq answers the CSV endpoint with a
+    # JavaScript browser challenge, so Yahoo is the only live price source.
+    "query1.finance.yahoo.com": fixture_json("yahoo_teva.json"),
     "ir.cgen.com": fixture_text("ir_feed.xml"),
 }
 
 SOURCES = [
     "sec_edgar_submissions", "sec_edgar_full_text", "federal_register",
-    "clinicaltrials", "fda_enforcement", "maya_tase", "prices_stooq",
+    "clinicaltrials", "fda_enforcement", "maya_tase", "prices_yahoo",
     "company_ir_rss",
 ]
 
@@ -1045,3 +1049,124 @@ def test_a_latin_unit_never_sits_outside_its_isolate(ran, db):
     # ...and none of them is left dangling after a closing isolate.
     for orphan in ("</span> UTC", "</span> ET", "</span> pp"):
         assert orphan not in page, orphan
+
+
+# ------------------------------------------------- timestamps and causation -- #
+def test_a_date_in_the_future_is_never_rendered_as_just_now():
+    """`he.ago` only tested `minutes < 1`, and -2880 is also less than one. So a
+    Federal Register document scheduled to publish on Monday was presented on
+    Saturday night as having come out this instant - the single most misleading
+    thing a tape can say."""
+    from datetime import datetime, timedelta, timezone
+
+    from harel.serve import hebrew as he
+
+    soon = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    rendered = he.ago(soon)
+    assert "הרגע" not in rendered
+    # "מחר" or "בעוד N ימים" - either says schedule; none of them says age.
+    assert any(word in rendered for word in ("בעוד", "מחר")), rendered
+    # And the past still reads as the past.
+    past = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    assert "לפני" in he.ago(past)
+
+
+def test_a_quote_separates_when_it_printed_from_when_we_fetched_it(config, db):
+    """On a Saturday, Friday's closing print was labelled "בן 2 דק׳" - the age
+    of our HTTP request wearing the price's name."""
+    from datetime import datetime, timedelta, timezone
+
+    from harel.models import PriceSnapshot
+    from harel.views import Views
+
+    now = datetime.now(timezone.utc)
+    close = now - timedelta(days=2)
+    db.save_price(PriceSnapshot(
+        ticker="TEVA", asof=now, market_time=close, last=35.01, prev_close=35.41,
+        change_pct=-1.13, session="closed", provider="yahoo",
+    ))
+    quote = Views(db=db, config=config).quote("TEVA")
+
+    assert quote["fetch_age_minutes"] < 5
+    assert quote["market_age_minutes"] > 60 * 24
+    assert quote["market_time"].startswith(close.isoformat()[:10])
+    assert "market closed" in quote["freshness"]
+    assert close.date().isoformat() in quote["freshness"]
+
+
+def test_a_sector_keyword_match_is_context_and_never_a_driver(config, db):
+    """The same UFLPA entity-list notice was offered as the reason TSEM rose
+    4.0% and as the reason CAMT fell 3.5%, in one session, with SOXX flat. A
+    document that explains a move and its opposite explains neither."""
+    from datetime import datetime, timedelta, timezone
+
+    from harel.models import Link, PriceSnapshot, RawItem, ScoredItem
+    from harel.views import Views
+
+    now = datetime.now(timezone.utc)
+    for ticker, pct in (("TSEM", 4.0), ("CAMT", -3.5), ("SOXX", 0.1)):
+        db.save_price(PriceSnapshot(
+            ticker=ticker, asof=now, market_time=now, last=100.0, prev_close=100.0,
+            change_pct=pct, session="regular", provider="yahoo"))
+
+    item = RawItem(
+        source="federal_register", source_kind="federal_register",
+        external_id="fr:2026-15628",
+        title="[FR] Notice Regarding the Uyghur Forced Labor Prevention Act Entity List",
+        url="https://example.invalid/uflpa", summary="", body="",
+        published_at=now - timedelta(hours=6),
+        meta={"document_number": "2026-15628"},
+    )
+    links = [Link("TSEM", "SECTOR_REG", 0.62, 'mentions "entity list"'),
+             Link("CAMT", "SECTOR_REG", 0.62, 'mentions "entity list"')]
+    db.upsert_item(
+        ScoredItem(raw=item, links=links, events=[], score=33.0, tier="normal",
+                   reasons=[], per_ticker_score={"TSEM": 33.0, "CAMT": 33.0}),
+        "k-uflpa", "c-uflpa")
+
+    moving = Views(db=db, config=config).whats_moving(min_abs_pct=2.0)
+    by_ticker = {m["ticker"]: m for m in moving["movers"]}
+
+    for ticker in ("TSEM", "CAMT"):
+        mover = by_ticker[ticker]
+        assert not mover["drivers"], f"{ticker}: a keyword match is not a cause"
+        assert mover["explained"] is False
+        titles = [c["title"] for c in mover["possible_context"]]
+        assert any("Uyghur" in t for t in titles), \
+            f"{ticker}: held back as context, but the reader must still see it"
+        assert all(c["causal_eligible"] is False for c in mover["possible_context"])
+
+    raised = {a["ticker"] for a in moving["unexplained"]}
+    assert {"TSEM", "CAMT"} <= raised, "both moves are still open questions"
+
+
+def test_one_document_filed_early_and_published_later_is_one_event(config, db):
+    """Public inspection and publication are two copies of one document under
+    one number. Left unmerged they were two stories, and the later copy - which
+    scores higher for being fresher - answered the bell test for both, putting a
+    document readable on Friday morning "after the bell" on Friday night."""
+    from datetime import datetime, timedelta, timezone
+
+    from harel.dedupe import dedupe_key
+    from harel.models import RawItem
+
+    now = datetime.now(timezone.utc)
+    common = dict(source_kind="federal_register", url="", summary="", body="")
+    early = RawItem(
+        source="federal_register_public_inspection", external_id="pi:2026-15628",
+        title="[FR-EARLY] Uyghur Forced Labor Prevention Act Entity List",
+        published_at=now - timedelta(days=2),
+        meta={"dedupe_id": "federal_register:2026-15628"}, **common)
+    late = RawItem(
+        source="federal_register", external_id="fr:2026-15628",
+        title="[FR] Notice Regarding the Uyghur Forced Labor Prevention Act Entity List",
+        published_at=now,
+        meta={"dedupe_id": "federal_register:2026-15628"}, **common)
+
+    assert dedupe_key(early) == dedupe_key(late), \
+        "one document number is one event, whatever the title prefix says"
+
+    # And a document with no stable id still falls back to title-and-day.
+    plain = RawItem(source="rss", external_id="x", title="Something else",
+                    published_at=now, meta={}, **common)
+    assert dedupe_key(plain) != dedupe_key(late)

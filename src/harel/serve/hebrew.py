@@ -20,7 +20,7 @@ honest - better a legible English fragment than a wrong Hebrew one.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # --------------------------------------------------------------- chrome ---- #
@@ -124,6 +124,12 @@ _CALENDAR_RULES: list[tuple[re.Pattern[str], str]] = [
      r"תוצאות Q\1 (תאריך שהחברה פרסמה)"),
     (re.compile(r"^Results results \(company-announced date\)$"),
      r"תוצאות (תאריך שהחברה פרסמה)"),
+    # A date restated by an aggregator is still a date, but the reader has to be
+    # able to tell it apart from one the issuer published itself.
+    (re.compile(r"^Q([1-4]) results \(reported by (.+)\)$"),
+     r"תוצאות Q\1 (לפי \2, לא מהחברה)"),
+    (re.compile(r"^Results results \(reported by (.+)\)$"),
+     r"תוצאות (לפי \1, לא מהחברה)"),
     (re.compile(r"^Rule effective: (.+)$"), r"תקנה נכנסת לתוקף: \1"),
     (re.compile(r"^Comment deadline: (.+)$"), r"מועד אחרון להערות: \1"),
     (re.compile(r"^Expected results: (.+)$"), r"תוצאות צפויות: \1"),
@@ -138,13 +144,30 @@ def calendar_label(text: str) -> str:
 
 
 # ------------------------------------------------------------------ time --- #
-def ago(iso: str) -> str:
-    """Relative time, Hebrew, with the grammar the numbers actually need."""
+# Sunday-first, matching datetime.isoweekday() % 7.
+_WEEKDAY_HE = ("א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳")
+
+
+def _parse(iso: str) -> datetime | None:
     try:
         dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
-    except ValueError:
+    except (ValueError, TypeError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def ago(iso: str) -> str:
+    """Relative time, Hebrew, with the grammar the numbers actually need."""
+    dt = _parse(iso)
+    if dt is None:
         return str(iso)[:16]
     minutes = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+    # A timestamp in the future used to fall through to "הרגע", because -2880
+    # minutes is also less than one. That is how a Federal Register document
+    # scheduled to publish on Monday was presented on Saturday night as having
+    # just come out. A future date is a schedule, not an age, and has to say so.
+    if minutes < 0:
+        return in_future(dt)
     if minutes < 1:
         return "הרגע"
     if minutes < 60:
@@ -155,6 +178,45 @@ def ago(iso: str) -> str:
         return "לפני שעה" if whole == 1 else f"לפני {whole} שעות"
     days = int(hours // 24)
     return "אתמול" if days == 1 else f"לפני {days} ימים"
+
+
+def in_future(dt: datetime) -> str:
+    minutes = (dt - datetime.now(timezone.utc)).total_seconds() / 60
+    if minutes < 60:
+        return "בעוד פחות משעה"
+    hours = minutes / 60
+    if hours < 24:
+        whole = int(hours)
+        return "בעוד שעה" if whole == 1 else f"בעוד {whole} שעות"
+    days = int(hours // 24)
+    return "מחר" if days == 1 else f"בעוד {days} ימים"
+
+
+def weekday(dt: datetime) -> str:
+    return _WEEKDAY_HE[dt.isoweekday() % 7]
+
+
+def day_label(iso: str) -> str:
+    """`ו׳ 31.7` - the weekday a trader thinks in, plus the date."""
+    dt = _parse(iso)
+    if dt is None:
+        return str(iso)[:10]
+    return f"{weekday(dt)} {dt.day}.{dt.month}"
+
+
+def eastern_label(iso: str) -> str:
+    """`ו׳ 16:00 ET` - the exchange's own clock, which is the one that decides
+    whether a print is a closing print.
+
+    Month-based DST approximation, as in `collect.prices.current_session`: ET is
+    UTC-4 from March to November and UTC-5 otherwise. Wrong for a few days a
+    year on either side of the switch, by one hour, on a label.
+    """
+    dt = _parse(iso)
+    if dt is None:
+        return str(iso)[:16]
+    et = dt - timedelta(hours=4 if 3 <= dt.month <= 11 else 5)
+    return f"{weekday(et)} {et:%H:%M} ET"
 
 
 # ------------------------------------------------- explanations & traces --- #

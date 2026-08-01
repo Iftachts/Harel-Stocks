@@ -30,6 +30,20 @@ FIELDS = [
     "significant", "effective_on", "comments_close_on", "citation",
 ]
 
+# Public inspection documents carry a *smaller* schema than published ones, and
+# the API rejects the whole request rather than ignoring a field it does not
+# know: asking for FIELDS here returns `400 field 'abstract' not valid`, so the
+# collector yielded nothing, every pass, since it was written. The one source in
+# this system that buys lead time was silently off. Eight of those fifteen names
+# are invalid here (abstract, action, docket_ids, topics, significant,
+# effective_on, comments_close_on, citation) - verified field by field against
+# the live API on 2026-08-01.
+PI_FIELDS = [
+    "document_number", "title", "html_url", "publication_date", "type",
+    "agencies", "agency_names", "filed_at", "filing_type", "pdf_url",
+    "excerpts", "toc_subject", "toc_doc", "num_pages", "docket_numbers",
+]
+
 MAX_PER_QUERY = 40
 
 
@@ -123,6 +137,9 @@ class FederalRegisterCollector(Collector):
             if item is not None:
                 yield item
 
+    # Which sector a query belongs to is not evidence about a document. See
+    # `_doc_to_item`; the tickers travel as context and the linker decides.
+
 
 @register("federal_register_pi")
 class FederalRegisterPublicInspectionCollector(Collector):
@@ -141,7 +158,7 @@ class FederalRegisterPublicInspectionCollector(Collector):
         if not agencies_of_interest:
             return
 
-        params = [("fields[]", f) for f in FIELDS] + [("per_page", "200")]
+        params = [("fields[]", f) for f in PI_FIELDS] + [("per_page", "200")]
         try:
             resp = self.client.get(PI_URL, params=params, allow_status=(400, 404))
         except HttpError as exc:
@@ -174,11 +191,40 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
     if not number or not title:
         return None
 
-    pub_date = doc.get("publication_date") or doc.get("filing_date") or ""
-    try:
-        published = datetime.strptime(pub_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        published = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    forthcoming = False
+    scheduled = doc.get("publication_date") if public_inspection else None
+
+    if public_inspection:
+        # `publication_date` on a public-inspection document is the date it is
+        # *scheduled* to appear - routinely two or three days out. Reading that
+        # as the publication time hands the item a future timestamp, a negative
+        # age and a recency bonus it has not earned. `filed_at` is the moment it
+        # became public, which is where the lead time actually starts.
+        published = _parse_iso(doc.get("filed_at")) or now
+        forthcoming = bool(scheduled and scheduled > now.date().isoformat())
+        # No abstract in this schema; the table-of-contents pair is the closest
+        # thing to one, and excerpts carries the real text when present.
+        summary = doc.get("excerpts") or " - ".join(
+            part for part in (doc.get("toc_subject"), doc.get("toc_doc")) if part
+        )
+    else:
+        pub_date = doc.get("publication_date") or doc.get("filing_date") or ""
+        try:
+            published = datetime.strptime(pub_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            published = datetime.now(timezone.utc)
+        # documents.json lists documents days BEFORE they publish, so this date
+        # is regularly in the future. Stored as published_at it gave the item a
+        # negative age: the recency curve read it as maximally fresh, and the
+        # relative-time label - which only tested `minutes < 1` - printed a
+        # Monday rule as "הרגע" on Saturday night. What is actually true is
+        # that we learned of it when we collected it, and that it is scheduled.
+        if published > now:
+            forthcoming = True
+            scheduled = pub_date
+            published = now
+        summary = doc.get("abstract") or ""
 
     agency_names = doc.get("agency_names") or [
         a.get("name") for a in (doc.get("agencies") or []) if isinstance(a, dict)
@@ -189,16 +235,36 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
         external_id=("pi:" if public_inspection else "fr:") + str(number),
         title=f"{prefix} {title}",
         url=doc.get("html_url") or "",
-        summary=(doc.get("abstract") or "")[:4000],
+        summary=(summary or "")[:4000],
         published_at=published,
-        seed_tickers=list(tickers),
+        # Deliberately empty. A seed is a claim by the collector that it knows
+        # who a document is about, and the linker honours it at 0.92 - but all
+        # this collector knew was that the API returned the document for one of
+        # a sector's search terms, and `conditions[term]` searches the FULL
+        # document text. That turned a passing mention into a high-confidence
+        # link to every ticker in the sector: a Family Violence Prevention rule
+        # became LPSN and NICE news, a hospice wage index became BrainsWay news,
+        # and both outranked real stories at 45. The tickers below travel as
+        # context; `EntityLinker._link_sector_regulatory` decides, and it looks
+        # only at the title and abstract - the parts that say what a document is
+        # actually about.
+        seed_tickers=[],
         seed_relation="SECTOR_REG",
         meta={
             "document_number": number,
+            # One document, one lifecycle. The public-inspection copy and the
+            # published copy carry different titles and different dates; the
+            # document number is the only thing that identifies the event, so it
+            # is what the deduper fingerprints on.
+            "dedupe_id": f"federal_register:{number}",
+            # Who the query was run for, kept for the drill-down so "why did we
+            # even fetch this" stays answerable after the link is gone.
+            "queried_for": list(tickers),
             "doc_type": doc.get("type"),
             "action": doc.get("action"),
             "agencies": agency_names,
-            "docket_ids": doc.get("docket_ids"),
+            # PI calls the same thing `docket_numbers`.
+            "docket_ids": doc.get("docket_ids") or doc.get("docket_numbers"),
             "topics": doc.get("topics"),
             "significant": doc.get("significant"),
             "effective_on": doc.get("effective_on"),
@@ -207,5 +273,27 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
             "sector": sector_key,
             "public_inspection": public_inspection,
             "lead_time": "1_business_day" if public_inspection else None,
+            # `filing_type: special` means the agency put it on public
+            # inspection ahead of the normal schedule - the strongest lead-time
+            # signal this source has. `scheduled_publication_date` is the day it
+            # will hit the Federal Register, kept out of published_at above.
+            "filing_type": doc.get("filing_type") if public_inspection else None,
+            "scheduled_publication_date": scheduled,
+            # True while the document exists but has not published yet. The
+            # surfaces must say "publishes Monday", never date it as news.
+            "forthcoming": forthcoming,
+            "pdf_url": doc.get("pdf_url") if public_inspection else None,
         },
     )
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    """PI timestamps arrive as `2026-07-30T16:15:00.000-04:00`."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(
+        tzinfo=timezone.utc)

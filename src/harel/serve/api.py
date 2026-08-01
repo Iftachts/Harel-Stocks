@@ -154,6 +154,33 @@ AGENT_MANIFEST: dict[str, Any] = {
         "why": "plain-language justification for the link; quote it, do not invent one",
         "reasons": "the full scoring trace; use it to explain rankings",
         "corroboration": "number of independent sources carrying the same story",
+        "causal_eligible": (
+            "TRUE if this item may be offered as the CAUSE of a price move: "
+            "something in it named the company, its product, subsidiary, or a "
+            "peer/customer/supplier we track for it. FALSE for sector-level "
+            "matches - a regulator document that matched a sector keyword and "
+            "named nobody. A false value does NOT mean irrelevant; it means the "
+            "evidence is about a group, not about this company."
+        ),
+        "causal_basis": (
+            "present only when a sector-level item was promoted to driver "
+            "anyway, and says what promoted it (the whole basket moving "
+            "together in the same direction)."
+        ),
+        "t": (
+            "publication time. Compare against `first_published_at` when it is "
+            "present, and never treat a value in the future as an age."
+        ),
+        "first_published_at": (
+            "when this event FIRST became knowable, across every copy of it we "
+            "hold. A Federal Register document appears on public inspection days "
+            "before publication; both copies are one event and this is its start."
+        ),
+        "forthcoming": (
+            "the document exists and is readable but has NOT published yet. "
+            "`publishes_on` is the scheduled date. Say 'publishes on X', never "
+            "'published X ago'."
+        ),
     },
     "rules_for_the_agent": [
         "Never state that a PEER or SECTOR_* item is news about our company.",
@@ -164,6 +191,14 @@ AGENT_MANIFEST: dict[str, Any] = {
         "could have caused the move. `after_the_bell` published after the close - "
         "never present those as the cause of that day's move; they are the next "
         "session's catalyst.",
+        "`possible_context` in /api/moving is what we read and deliberately did "
+        "NOT call a cause: relevant to the sector, naming no company. Report it "
+        "as context at low confidence, say no company-specific exposure was "
+        "found, and leave the move an open question. Do not upgrade it to an "
+        "explanation because nothing better is available - the same entity-list "
+        "notice sat behind one name up 4% and another down 3.5% in one session.",
+        "A high `score` is relevance, not causation. Gate any causal claim on "
+        "`causal_eligible`, never on the score alone.",
         "Check `coverage_warnings` in /api/morning before claiming 'no news'.",
         "When the user asks why an item is ranked where it is, why it is tagged "
         "with a ticker, or whether it can be trusted, call /api/explain/{uid} "

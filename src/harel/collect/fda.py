@@ -48,12 +48,26 @@ class OpenFdaCollector(Collector):
             "510k": "decision_date",
         }.get(dataset, "receivedate")
 
-        # openFDA lags; widen the window so nothing is lost to the lag.
-        start = (self.ctx.since - timedelta(days=4)).strftime("%Y%m%d")
+        # openFDA is a batch source and every dataset lands on its own delay, so
+        # the window has to be padded by more than that delay or the query asks
+        # for days the dataset does not have yet. Measured 2026-08-01 against a
+        # live API: drugsfda 3 days behind, both enforcement sets 10, 510k 15.
+        # The old flat 4-day pad meant enforcement and 510k could never match
+        # anything - they were returning zero on their own terms, not only
+        # because of the HTTP 500 below. Padding is cheap: the deduper drops
+        # records already stored, so a wide window costs one request, not rows.
+        lag_days = {"drugsfda": 10, "enforcement": 21, "510k": 30}.get(dataset, 14)
+        start = (self.ctx.since - timedelta(days=lag_days)).strftime("%Y%m%d")
         end = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d")
 
         params = {
-            "search": f"{date_field}:[{start}+TO+{end}]",
+            # openFDA's documented range syntax is `field:[start+TO+end]`, but
+            # that `+` is URL encoding for a space - it belongs to the wire, not
+            # to the value. Passing it through a params dict escapes it to %2B,
+            # so the server received a literal plus and Lucene answered HTTP 500
+            # (`Encountered "]" ... was expecting "TO"`) for every FDA endpoint.
+            # Write the space; requests does the encoding.
+            "search": f"{date_field}:[{start} TO {end}]",
             "limit": str(min(MAX_LIMIT, 500)),
         }
         key = self.source.api_key

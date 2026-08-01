@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from .config import Config, get_config
 from .db import Database
+from .enrich.linker import causal_eligible
 
 MARKET_TZ = ZoneInfo("America/New_York")
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
@@ -135,6 +136,25 @@ def last_session_close(now: datetime | None = None) -> datetime:
     return close.astimezone(timezone.utc)
 
 
+def _event_start(row: dict[str, Any]) -> datetime | None:
+    """When this event first became knowable, not when this copy of it was filed.
+
+    The Federal Register publishes a document twice: on public inspection, and
+    again on publication days later. Collapsed into one cluster, the winning row
+    is whichever scored higher - usually the later copy - and testing that copy
+    against the closing bell put a document we could read on Friday morning
+    "after the bell" on Friday night. One event has one beginning, and the bell
+    test is a question about the beginning.
+    """
+    first = row.get("first_published_at")
+    if first:
+        earliest = _published_utc({"published_at": first})
+        current = _published_utc(row)
+        if earliest and (current is None or earliest < current):
+            return earliest
+    return _published_utc(row)
+
+
 def _published_utc(row: dict[str, Any]) -> datetime | None:
     raw = row.get("published_at")
     if not raw:
@@ -164,6 +184,12 @@ def _compact(row: dict[str, Any], include_reasons: bool = False) -> dict[str, An
         out["ticker"] = row["ticker"]
         out["relation"] = row.get("relation")
         out["why"] = row.get("why")
+        # Separate from the score on purpose. A high relevance score is not
+        # proof of causation, and the agent downstream has to be able to tell
+        # "this matters to the name" from "this moved the name".
+        out["causal_eligible"] = causal_eligible(row.get("relation"))
+    if row.get("causal_basis"):
+        out["causal_basis"] = row["causal_basis"]
     if row.get("tickers"):
         out["tickers"] = row["tickers"]
     summary = (row.get("summary") or "").strip()
@@ -176,9 +202,20 @@ def _compact(row: dict[str, Any], include_reasons: bool = False) -> dict[str, An
         # an evergreen marketing page reads as six-hour-old news.
         out["published_unknown"] = True
         out["discovered_at"] = row.get("collected_at")
+    if row.get("first_published_at"):
+        # An earlier copy of the same event exists in this cluster - the public
+        # inspection filing before the publication. That is when the clock
+        # actually started, and lead time is why the early copy is collected.
+        out["first_published_at"] = row["first_published_at"]
+    if meta.get("forthcoming") and meta.get("scheduled_publication_date"):
+        # It exists, we can read it, and it has not published yet. `t` is when
+        # we learned of it - not a publication time, and never an age.
+        out["forthcoming"] = True
+        out["publishes_on"] = meta["scheduled_publication_date"]
+        out["discovered_at"] = row.get("collected_at")
     for key in ("form_type", "items", "item_labels", "nct_id", "status", "change",
                 "agencies", "document_number", "public_inspection", "sponsor",
-                "classification", "synthetic", "kind"):
+                "classification", "synthetic", "kind", "filing_type"):
         if meta.get(key):
             out.setdefault("meta", {})[key] = meta[key]
     also = row.get("also") or []
@@ -306,21 +343,35 @@ class Views:
         row = self.db.latest_price(ticker)
         if not row:
             return None
-        asof = _published_utc({"published_at": row.get("asof")})
-        age_min = ((datetime.now(timezone.utc) - asof).total_seconds() / 60
-                   if asof else None)
+        # Two clocks, and conflating them is how a Friday close became a
+        # "2 minute old" price on a Saturday. `asof` is when we fetched;
+        # `market_time` is when the exchange last printed. Only the second one
+        # is the age of the number on screen.
+        fetched = _published_utc({"published_at": row.get("asof")})
+        printed = _published_utc({"published_at": row.get("market_time")})
+        now = datetime.now(timezone.utc)
+        fetch_age_min = ((now - fetched).total_seconds() / 60 if fetched else None)
+        print_age_min = ((now - printed).total_seconds() / 60 if printed else None)
         provider = (row.get("provider") or "").strip()
+        session = row.get("session") or "unknown"
 
-        if provider == "stooq":
-            freshness = f"end-of-day bar for {str(row.get('asof'))[:10]} - not an intraday price"
-        elif age_min is None:
-            freshness = "capture time unknown"
-        elif provider:
-            freshness = (f"captured {age_min:.0f} min ago; the feed itself is "
-                         f"delayed on top of that")
+        if printed is None:
+            freshness = (
+                f"fetched {fetch_age_min:.0f} min ago; the exchange timestamp was "
+                f"not recorded for this print, so its true age is unknown"
+                if fetch_age_min is not None else "capture time unknown")
+        elif session == "closed":
+            freshness = (
+                f"market closed - this is the last print of the "
+                f"{printed.date().isoformat()} session, fetched "
+                f"{fetch_age_min:.0f} min ago"
+                if fetch_age_min is not None else
+                f"market closed - last print {printed.date().isoformat()}")
         else:
-            freshness = (f"captured {age_min:.0f} min ago; provider was not "
-                         f"recorded for this print")
+            freshness = (
+                f"last trade {print_age_min:.0f} min ago, fetched "
+                f"{fetch_age_min:.0f} min ago; the feed itself is delayed on "
+                f"top of that")
 
         return {
             "ticker": ticker.upper(),
@@ -337,7 +388,13 @@ class Views:
             "provider_note": PROVIDER_MEANING.get(
                 provider, "provider not recorded (print predates provenance tracking)"),
             "asof": row.get("asof"),
-            "age_minutes": round(age_min) if age_min is not None else None,
+            # Kept as the fetch age it always was, but no longer the only age on
+            # offer and no longer described as the age of the price.
+            "fetched_at": row.get("asof"),
+            "fetch_age_minutes": round(fetch_age_min) if fetch_age_min is not None else None,
+            "market_time": row.get("market_time"),
+            "market_age_minutes": round(print_age_min) if print_age_min is not None else None,
+            "age_minutes": round(fetch_age_min) if fetch_age_min is not None else None,
             "freshness": freshness,
             "math": (f"({row['last']} - {row['prev_close']}) / {row['prev_close']} "
                      f"= {row['change_pct']:+.2f}%"
@@ -380,15 +437,31 @@ class Views:
             ]
             candidates = [r for r in candidates if not self._is_reactive(r)]
 
+            # Sector-level regulatory reading, gathered on its own terms. It is
+            # not a driver candidate, so it must not inherit the driver
+            # threshold: demoting an item from cause to context also lowers its
+            # score, and a context line that disappears exactly because we
+            # stopped believing it was the cause is the failure this is meant to
+            # prevent. The reader has to see what we read and set aside.
+            seen = {r["uid"] for r in candidates}
+            sector_context = [
+                r for r in self.db.feed(tickers=[ticker], min_score=0,
+                                        since_hours=36, limit=20)
+                if r["uid"] not in seen
+                and not causal_eligible(r.get("relation"))
+                and not self._is_reactive(r)
+                and (r.get("meta") or {}).get("kind") != "unexplained_move"
+            ]
+
             # A story published after the closing bell cannot have caused the
             # move that bell ended. Keep it - it is tomorrow's catalyst - but
             # never offer it as this move's explanation. Which bell, though,
             # depends on the print we are explaining: see _driver_cutoff.
             cutoff = self._driver_cutoff(price)
-            drivers = [r for r in candidates
-                       if (p := _published_utc(r)) is None or p <= cutoff]
+            pre_move = [r for r in candidates
+                        if (p := _event_start(r)) is None or p <= cutoff]
             after_bell = [r for r in candidates
-                          if (p := _published_utc(r)) is not None and p > cutoff]
+                          if (p := _event_start(r)) is not None and p > cutoff]
             # What the group did, and what is left over once you subtract it.
             tc = self.config.ticker(ticker)
             bench_sym = self.config.benchmark_for(tc.sector) if tc else None
@@ -396,6 +469,24 @@ class Views:
             bench_pct = bench.get("change_pct") if bench else None
             relative = (round(price["change_pct"] - bench_pct, 2)
                         if bench_pct is not None else None)
+
+            # Relevance got an item this far. Causation is a second question,
+            # and it is asked here: a sector-level match may only explain a move
+            # if the whole basket moved the way the document would predict.
+            # Otherwise it is context, and context that is presented as a cause
+            # hides the question it should have raised.
+            sector_move = self._sector_move(ticker)
+            corroborated = self._sector_wide_corroboration(price, sector_move)
+            drivers, context = [], []
+            for row in pre_move + sector_context:
+                if causal_eligible(row.get("relation")):
+                    drivers.append(row)
+                elif corroborated:
+                    drivers.append(dict(row, causal_basis=(
+                        f"sector-level match, promoted: {sector_move['names']} names "
+                        f"in the sector moved together")))
+                else:
+                    context.append(row)
 
             movers.append({
                 "ticker": ticker,
@@ -411,6 +502,10 @@ class Views:
                 "session": price.get("session"),
                 "explained": bool(drivers),
                 "drivers": [_compact(r) for r in drivers[:3]],
+                # Relevant, read, and deliberately not called a cause. Named so
+                # that a reader can see what we looked at and rejected instead
+                # of wondering whether we missed it.
+                "possible_context": [_compact(r) for r in context[:3]],
                 "after_the_bell": [_compact(r) for r in after_bell[:3]],
                 "post_move_commentary": [_compact(r) for r in commentary[:3]],
             })
@@ -422,6 +517,55 @@ class Views:
     # question of the session - "what do they know?" - and it is not news, so
     # nothing in a news feed was ever going to raise it.
     UNEXPLAINED_RELATIVE_PCT = 3.0
+
+    # How much of a sector has to move the same way before a sector-wide
+    # document is allowed to be the reason. Two names is not a sector.
+    SECTOR_CORROBORATION_MIN_NAMES = 3
+    SECTOR_CORROBORATION_MIN_SHARE = 0.6
+    SECTOR_CORROBORATION_MIN_PCT = 1.0
+
+    def _sector_move(self, ticker: str) -> dict[str, Any] | None:
+        """What every other name in this ticker's sector did today.
+
+        A sector-wide regulatory document predicts a sector-wide move. If the
+        basket did not make one, the document did not cause anything - and if
+        the basket split, it certainly did not cause both halves.
+        """
+        tc = self.config.ticker(ticker)
+        if not tc:
+            return None
+        peers = [t for t in self.config.active_tickers
+                 if t != ticker and (self.config.ticker(t) or None)
+                 and self.config.ticker(t).sector == tc.sector]
+        moves = []
+        for peer in peers:
+            row = self.db.latest_price(peer)
+            if row and row.get("change_pct") is not None:
+                moves.append(row["change_pct"])
+        if not moves:
+            return None
+        return {
+            "names": len(moves),
+            "up": sum(1 for m in moves if m > 0),
+            "down": sum(1 for m in moves if m < 0),
+            "median_pct": sorted(moves)[len(moves) // 2],
+        }
+
+    def _sector_wide_corroboration(self, price: dict[str, Any],
+                                   sector_move: dict[str, Any] | None) -> bool:
+        """Did the basket move together, in this name's direction, and enough?"""
+        if not sector_move or sector_move["names"] < self.SECTOR_CORROBORATION_MIN_NAMES:
+            return False
+        change = price.get("change_pct")
+        if change is None or abs(change) < self.SECTOR_CORROBORATION_MIN_PCT:
+            return False
+        agreeing = sector_move["up"] if change > 0 else sector_move["down"]
+        if agreeing / sector_move["names"] < self.SECTOR_CORROBORATION_MIN_SHARE:
+            return False
+        # And the group's own move has to point the same way with real size -
+        # "most names were fractionally green" is not a sector event.
+        median = sector_move["median_pct"]
+        return (median > 0) == (change > 0) and abs(median) >= self.SECTOR_CORROBORATION_MIN_PCT
 
     def _unexplained_alerts(self, movers: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Moves that outran their sector with no verified catalyst.
@@ -467,8 +611,14 @@ class Views:
                 # story, it is a price recap, and it was ruled out on purpose.
                 "checked": ("no eligible pre-move catalyst above score 20 in the "
                             "last 30h" + (" (price recaps excluded as reactive)"
-                                          if mover.get("post_move_commentary") else "")),
+                                          if mover.get("post_move_commentary") else "")
+                            + (" (sector-level regulatory matches held as context, "
+                               "not cause)" if mover.get("possible_context") else "")),
                 "post_move_commentary": mover.get("post_move_commentary") or [],
+                # What we read and would not call a cause. Suppressing it would
+                # be the same failure in the other direction: the reader sees
+                # the document elsewhere and concludes we never looked.
+                "possible_context": mover.get("possible_context") or [],
                 "next_catalyst": self._next_catalyst(mover["ticker"]),
             })
         out.sort(key=lambda a: abs(a.get("relative_pct") or a["change_pct"]), reverse=True)

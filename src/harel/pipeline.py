@@ -147,6 +147,7 @@ class Pipeline:
             collected=report.collected, stored=report.stored,
             deduped=report.deduped, errors=report.errors[:50],
         )
+        self.db.checkpoint()
         return report
 
     # ------------------------------------------------------------- rescore --
@@ -247,7 +248,17 @@ class Pipeline:
         """
         seeds = list(meta.get("seed_tickers") or [])
         source = self.config.sources.get(row["source"])
-        if not seeds or not source or "{q}" not in (source.base_url or ""):
+        if not seeds or not source:
+            return seeds
+        # A regulator document's seed said only "the API returned this for one
+        # of the sector's terms", which the linker then honoured at 0.92. The
+        # collector no longer makes that claim - but stored items still carry
+        # the old seed list, so without this the back catalogue re-links to it
+        # for ever and a fixed false positive is only fixed for the future.
+        # Rescore exists precisely so that tuning reaches what is already here.
+        if source.kind in _REGULATOR_KINDS:
+            return []
+        if "{q}" not in (source.base_url or ""):
             return seeds
         if (meta.get("seed_relation") or "DIRECT") != "DIRECT":
             return seeds
@@ -346,11 +357,19 @@ class Pipeline:
         reported = _earnings_date(scored.raw)
         if reported:
             date_str, label = reported
+            # An issuer stating its own date and an aggregator restating it are
+            # not equally good. Both are worth having - the aggregator is the
+            # only channel for a name with no IR feed, which is how GILT and
+            # NICE went missing - but the calendar has to say which it was.
+            first_party = scored.raw.source in _FIRST_PARTY_SOURCES
+            label = (f"{label} (company-announced date)" if first_party
+                     else f"{label} (reported by {scored.raw.source})")
             for link in scored.links:
                 if link.relation in ("DIRECT", "SUBSIDIARY"):
                     entries.append(CalendarEntry(
                         ticker=link.ticker, kind="earnings", date=date_str,
-                        label=label, source=scored.raw.source, confidence=0.95,
+                        label=label, source=scored.raw.source,
+                        confidence=0.95 if first_party else 0.8,
                         url=scored.raw.url, relation=link.relation,
                     ))
 
@@ -421,7 +440,13 @@ class Pipeline:
 # --------------------------------------------------------------------------- #
 _EARNINGS_ANNOUNCEMENT = re.compile(
     r"\b(will (issue|report|release|host|announce)|to (report|announce|release|host)|"
-    r"schedules?|has scheduled|announces? (the )?(date|timing))\b", re.IGNORECASE)
+    r"schedules?|has scheduled|announces? (the )?(date|timing)|"
+    # Aggregators rewrite the issuer's headline and drop the announcing verb.
+    # Gilat's date reached us only as "Gilat CEO and CFO to Take Questions on Q2
+    # Results Aug. 5", which named the quarter and the day and still failed all
+    # three legs. The date is not less true for having been reworded.
+    r"to (take questions|discuss|present)|(earnings|conference) call)\b",
+    re.IGNORECASE)
 _EARNINGS_SUBJECT = re.compile(
     r"\b((first|second|third|fourth)[- ]quarter|q[1-4]|full[- ]year|annual|"
     r"half[- ]year)\b.{0,40}?\b(results|earnings)\b|"
@@ -429,14 +454,32 @@ _EARNINGS_SUBJECT = re.compile(
     re.IGNORECASE | re.DOTALL)
 _MONTH = ("january february march april may june july august september october "
           "november december").split()
+# Abbreviated forms, and a year that is allowed to be absent. "Aug. 5" is how a
+# headline writes a date; requiring "August 5, 2026" meant the only place the
+# date was ever written in full was the issuer's own release - exactly the feed
+# GILT and NICE do not have. A missing year is resolved to the next occurrence
+# inside the 120-day horizon below, so it cannot silently mean last year.
+_MONTH_ALT = "|".join(m[:3] + r"(?:" + m[3:] + r")?\.?" for m in _MONTH)
 _DATE_MDY = re.compile(
-    r"\b(" + "|".join(_MONTH) + r")\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b",
+    r"\b(" + _MONTH_ALT + r")\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b",
     re.IGNORECASE)
 _DATE_DMY = re.compile(
-    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(" + "|".join(_MONTH) + r"),?\s+(\d{4})\b",
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(" + _MONTH_ALT + r"),?(?:\s+(\d{4}))?\b",
     re.IGNORECASE)
 _QUARTER_LABEL = re.compile(
     r"\b(first|second|third|fourth)[- ]quarter\b|\bq([1-4])\b", re.IGNORECASE)
+# Sources where the issuer is speaking for itself.
+_FIRST_PARTY_SOURCES = frozenset({
+    "company_ir_rss", "maya_tase", "maya_schedule", "sec_edgar_submissions",
+})
+
+# Collectors that fetch regulator documents by *sector query* and so cannot know
+# who a document is about - only its text can say. See `_trusted_seeds`.
+#
+# openFDA and html_table are deliberately absent: they seed from an entity
+# matcher that found a company, product or named peer in the record, which is
+# the evidence standard being enforced here rather than a violation of it.
+_REGULATOR_KINDS = frozenset({"federal_register", "federal_register_pi"})
 
 
 def _earnings_date(item) -> tuple[str, str] | None:
@@ -453,16 +496,16 @@ def _earnings_date(item) -> tuple[str, str] | None:
 
     today = datetime.now(timezone.utc).date()
     best: date | None = None
-    for match in _DATE_MDY.finditer(text):
-        month, day, year = match.group(1), match.group(2), match.group(3)
-        found = _safe_date(int(year), _MONTH.index(month.lower()) + 1, int(day))
-        if found and today <= found <= today + timedelta(days=120):
-            best = found if best is None else min(best, found)
-    for match in _DATE_DMY.finditer(text):
-        day, month, year = match.group(1), match.group(2), match.group(3)
-        found = _safe_date(int(year), _MONTH.index(month.lower()) + 1, int(day))
-        if found and today <= found <= today + timedelta(days=120):
-            best = found if best is None else min(best, found)
+    for pattern, month_first in ((_DATE_MDY, True), (_DATE_DMY, False)):
+        for match in pattern.finditer(text):
+            raw_month = match.group(1) if month_first else match.group(2)
+            raw_day = match.group(2) if month_first else match.group(1)
+            month = _month_index(raw_month)
+            if month is None:
+                continue
+            found = _resolve_date(month, int(raw_day), match.group(3), today)
+            if found and today <= found <= today + timedelta(days=120):
+                best = found if best is None else min(best, found)
     if best is None:
         return None
 
@@ -473,7 +516,33 @@ def _earnings_date(item) -> tuple[str, str] | None:
                  if word else f"Q{quarter.group(2)}")
     else:
         label = "Results"
-    return best.isoformat(), f"{label} results (company-announced date)"
+    return best.isoformat(), f"{label} results"
+
+
+def _month_index(token: str) -> int | None:
+    """`Aug.` / `august` / `Sept` -> 8 / 8 / 9."""
+    token = token.lower().rstrip(".")
+    for index, name in enumerate(_MONTH):
+        if name.startswith(token):
+            return index + 1
+    return None
+
+
+def _resolve_date(month: int, day: int, year: str | None, today: date) -> date | None:
+    """A date with no year means the next one, not an ambiguous one.
+
+    "Aug. 5" in a July headline is this August. Resolving to the current year
+    unconditionally would put a January date eleven months in the past, where
+    the horizon check below silently drops it - a date lost rather than a date
+    wrong, but lost all the same.
+    """
+    if year:
+        return _safe_date(int(year), month, day)
+    for candidate in (today.year, today.year + 1):
+        found = _safe_date(candidate, month, day)
+        if found and found >= today:
+            return found
+    return None
 
 
 def _safe_date(year: int, month: int, day: int) -> date | None:

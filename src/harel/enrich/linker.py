@@ -30,6 +30,31 @@ RELATION_RANK = {
     "MACRO": 10,
 }
 
+# Relations that carry evidence about the *company*: the document named it, or
+# named a product, subsidiary, peer, customer or supplier we track for it.
+# Everything below this line is evidence about a group.
+CAUSAL_RELATIONS = frozenset({
+    "DIRECT", "SUBSIDIARY", "PRODUCT_RIVAL", "CUSTOMER", "PEER", "SUPPLIER",
+})
+
+
+def causal_eligible(relation: str | None) -> bool:
+    """May a link of this kind be offered as the *cause* of a price move?
+
+    Relevance and causation are different questions, and one number was
+    answering both. A UFLPA entity-list notice is genuinely relevant to a
+    foundry - and on 2026-07-31 it was offered as the reason TSEM rose 4.0% and,
+    in the same session, as the reason CAMT fell 3.5%, while SOXX barely moved.
+    A document that explains a move and its opposite explains neither.
+
+    So a sector-level match stays in the feed - suppressing it would be its own
+    failure, the entity list does matter to a foundry - but it cannot be a
+    driver on a keyword alone. What lifts it is evidence: the company named, an
+    entity we track for it named, or (checked at read time, not here) the whole
+    basket moving together in the direction the document would predict.
+    """
+    return (relation or "").upper() in CAUSAL_RELATIONS
+
 # Symbols that are also ordinary English words. Matching these bare would flood
 # the feed, so they need an exchange prefix or a $ sigil.
 AMBIGUOUS_TICKERS = {

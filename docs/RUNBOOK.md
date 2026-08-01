@@ -46,7 +46,8 @@ harel doctor
 
 מה לחפש:
 - `universe  22 active, 0 unresolved` — אם מופיע unresolved, ראה שלב 2
-- `sources   24/28 available` — 4 כבויים כי חסרים מפתחות, זה תקין
+- `sources   20/29 available` — 3 מחכים למפתח API, 6 כבויים ב-`sources.yaml`
+  (כל אחד עם `notes:` שמסביר למה). זה תקין
 - רשימת "Sources off" — מפתחות שאפשר להוסיף מאוחר יותר
 
 ### 1.2 `harel verify-feeds`
@@ -186,6 +187,33 @@ Start-ScheduledTask -TaskName HarelTerminal
 
 הסקריפט טוען את `.env` בעצמו מפני שהאפליקציה קוראת `os.environ` ישירות ואינה
 מפרסרת `.env`. בלי `SEC_CONTACT_EMAIL` ה-SEC מחזירה 403 ו-EDGAR שותק.
+
+### מעבר אחד בשעה (Windows, מומלץ)
+
+`harel watch` הוא לולאה בתוך תהליך אחד: מה שמפיל את התהליך מפיל איתו את הלו"ז.
+`scripts/harel-hourly.ps1` הוא הצורה ההפוכה — מעבר יחיד שמסתיים, ו-Task Scheduler
+מחזיק את הקצב. מעבר שנכשל עולה שעה, לא את כל התזמון.
+
+```powershell
+.\scripts\harel-hourly.ps1            # מעבר אחד עכשיו, בחזית
+.\scripts\harel-hourly.ps1 -Install   # רישום המשימה (פעם אחת)
+.\scripts\harel-hourly.ps1 -Uninstall
+```
+
+המשימה נרשמת כ-`\Harel\HarelCollectHourly` — **בתיקייה, לא בשורש**. רישום בשורש
+דורש הרשאות מנהל; תיקייה לא. מאותה סיבה טריגר ה-logon מוגבל למשתמש הנוכחי:
+`-AtLogOn` בלי `-User` פירושו "כל משתמש", וזו פעולה ברמת מנהל.
+
+```powershell
+Start-ScheduledTask   -TaskName HarelCollectHourly -TaskPath \Harel\
+Get-ScheduledTaskInfo -TaskName HarelCollectHourly -TaskPath \Harel\
+```
+
+`LastTaskResult`: `0` נקי, `1` המעבר רץ אבל מקור החזיר שגיאה, `267009` רץ כרגע.
+הפלט המלא ב-`logs/hourly.log`.
+
+מעבר מלא נמדד ב-~320 שניות, ולכן שעה היא מרווח נוח — בניגוד ל-300 שניות, שבהן
+המעבר הבא מתחיל לפני שהקודם נגמר.
 
 ### הטרמינל
 

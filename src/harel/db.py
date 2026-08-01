@@ -65,7 +65,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
 
 CREATE TABLE IF NOT EXISTS prices (
     ticker      TEXT NOT NULL,
-    asof        TEXT NOT NULL,
+    asof        TEXT NOT NULL,   -- when we fetched
+    market_time TEXT,            -- when the exchange printed
     last        REAL,
     prev_close  REAL,
     change_pct  REAL,
@@ -148,7 +149,13 @@ class Database:
         self.path = Path(path) if path else default_db_path()
         if self.path != Path(":memory:"):
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        # `serve` keeps a connection open for as long as the terminal runs, so a
+        # collection pass is always writing against a live reader. WAL lets them
+        # coexist, but the default 5s busy timeout does not survive a checkpoint
+        # stall - the collector died mid-pass with "database is locked" and left
+        # the feed a day stale. Thirty seconds is longer than any write here.
+        self.conn = sqlite3.connect(str(self.path), check_same_thread=False,
+                                    timeout=30.0)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.conn.executescript(TRIGGERS)
@@ -162,6 +169,10 @@ class Database:
         added: list[tuple[str, str, str]] = [
             ("prices", "provider", "TEXT"),
             ("calendar", "relation", "TEXT"),
+            # The exchange's own timestamp. Rows written before this column
+            # existed read back None, which the surfaces render as "the print
+            # time was not recorded" rather than inventing one.
+            ("prices", "market_time", "TEXT"),
         ]
         for table, column, decl in added:
             cols = {r["name"] for r in
@@ -178,6 +189,24 @@ class Database:
         except Exception:
             self.conn.rollback()
             raise
+
+    def checkpoint(self) -> int:
+        """Fold the WAL back into the database file and truncate it.
+
+        SQLite only checkpoints automatically when no reader is active. The
+        terminal is a permanent reader, so on this machine the WAL grew to 89MB
+        against a 5MB database - every write walking a log seventeen times the
+        size of the data. Call this at the end of a pass, when the collector is
+        the only writer; it is a no-op if a reader is mid-transaction.
+
+        Returns the number of pages left in the WAL (0 means fully truncated).
+        """
+        try:
+            _busy, _log, remaining = self.conn.execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            return int(remaining)
+        except sqlite3.OperationalError:
+            return -1  # a reader held it; the next pass will try again
 
     def close(self) -> None:
         self.conn.close()
@@ -201,7 +230,18 @@ class Database:
                 title=excluded.title, summary=excluded.summary, body=excluded.body,
                 meta_json=excluded.meta_json, events_json=excluded.events_json,
                 score=excluded.score, tier=excluded.tier,
-                reasons_json=excluded.reasons_json, cluster_id=excluded.cluster_id
+                reasons_json=excluded.reasons_json, cluster_id=excluded.cluster_id,
+                -- published_at was absent here, so a date this system got wrong
+                -- was permanent: re-collection could correct the title, the
+                -- score and the links, but never the timestamp. Twenty-two
+                -- Federal Register items stayed dated in the future through a
+                -- fix that stopped producing future dates at all.
+                --
+                -- collected_at stays out on purpose. It means "when we first
+                -- saw this", it is what the latency panel measures against, and
+                -- refreshing it on every pass would reset that to zero.
+                published_at=excluded.published_at,
+                dedupe_key=excluded.dedupe_key
             """,
             (
                 raw.uid, raw.source, raw.source_kind, raw.external_id, raw.title,
@@ -228,10 +268,12 @@ class Database:
     def save_price(self, snap: PriceSnapshot) -> None:
         self.conn.execute(
             """INSERT OR REPLACE INTO prices
-               (ticker, asof, last, prev_close, change_pct, volume, adv20,
-                vol_mult, day_high, day_low, session, provider)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (snap.ticker, snap.asof.isoformat(), snap.last, snap.prev_close,
+               (ticker, asof, market_time, last, prev_close, change_pct, volume,
+                adv20, vol_mult, day_high, day_low, session, provider)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (snap.ticker, snap.asof.isoformat(),
+             snap.market_time.isoformat() if snap.market_time else None,
+             snap.last, snap.prev_close,
              snap.change_pct, snap.volume, snap.adv20, snap.volume_multiple,
              snap.day_high, snap.day_low, snap.session, snap.provider),
         )
@@ -398,9 +440,37 @@ class Database:
 
         if collapse_clusters:
             rows = _collapse(rows)
+            self._attach_event_start(rows)
         if max_per_ticker:
             rows = _cap_per_ticker(rows, max_per_ticker)
         return rows[:limit]
+
+    def _attach_event_start(self, rows: list[dict[str, Any]]) -> None:
+        """When each row's event first became knowable, cluster-wide.
+
+        Asked of the whole cluster and not of the rows in hand, because the two
+        copies of one Federal Register document sit days apart: a 30-hour feed
+        window returns the publication copy and leaves the public-inspection
+        copy - the earlier one, the one that answers "could this have moved
+        Friday's close" - outside the window entirely. Collapsing what happens
+        to be in the window is not the same question.
+        """
+        cluster_ids = {r["cluster_id"] for r in rows if r.get("cluster_id")}
+        if not cluster_ids:
+            return
+        ids = list(cluster_ids)
+        starts = {
+            r["cluster_id"]: r["first"]
+            for r in self.conn.execute(
+                f"SELECT cluster_id, MIN(published_at) AS first FROM items "
+                f"WHERE cluster_id IN ({','.join('?' * len(ids))}) GROUP BY cluster_id",
+                ids,
+            ).fetchall()
+        }
+        for row in rows:
+            first = starts.get(row.get("cluster_id"))
+            if first and first < str(row.get("published_at") or ""):
+                row["first_published_at"] = first
 
     def search(self, query: str, limit: int = 40, since_hours: float | None = None,
                tickers: Sequence[str] | None = None) -> list[dict[str, Any]]:
@@ -522,7 +592,28 @@ class Database:
             f"SELECT * FROM calendar WHERE {' AND '.join(where)} ORDER BY date, ticker",
             params,
         ).fetchall()
-        return [dict(r) for r in rows]
+        # The primary key includes the label, so one earnings date announced by
+        # the issuer and restated by an aggregator lands as two rows. That is
+        # one date; printing it twice makes a seven-line calendar look like a
+        # fourteen-line one and invites the reader to wonder which is real.
+        best: dict[tuple[str, str, str], dict[str, Any]] = {}
+        order: list[tuple[str, str, str]] = []
+        for row in rows:
+            entry = dict(row)
+            key = (entry["ticker"], entry["kind"], entry["date"])
+            current = best.get(key)
+            if current is None:
+                entry["also_reported_by"] = []
+                best[key] = entry
+                order.append(key)
+                continue
+            weaker, stronger = (
+                (current, entry) if (entry.get("confidence") or 0) >
+                (current.get("confidence") or 0) else (entry, current))
+            stronger["also_reported_by"] = (
+                current.get("also_reported_by") or []) + [weaker.get("source")]
+            best[key] = stronger
+        return [best[k] for k in order]
 
     def counts(self) -> dict[str, Any]:
         c = self.conn.execute

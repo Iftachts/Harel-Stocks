@@ -9,7 +9,10 @@ from harel.collect.base import CollectorContext
 from harel.collect.clinicaltrials import ClinicalTrialsCollector
 from harel.collect.edgar import EdgarFullTextCollector, EdgarSubmissionsCollector
 from harel.collect.fda import OpenFdaCollector
-from harel.collect.federal_register import FederalRegisterCollector
+from harel.collect.federal_register import (
+    FederalRegisterCollector,
+    FederalRegisterPublicInspectionCollector,
+)
 from harel.collect.maya import MayaCollector, MayaScheduleCollector
 from harel.collect.prices import PriceCollector
 from harel.collect.rss import RssCollector
@@ -71,18 +74,118 @@ def test_edgar_full_text_excludes_the_companys_own_filings(config, db):
 
 # --------------------------------------------------------- FEDERAL REGISTER -- #
 def test_federal_register_maps_bis_rule_to_semi_names(config, db):
+    """The BIS rule still reaches the semiconductor names - but through the
+    linker reading the document, not through the collector asserting it.
+
+    The collector used to seed every ticker in the queried sector at 0.92 on the
+    strength of the API having returned the document at all. `conditions[term]`
+    searches the FULL document text, so that promoted a passing mention to a
+    high-confidence link: a Family Violence Prevention rule became LPSN and NICE
+    news. The evidence now has to be in the title or abstract.
+    """
+    from harel.enrich.linker import EntityLinker
+
     routes = {"federalregister.gov/api/v1/documents.json": fixture_json("federal_register.json")}
     collector = FederalRegisterCollector(
         config.sources["federal_register"], ctx(config, db, routes)
     )
     items = list(collector.collect())
     assert items
-    semis = {t for i in items for t in i.seed_tickers}
+    assert not any(i.seed_tickers for i in items), \
+        "the collector must not assert who a regulator document is about"
+
+    linker = EntityLinker(config)
+    semis = {link.ticker for i in items for link in linker.link(i)}
     assert {"TSEM", "NVMI", "CAMT"} & semis
+
     doc = items[0]
     assert doc.meta["doc_type"] == "Rule"
-    assert doc.seed_relation == "SECTOR_REG"
     assert doc.title.startswith("[FR]")
+    assert doc.meta["queried_for"], "keep why we fetched it, for the drill-down"
+
+
+def test_a_regulator_document_that_names_nobody_links_to_nobody(config, db):
+    """A hospice wage index is not a BrainsWay catalyst and a family-violence
+    rule is not a LivePerson catalyst. Both were, at score 45, because the
+    Federal Register full-text search returned them for a sector term buried
+    somewhere in a 137-page document."""
+    from harel.enrich.linker import EntityLinker
+
+    routes = {"federalregister.gov/api/v1/documents.json": {"results": [{
+        "document_number": "2026-15686",
+        "title": "Medicare Program; FY 2027 Hospice Wage Index and Payment Rate Update",
+        "abstract": "This rule updates the hospice wage index and payment rates.",
+        "html_url": "https://www.federalregister.gov/documents/2026/08/03/2026-15686/x",
+        "publication_date": "2026-08-03",
+        "type": "Rule",
+        "agencies": [{"name": "Centers for Medicare & Medicaid Services",
+                      "slug": "centers-for-medicare-medicaid-services"}],
+        "agency_names": ["Centers for Medicare & Medicaid Services"],
+    }]}}
+    collector = FederalRegisterCollector(
+        config.sources["federal_register"], ctx(config, db, routes)
+    )
+    linker = EntityLinker(config)
+    for item in collector.collect():
+        assert not linker.link(item), \
+            f"{item.title[:60]!r} named no company we track and must link to none"
+
+
+def test_public_inspection_asks_only_for_fields_that_endpoint_has(config, db):
+    """Public-inspection documents carry a smaller schema than published ones,
+    and the API rejects the whole request rather than ignoring a field it does
+    not recognise. Asking for the published-document field list returned
+    `400 field 'abstract' not valid`, so the one source that buys lead time
+    yielded nothing at all, silently, every pass."""
+    routes = {"public-inspection-documents/current.json":
+              fixture_json("federal_register_pi.json")}
+    client = FakeHttpClient(routes)
+    collector = FederalRegisterPublicInspectionCollector(
+        config.sources["federal_register_public_inspection"],
+        CollectorContext(config=config, client=client, db=db, lookback_hours=72),
+    )
+    items = list(collector.collect())
+
+    invalid = {"abstract", "action", "docket_ids", "topics", "significant",
+               "effective_on", "comments_close_on", "citation"}
+    requested = {
+        part.split("=", 1)[1]
+        for call in client.calls for part in call.split("&")
+        if part.startswith("fields[]=")
+    }
+    assert requested, "the collector must request fields"
+    assert not (requested & invalid), \
+        f"asked the PI endpoint for fields it rejects: {sorted(requested & invalid)}"
+    assert items, "the fixture names agencies our sectors watch"
+    assert items[0].title.startswith("[FR-EARLY]")
+
+
+def test_public_inspection_is_dated_when_it_was_filed_not_when_it_will_publish(
+        config, db):
+    """`publication_date` on a PI document is the day it is *scheduled* to
+    appear - days in the future. Read as the publication time it gives the item
+    a negative age and a recency bonus it has not earned. `filed_at` is when it
+    became public, which is where the lead time starts."""
+    routes = {"public-inspection-documents/current.json":
+              fixture_json("federal_register_pi.json")}
+    collector = FederalRegisterPublicInspectionCollector(
+        config.sources["federal_register_public_inspection"], ctx(config, db, routes)
+    )
+    items = list(collector.collect())
+    assert items
+
+    for item in items:
+        assert item.published_at < datetime.now(timezone.utc), \
+            f"{item.title[:50]!r} is dated in the future"
+        scheduled = item.meta["scheduled_publication_date"]
+        assert scheduled and item.published_at.date().isoformat() < scheduled, \
+            "filed_at must precede the scheduled publication date"
+
+    cms = next(i for i in items if "2026-15652" in i.meta["document_number"])
+    assert cms.published_at == datetime(2026, 7, 30, 20, 15, tzinfo=timezone.utc)
+    assert cms.meta["filing_type"] == "special"
+    assert cms.meta["docket_ids"] == ["CMS-1830-F"]
+    assert cms.summary, "no abstract in this schema - fall back to the TOC pair"
 
 
 # --------------------------------------------------------- CLINICALTRIALS -- #

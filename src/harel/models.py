@@ -110,7 +110,14 @@ class PriceSnapshot:
     """Tape context used both for scoring and for the `whats_moving` view."""
 
     ticker: str
+    # When WE fetched it. Not when the price happened - on a Saturday these are
+    # two days apart, and reporting the fetch as the age of the print made a
+    # Friday close read as "2 minutes old".
     asof: datetime
+    # When the exchange last printed: the last trade, or the closing print of
+    # the last session. This is the observation time; `asof` is the fetch time.
+    # None for providers that do not say.
+    market_time: datetime | None = None
     last: float | None = None
     prev_close: float | None = None
     change_pct: float | None = None
@@ -129,6 +136,7 @@ class PriceSnapshot:
         return {
             "ticker": self.ticker,
             "asof": self.asof.isoformat(),
+            "market_time": self.market_time.isoformat() if self.market_time else None,
             "last": self.last,
             "prev_close": self.prev_close,
             "change_pct": round(self.change_pct, 2) if self.change_pct is not None else None,

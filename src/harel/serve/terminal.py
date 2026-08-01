@@ -341,6 +341,17 @@ def _unexplained_section(alerts: list[dict[str, Any]]) -> str:
             tail.append("(פרשנויות מחיר סוננו כתגובתיות)")
         detail = " ".join(tail)
 
+        # A sector keyword match read as an explanation is worse than no
+        # explanation: the same UFLPA notice was offered as the reason TSEM rose
+        # 4% and as the reason CAMT fell 3.5% in the same session. Named here,
+        # at its real strength, so the reader can weigh it - and so the move
+        # stays a question instead of being quietly closed.
+        for context in (a.get("possible_context") or [])[:2]:
+            detail += (
+                f"<br>הקשר רגולטורי אפשרי, בביטחון נמוך: "
+                f"{_auto(context['title'], 90)} — "
+                f"לא נמצאה חשיפה ספציפית לחברה")
+
         catalyst = a.get("next_catalyst")
         if catalyst and catalyst.get("strength") == "company":
             detail += (f"<br>התאריך הידוע הבא: <b>{_ltr(catalyst['date'])}</b> "
@@ -757,13 +768,19 @@ def _provider_he(provider: str | None) -> str:
 
 
 def _freshness_he(quote: dict[str, Any]) -> str:
-    provider = quote.get("provider") or ""
-    if provider == "stooq":
-        return f"נר סוף-יום ל-{_ltr(str(quote.get('asof') or '')[:10])} — לא מחיר תוך-יומי"
-    age = quote.get("age_minutes")
-    if age is None:
-        return "זמן הלכידה לא ידוע"
-    return f"נלכד לפני {_ltr(age)} דקות; הפיד עצמו מושהה מעבר לזה"
+    printed = quote.get("market_time")
+    fetch_age = quote.get("fetch_age_minutes")
+    fetched = (f"נשלף לפני {_ltr(fetch_age)} דק׳" if fetch_age is not None
+               else "זמן השליפה לא ידוע")
+    if not printed:
+        return f"{fetched}; זמן ההדפסה בבורסה לא נרשם, ולכן הגיל האמיתי לא ידוע"
+    if quote.get("session") == "closed":
+        return (f"השוק סגור — ההדפסה האחרונה של סשן "
+                f"{_ltr(he.day_label(printed))} ({_ltr(he.eastern_label(printed))}); "
+                f"{fetched}")
+    market_age = quote.get("market_age_minutes")
+    return (f"עסקה אחרונה לפני {_ltr(market_age)} דק׳ "
+            f"({_ltr(he.eastern_label(printed))}); {fetched}; הפיד מושהה מעבר לזה")
 
 
 def _kv(title: str, pairs: list[tuple[str, str]]) -> str:
@@ -804,16 +821,35 @@ def _dig(uid: str | None) -> str:
 
 
 def _quote_label(quote: dict[str, Any] | None) -> str:
-    """One-line price provenance for a dense table."""
+    """Price provenance, on two clocks.
+
+    "בן 2 דק׳" was the fetch age wearing the price's name. On a Saturday it
+    described Friday's closing print as two minutes old, which is the one thing
+    a tape panel must never do. The observation time and the fetch time are
+    different numbers and now say so separately.
+    """
     if not quote:
         return "אין ציטוט שמור"
     provider = quote.get("provider") or "לא ידוע"
-    if provider == "stooq":
-        return f"{_ltr('stooq')} סוף-יום {_ltr(str(quote.get('asof') or '')[:10])}"
-    age = quote.get("age_minutes")
-    if age is None:
-        return f"{_ltr(provider)}, זמן הלכידה לא ידוע"
-    return f"{_ltr(provider)} &middot; בן {_ltr(age)} דק׳, מושהה"
+    printed = quote.get("market_time")
+    fetch_age = quote.get("fetch_age_minutes")
+    fetched = (f"נשלף {_ltr(he.ago(quote['fetched_at']))}"
+               if quote.get("fetched_at") else
+               (f"נשלף לפני {_ltr(fetch_age)} דק׳" if fetch_age is not None
+                else "זמן השליפה לא ידוע"))
+
+    if not printed:
+        return (f"{_ltr(provider)} &middot; {fetched} &middot; "
+                f"<span class='muted'>זמן ההדפסה לא נרשם</span>")
+
+    session = quote.get("session")
+    if session == "closed":
+        return (f"<span class='muted'>השוק סגור &middot; סשן אחרון: "
+                f"{_ltr(he.day_label(printed))}</span><br>"
+                f"{_ltr(provider)} &middot; עסקה אחרונה "
+                f"{_ltr(he.eastern_label(printed))} &middot; {fetched}")
+    return (f"{_ltr(provider)} &middot; עסקה אחרונה "
+            f"{_ltr(he.eastern_label(printed))} &middot; {fetched} &middot; מושהה")
 
 
 def _time_cell(item: dict[str, Any]) -> str:
@@ -822,4 +858,13 @@ def _time_cell(item: dict[str, Any]) -> str:
         seen = he.ago(item.get("discovered_at") or item["t"])
         return (f"<span class='muted'>תאריך לא ידוע</span>"
                 f"<div class='why'>נראה {html.escape(seen)}</div>")
+    if item.get("forthcoming"):
+        # A Federal Register document is readable days before it publishes.
+        # Dating it by that future date made it "הרגע"; dating it by when we
+        # found it would hide the lead time, which is the only reason we hold
+        # the document at all. Say both.
+        seen = he.ago(item.get("discovered_at") or item["t"])
+        return (f"<span class='muted'>מתפרסם "
+                f"{_ltr(he.day_label(item['publishes_on']))}</span>"
+                f"<div class='why'>נודע לנו {html.escape(seen)}</div>")
     return html.escape(he.ago(item["t"]))
