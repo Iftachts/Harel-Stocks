@@ -33,6 +33,16 @@ UI = {
     "nav_manifest": "מניפסט",
     "nav_json": "JSON",
 
+    "collect_run": "עדכן עכשיו",
+    "collect_running": "אוסף",
+    "collect_done": "נאסף",
+    "collect_failed": "האיסוף נכשל",
+    "collect_collected": "נאספו",
+    "collect_stored": "נשמרו",
+    "collect_already": "איסוף כבר רץ",
+    "collect_hint": "מעבר איסוף יחיד — אותו מעבר שרץ בכל שעה. נמשך כ-4 דקות.",
+    "collect_reloading": "טוען מחדש",
+
     "coverage_warnings": "אזהרות כיסוי",
     "unexplained": "תנועות ללא הסבר",
     "news_alerts": "התראות חדשות (24 שעות)",

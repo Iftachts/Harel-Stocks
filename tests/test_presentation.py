@@ -133,3 +133,106 @@ def test_cutting_first_does_not_stop_anything_being_escaped():
     rendered = _auto(dangerous)
     assert "<img" not in rendered
     assert html.escape(dangerous) in rendered
+
+
+# ------------------------------------------------- collect-on-demand ------- #
+def _runner(monkeypatch, duration=0.0, boom=None):
+    """A CollectRunner whose pass is instant and never touches the network."""
+    import time as _time
+
+    from harel.serve import api as api_mod
+
+    class FakeReport:
+        collected, stored, deduped, duration_sec = 147, 75, 72, 1.5
+        by_source, warnings, errors = {"globes": 12}, [], []
+
+    class FakePipeline:
+        def __init__(self, **kw):
+            self.kw = kw
+
+        def run(self):
+            if duration:
+                _time.sleep(duration)
+            if boom:
+                raise RuntimeError(boom)
+            return FakeReport()
+
+    monkeypatch.setattr(api_mod, "Database", lambda path: type(
+        "D", (), {"close": lambda self: None})())
+    import harel.pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "Pipeline", FakePipeline)
+    return api_mod.CollectRunner(db_path=":memory:")
+
+
+def test_a_second_click_does_not_start_a_second_pass(monkeypatch):
+    """A pass takes ~260s, so the button is clickable again long before the
+    first one finishes. Two passes at once is wasted fetching, which is what
+    `-MultipleInstances IgnoreNew` prevents for the scheduled task."""
+    runner = _runner(monkeypatch, duration=1.0)
+    first = runner.start()
+    second = runner.start()
+
+    assert first["status"] == "running"
+    assert second["already_running"] is True
+    assert second["started_at"] == first["started_at"], "the first pass must still own the run"
+
+
+def test_a_finished_pass_reports_what_it_collected(monkeypatch):
+    runner = _runner(monkeypatch)
+    runner.start()
+    runner._thread.join(timeout=10)
+
+    state = runner.status()
+    assert state["status"] == "done"
+    assert (state["collected"], state["stored"]) == (147, 75)
+    assert state["finished_at"]
+
+
+def test_a_pass_that_raises_is_reported_not_swallowed(monkeypatch):
+    """The thread is the only place this runs, so an exception there would
+    otherwise vanish and leave the button saying 'running' for ever."""
+    runner = _runner(monkeypatch, boom="the network went away")
+    runner.start()
+    runner._thread.join(timeout=10)
+
+    state = runner.status()
+    assert state["status"] == "error"
+    assert "the network went away" in state["error"]
+    assert state["finished_at"], "a failed pass still has to stop being 'running'"
+
+
+def test_the_page_refreshes_itself_only_while_a_pass_is_running():
+    """The terminal is script-free, so a meta refresh is how it watches. A page
+    that reloads for ever is worse than one that never does, so the tag has to
+    be absent in every other state."""
+    from harel.serve.terminal import _document
+
+    running = _document("t", "", "", {"status": "running", "elapsed_sec": 63})
+    assert "http-equiv='refresh'" in running
+    assert "1:03" in running, "the elapsed clock must be readable"
+
+    for state in ({"status": "idle"}, {"status": "done", "collected": 1, "stored": 1},
+                  {"status": "error", "error": "x"}, None):
+        assert "http-equiv='refresh'" not in _document("t", "", "", state)
+
+
+def test_the_collect_button_posts_and_never_gets():
+    """A GET that collects would be fired by a link prefetcher or a browser
+    preview, and would rewrite the database without anyone clicking."""
+    from harel.serve.terminal import _collect_control
+
+    idle = _collect_control({"status": "idle"})
+    assert "method='post'" in idle and "action='/collect'" in idle
+
+    # While running there is no form at all - a click would be a no-op, and
+    # offering it invites the reader to think the first one did not take.
+    assert "<form" not in _collect_control({"status": "running", "elapsed_sec": 5})
+
+
+def test_the_collect_result_isolates_its_numbers():
+    """Same rule as every other number on an RTL page."""
+    from harel.serve.terminal import _collect_control
+
+    done = _collect_control({"status": "done", "collected": 147, "stored": 75})
+    assert "<span class='ltr'>147</span>" in done
+    assert "<span class='ltr'>75</span>" in done

@@ -37,6 +37,9 @@ def create_app(db_path: str | None = None):
 
     from .terminal import render_item, render_sources, render_terminal
 
+    # Defined before the routes below close over it.
+    runner = CollectRunner(db_path)
+
     db = Database(db_path)
     views = Views(db=db, config=get_config())
 
@@ -52,17 +55,30 @@ def create_app(db_path: str | None = None):
 
     @app.get("/", response_class=HTMLResponse)
     def terminal() -> str:
-        return render_terminal(views)
+        return render_terminal(views, runner.status())
+
+    @app.post("/collect")
+    def collect_form():
+        """The header button. Starts a pass and redirects straight back.
+
+        303 rather than 200 so a reload of the resulting page is a GET and not a
+        second POST, and because the pass takes ~260s - the response cannot be
+        the finished result, only the acknowledgement that it began.
+        """
+        from fastapi.responses import RedirectResponse
+
+        runner.start()
+        return RedirectResponse("/", status_code=303)
 
     @app.get("/item/{uid}", response_class=HTMLResponse)
     def item_page(uid: str) -> str:
         """The evidence behind one line of the feed, for a human who is going to
         check it before trading it."""
-        return render_item(views, uid)
+        return render_item(views, uid, runner.status())
 
     @app.get("/sources", response_class=HTMLResponse)
     def sources_page() -> str:
-        return render_sources(views)
+        return render_sources(views, runner.status())
 
     @app.get("/agent/manifest")
     def manifest() -> dict[str, Any]:
@@ -130,6 +146,22 @@ def create_app(db_path: str | None = None):
     def health() -> dict[str, Any]:
         return views.health()
 
+    # -- collection on demand ---------------------------------------------- #
+    @app.post("/api/collect")
+    def collect_now() -> dict[str, Any]:
+        """Run one collection pass - the same one Task Scheduler runs hourly.
+
+        POST, not GET, because it changes the database: a GET would be fetched
+        by a link prefetcher or a browser preview and collect behind your back.
+        """
+        return runner.start()
+
+    @app.get("/api/collect/status")
+    def collect_status() -> dict[str, Any]:
+        """Poll target for the button, and how a page loaded mid-pass finds out
+        that one is already running - including one the scheduled task started."""
+        return runner.status()
+
     return app
 
 
@@ -137,6 +169,118 @@ def _split(value: str | None) -> list[str] | None:
     if not value:
         return None
     return [v.strip().upper() for v in value.split(",") if v.strip()]
+
+
+# The lookback `scripts/harel-hourly.ps1` passes. Wider than the interval on
+# purpose: sources publish late and backdate, and the deduper drops what we
+# already hold, so overlap costs a request rather than a row.
+COLLECT_LOOKBACK_HOURS = 12.0
+
+
+class CollectRunner:
+    """One collection pass at a time, off the request thread.
+
+    A pass measures ~260s against the live sources. That is far past any browser
+    or proxy timeout, so the request cannot wait for it: POST starts the work and
+    returns immediately. The terminal is server-rendered and script-free, so it
+    watches by carrying a meta refresh while `status()` says a pass is running -
+    which also means a pass started by the hourly scheduled task, or from another
+    tab, shows up without anything having to subscribe.
+
+    The lock makes a second click a no-op rather than a second pass - the same
+    thing `-MultipleInstances IgnoreNew` does for the scheduled task. It is an
+    in-process lock, so it cannot see a pass that Task Scheduler started in its
+    own process; if the two overlap, SQLite's WAL mode and the 30s busy timeout
+    let them share the file and the deduper makes the overlap idempotent. Two
+    passes at once is wasteful, not corrupting, and a cross-process lock would be
+    a lot of machinery to save a few minutes of duplicated fetching.
+    """
+
+    def __init__(self, db_path: str | None = None,
+                 hours: float = COLLECT_LOOKBACK_HOURS) -> None:
+        import threading
+
+        self.db_path = db_path
+        self.hours = hours
+        self._lock = threading.Lock()
+        self._thread: Any = None
+        self._state: dict[str, Any] = {"status": "idle"}
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            state = dict(self._state)
+        if state.get("status") == "running" and state.get("started_at"):
+            state["elapsed_sec"] = round(_age_seconds(state["started_at"]), 1)
+        return state
+
+    def start(self) -> dict[str, Any]:
+        import threading
+
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                state = dict(self._state)
+                state["already_running"] = True
+                return state
+            self._state = {
+                "status": "running",
+                "started_at": _utc_now_iso(),
+                "finished_at": None,
+            }
+            self._thread = threading.Thread(
+                target=self._run, name="harel-collect", daemon=True)
+            self._thread.start()
+            return dict(self._state, already_running=False)
+
+    def _run(self) -> None:
+        from ..pipeline import Pipeline
+
+        started = self._state.get("started_at")
+        db = None
+        try:
+            # Its own connection, and its own Database: this thread must not
+            # share the one the request handlers read through.
+            db = Database(self.db_path)
+            report = Pipeline(db=db, lookback_hours=self.hours).run()
+            result = {
+                "status": "done",
+                "collected": report.collected,
+                "stored": report.stored,
+                "dropped": report.deduped,
+                "duration_sec": round(report.duration_sec, 1),
+                "sources": report.by_source,
+                "warnings": len(report.warnings),
+                # Errors are the ones worth surfacing; warnings are per-ticker
+                # noise that the sources page already carries.
+                "errors": report.errors[:10],
+            }
+        except Exception as exc:                       # pragma: no cover - defensive
+            result = {"status": "error",
+                      "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            if db is not None:
+                db.close()
+        result["started_at"] = started
+        result["finished_at"] = _utc_now_iso()
+        with self._lock:
+            self._state = result
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _age_seconds(iso: str) -> float:
+    from datetime import datetime, timezone
+
+    try:
+        started = datetime.fromisoformat(iso)
+    except ValueError:
+        return 0.0
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).total_seconds()
 
 
 AGENT_MANIFEST: dict[str, Any] = {

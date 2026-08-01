@@ -108,6 +108,18 @@ a:hover {{ text-decoration: underline; }}
   border-inline-start: 3px solid #ffa500; background: #140f00;
   padding: 6px 10px; margin-bottom: 6px; color: #ffcf7a; font-size: 12px;
 }}
+/* The collect button. Logical properties like everything else, so it sits on
+   the reading edge when the page mirrors. */
+#collect {{
+  font: inherit; color: #ffb000; background: #140f00; cursor: pointer;
+  border: 1px solid #4a3800; border-radius: 2px; padding: 2px 10px;
+}}
+#collect:hover {{ background: #241a00; border-color: #ffb000; }}
+.collect-form {{ margin: 0; display: inline; }}
+.collect {{ font-size: 11px; }}
+.collect.running {{ color: #ffb000; }}
+.collect.ok {{ color: #4ade80; }}
+.collect.bad {{ color: #ff6b6b; }}
 .empty {{ color: #6b6b6b; font-style: italic; padding: 6px 0; }}
 .tape {{
   border-inline-start: 3px solid #ff4d4d; background: #170a0a;
@@ -191,7 +203,7 @@ def _pct(value: float, digits: int = 1, suffix: str = "%") -> str:
 
 
 # --------------------------------------------------------------------------- #
-def render_terminal(views: Views) -> str:
+def render_terminal(views: Views, collect: dict[str, Any] | None = None) -> str:
     brief = views.morning_brief(hours=24)
     # 40 was reachable only because the [TAPE] markers carried a forced 70 and
     # sat in the feed. With those moved to the movers board where they belong,
@@ -245,7 +257,7 @@ def render_terminal(views: Views) -> str:
         parts.append(_section(he.UI["tase_overnight"], brief["tase_overnight"]))
     parts.append(_calendar_section(brief.get("calendar_next_7d") or []))
 
-    return _document(he.UI["brand"], header, "".join(parts))
+    return _document(he.UI["brand"], header, "".join(parts), collect)
 
 
 def _coverage_warning_he(entry: dict[str, Any]) -> str:
@@ -492,7 +504,8 @@ def _calendar_section(entries: list[dict[str, Any]]) -> str:
 # arithmetic of the score, who else carried it, what the tape did - and a set of
 # outside links so the whole thing can be checked without us.
 # --------------------------------------------------------------------------- #
-def render_item(views: Views, uid: str) -> str:
+def render_item(views: Views, uid: str,
+                collect: dict[str, Any] | None = None) -> str:
     data = views.explain(uid)
     if data.get("error"):
         return _document("לא נמצא", "", (
@@ -688,11 +701,12 @@ def render_item(views: Views, uid: str) -> str:
                  f"<a href='/api/explain/{html.escape(data['uid'])}' class='ltr'>"
                  f"/api/explain/{html.escape(data['uid'][:12])}</a></p></section>")
 
-    return _document(f"{data['uid'][:8]} · {he.UI['brand']}", "", "".join(parts))
+    return _document(f"{data['uid'][:8]} · {he.UI['brand']}", "", "".join(parts),
+                     collect)
 
 
 # --------------------------------------------------------------------------- #
-def render_sources(views: Views) -> str:
+def render_sources(views: Views, collect: dict[str, Any] | None = None) -> str:
     """Did the system even look? A quiet screen and a blind one look identical
     until you can see, per source, when it last returned anything."""
     report = views.sources_report()
@@ -755,16 +769,70 @@ def render_sources(views: Views) -> str:
         "קורא היסטוריה. מיד אחרי איסוף ראשוני הוא נראה גבוה ליום, כי הפריטים "
         "באמת נראו באיחור.</p></section>"
     )
-    return _document(f"{he.UI['nav_sources']} · {he.UI['brand']}", "", body)
+    return _document(f"{he.UI['nav_sources']} · {he.UI['brand']}", "", body, collect)
+
+
+# How often a page re-renders itself while a pass is running. A pass takes ~260s
+# and a render costs ~54ms, so watching one costs about 2.6s of CPU in total -
+# cheap enough that it is not worth a script to avoid.
+COLLECT_REFRESH_SEC = 5
+
+
+def _collect_control(collect: dict[str, Any] | None) -> str:
+    """The button, and what it says while a pass is running.
+
+    No JavaScript. The page is server-rendered and the test suite enforces that,
+    which rules out the obvious design - POST, then poll from the browser. A
+    pass takes ~260s, far past any request timeout, so the click cannot wait for
+    it either: POST starts the work and redirects straight back, and while the
+    pass runs the document carries a meta refresh so the page reports its own
+    progress. That also means a pass started by the hourly scheduled task, or
+    from another tab, shows up here without anything having to subscribe.
+    """
+    status = (collect or {}).get("status")
+
+    if status == "running":
+        elapsed = int((collect or {}).get("elapsed_sec") or 0)
+        clock = f"{elapsed // 60}:{elapsed % 60:02d}"
+        # Not a form: a second pass is a no-op, and offering the click invites
+        # the reader to think the first one did not take.
+        return (f"<span class='collect running'>{html.escape(he.UI['collect_running'])} "
+                f"{_ltr(clock)}</span>")
+
+    note = ""
+    if status == "done":
+        note = (f"<span class='collect ok'>{html.escape(he.UI['collect_done'])} "
+                f"&middot; {html.escape(he.UI['collect_collected'])} "
+                f"{_ltr((collect or {}).get('collected', 0))} &middot; "
+                f"{html.escape(he.UI['collect_stored'])} "
+                f"{_ltr((collect or {}).get('stored', 0))}</span>")
+    elif status == "error":
+        note = (f"<span class='collect bad' title="
+                f"'{html.escape(str((collect or {}).get('error') or ''))}'>"
+                f"{html.escape(he.UI['collect_failed'])}</span>")
+
+    return (
+        f"<form method='post' action='/collect' class='collect-form'>"
+        f"<button id='collect' type='submit' "
+        f"title='{html.escape(he.UI['collect_hint'])}'>"
+        f"{html.escape(he.UI['collect_run'])}</button></form>{note}"
+    )
 
 
 # --------------------------------------------------------------------------- #
-def _document(title: str, header_extra: str, body: str) -> str:
+def _document(title: str, header_extra: str, body: str,
+              collect: dict[str, Any] | None = None) -> str:
     """The RTL shell. `dir='rtl'` on <html> is what makes every logical CSS
     property in the sheet above resolve the right way round."""
+    # Only while a pass is actually running: a page that reloads itself for ever
+    # is worse than one that never does, and there is nothing to watch once the
+    # pass is finished.
+    refresh = (f"<meta http-equiv='refresh' content='{COLLECT_REFRESH_SEC}'>"
+               if (collect or {}).get("status") == "running" else "")
     return (
         "<!doctype html><html lang='he' dir='rtl'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"{refresh}"
         f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>"
         f"<header><h1><a href='/'>{he.UI['brand']}</a></h1>"
         f"{header_extra}"
@@ -772,6 +840,7 @@ def _document(title: str, header_extra: str, body: str) -> str:
         f"<a href='/sources'>{he.UI['nav_sources']}</a>"
         f"<a href='/agent/manifest'>{he.UI['nav_manifest']}</a>"
         f"<a href='/api/morning'>{he.UI['nav_json']}</a></nav>"
+        f"{_collect_control(collect)}"
         f"</header><main>{body}</main></body></html>"
     )
 
