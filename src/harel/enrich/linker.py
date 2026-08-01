@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 
 from ..config import Config, TickerConfig
-from ..models import Link, RawItem
+from ..models import FIELD_SEP, Link, RawItem
 
 RELATION_RANK = {
     "DIRECT": 90,
@@ -314,16 +314,31 @@ class EntityLinker:
 
     def _apply_rules(self, title: str, body: str, offer, note_where: bool = True) -> None:
         """Run every compiled rule over the text. The one place rules are read."""
-        title_lower = title.lower()
-        body_lower = body.lower()
+        # The same text with every shouting field dropped, for the rules that
+        # read a capital as evidence. Judged field by field: a normal headline
+        # over an upper-cased summary is the ordinary shape of a recall notice,
+        # and only the summary should lose its capitals as a signal.
+        quiet_title = "" if _is_shouty(title) else title
+        quiet_body = FIELD_SEP.join(
+            f for f in body.split(FIELD_SEP) if not _is_shouty(f)
+        )
+        # (title, title lowered, body, body lowered). The second pair is built
+        # only when the item actually shouts, which is rare outside openFDA.
+        loud = (title, title.lower(), body, body.lower())
+        quiet = (loud if (quiet_title, quiet_body) == (title, body) else
+                 (quiet_title, quiet_title.lower(), quiet_body, quiet_body.lower()))
+
         for rule in self.rules:
-            if rule.probe and rule.probe not in body_lower:
+            head, head_lower, hay, hay_lower = (
+                quiet if rule.needs_case_signal else loud
+            )
+            if rule.probe and rule.probe not in hay_lower:
                 continue        # cheap literal prefilter, see _Rule.probe
             in_title = (
-                (not rule.probe or rule.probe in title_lower)
-                and bool(rule.pattern.search(title))
+                (not rule.probe or rule.probe in head_lower)
+                and bool(rule.pattern.search(head))
             )
-            if not in_title and not rule.pattern.search(body):
+            if not in_title and not rule.pattern.search(hay):
                 continue
             confidence = rule.base_confidence + (rule.title_only_bonus if in_title else 0.0)
             why = rule.why
@@ -346,13 +361,11 @@ class EntityLinker:
         something we track for it, and not the sector vocabulary a regulator
         document is made of, which would match nearly every row.
 
-        Caller beware on ALL-CAPS text. PEER includes the 135 bare peer symbols
-        of rule 6, matched case-sensitively and with no ordinary-word guard -
-        13 of them are English words (AIR, NET, NOW, RUN, ONTO, FOUR, TER, VIS,
-        SES, MOS, TAK, SPR, HON), so "NET WT 250 G" reads as a Palo Alto peer
-        and "PLACE THE STRIP ONTO THE METER" as a Nova and Camtek one. Prose
-        does not trip this because the match is case-sensitive; an openFDA
-        product_description, which is upper-cased, does.
+        Safe on the upper-cased text openFDA and the Federal Register emit: the
+        bare peer symbols of rule 6 are withheld from a field that is shouting,
+        so "NET WT 250 G" is not a Cloudflare mention and so not a Palo Alto
+        peer. Pass the whole record, not a de-capitalised one - the guard needs
+        to see the original case to judge it.
         """
         best: dict[str, Link] = {}
         allowed = frozenset(
@@ -482,6 +495,26 @@ def _probe(term: str) -> str:
 
 def _norm(text: str) -> str:
     return " ".join(text.split()).lower()
+
+
+def _is_shouty(text: str) -> bool:
+    """Is this field upper-cased throughout, so that a capital means nothing?
+
+    A ticker is legible because it is capitalised where the prose is not. That
+    holds for a headline and a quote line - "AAR Corp. (AIR) Stock Falls",
+    "CRWD, PANW, NET, ZS" - and fails completely for an openFDA
+    product_description or a Federal Register table row, which arrive
+    upper-cased: there "NET WT 250 G" and "AIR FILTER ASSEMBLY" are English.
+
+    Measured against the 1,892 items in the live database, this withholds
+    nothing: all 196 peer-symbol matches there are in mixed-case text.
+    """
+    words = re.findall(r"[A-Za-z]{2,}", text or "")
+    # Under three words there is no ratio worth reading - "TSEM UP 4%" is a
+    # perfectly ordinary tape headline.
+    if len(words) < 3:
+        return False
+    return sum(1 for w in words if w.isupper()) / len(words) >= 0.6
 
 
 def _has_code_token(term: str) -> bool:

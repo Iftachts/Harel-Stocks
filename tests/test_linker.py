@@ -367,6 +367,74 @@ def test_direct_evidence_does_not_serve_one_configs_pattern_to_another():
 
 
 # --------------------------------------------------------------------------- #
+# A capital is only evidence where the prose is not already shouting
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("summary", [
+    # openFDA upper-cases its product descriptions. NET is Cloudflare, AIR is
+    # AAR Corp, RUN is Sunrun, ONTO is Onto Innovation, FOUR is Shift4 - so an
+    # upper-cased recall notice read as five different peer mentions.
+    "NET WT 250 G, LOT 22B, STERILE",
+    "DO NOT RUN THE PUMP DRY",
+    "AIR FILTER ASSEMBLY FOR VENTILATOR",
+    "PLACE THE STRIP ONTO THE METER",
+    "FOUR OUNCE BOTTLE, STERILE, LOT 22B",
+    "STERILE WATER FOR INJECTION USP 1000 mL SINGLE DOSE CONTAINER",
+])
+def test_a_bare_peer_symbol_is_not_matched_in_upper_cased_text(linker, summary):
+    links = linker.link(
+        item("[FDA RECALL Class II] ACME LABS INC", summary,
+             source="openfda_enforcement")
+    )
+    assert not links, links
+
+
+@pytest.mark.parametrize("headline,ticker", [
+    # The positive controls. A bare symbol IS the wire convention, and all of
+    # these are real rows from the live database.
+    ("AAR Corp. $AIR Shares Sold by Sei Investments Co. - MarketBeat", "TATT"),
+    ("AAR CORP. (AIR) Stock Falls on Q4 2026 Earnings", "TATT"),
+    ("AAR Corp. (NYSE:AIR) Given Average Recommendation of Moderate Buy", "TATT"),
+    ("Biggest stock movers Tuesday: TSEM, ERIC, IBM, GS, and more", "ALLT"),
+    ("STIM|Neuronetics Inc|Price:1.965|Chg%:+0.145 - TradingKey", "BWAY"),
+    ("Vistra Corp. (VST) Earnings Expected to Grow: What to Know", "KEN"),
+])
+def test_a_bare_peer_symbol_still_links_where_it_reads_as_a_ticker(
+        linker, headline, ticker):
+    assert rel(linker.link(item(headline)), ticker) == "PEER"
+
+
+def test_an_upper_cased_summary_does_not_silence_a_normal_headline(linker):
+    """Judged field by field. A recall notice is a readable headline over a
+    shouting product description, and only the description loses its capitals
+    as evidence."""
+    links = linker.link(item(
+        "AAR Corp. (NYSE:AIR) recalls a part",
+        "AIR FILTER ASSEMBLY FOR VENTILATOR, MODEL 3",
+        source="openfda_enforcement",
+    ))
+    assert rel(links, "TATT") == "PEER"
+
+
+@pytest.mark.parametrize("text,shouty", [
+    ("NET WT 250 G, LOT 22B, STERILE", True),
+    ("AIR FILTER ASSEMBLY FOR VENTILATOR", True),
+    ("AAR Corp. (AIR) Stock Falls on Q4 2026 Earnings", False),
+    ("CRWD, PANW, NET, ZS: One Cybersecurity Stock Won Over Retail", False),
+    # An acronym next to a symbol is ordinary headline English, which is why
+    # the test is a ratio over the field and not a look at the neighbours.
+    ("TSEM CEO steps down after eight years", False),
+    ("NVMI Q1 2026 Earnings: EPS Beats Estimates", False),
+    # Too short to read a ratio from.
+    ("TSEM UP 4%", False),
+])
+def test_shoutiness_is_measured_over_the_field_not_the_neighbours(text, shouty):
+    from harel.enrich.linker import _is_shouty
+
+    assert _is_shouty(text) is shouty, text
+
+
+# --------------------------------------------------------------------------- #
 # entity_hits: the same rules, for collectors holding a bare string
 # --------------------------------------------------------------------------- #
 
