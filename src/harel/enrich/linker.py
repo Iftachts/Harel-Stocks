@@ -90,6 +90,9 @@ class _Rule:
     # and skips ~95% of regex executions. There are ~1,000 rules and the
     # pipeline runs every couple of minutes, so this matters.
     probe: str = ""
+    # This rule reads capitalisation as evidence, so it is only allowed to look
+    # at fields where capitalisation still carries information. See `_is_shouty`.
+    needs_case_signal: bool = False
 
 
 class EntityLinker:
@@ -222,7 +225,18 @@ class EntityLinker:
                     probe=_probe(name),
                 ))
 
-        # 6. Peer tickers (only unambiguous ones).
+        # 6. Peer tickers (only unambiguous ones). The match is case-sensitive
+        #    because that is the whole of the evidence: prose writes "air", a
+        #    wire writes "AIR", and AAR Corp is NYSE:AIR. AMBIGUOUS_TICKERS only
+        #    ever covered OUR symbols, so a peer's ordinary-word ticker had no
+        #    guard at all and openFDA, which upper-cases its product
+        #    descriptions, read "NET WT 250 G" as a Cloudflare mention and so as
+        #    a Palo Alto peer, "AIR FILTER ASSEMBLY" as a TAT one, "PLACE THE
+        #    STRIP ONTO THE METER" as Nova's and Camtek's. Listing the English
+        #    words would go stale with the next peer added, and there is no
+        #    lexicon here to test one against - so `needs_case_signal` withholds
+        #    these rules from text that is shouting, where a capital says
+        #    nothing. See `_is_shouty`.
         for peer in tc.peers:
             symbol = peer.split(".")[0]
             if len(symbol) >= 3 and symbol.upper() not in AMBIGUOUS_TICKERS:
@@ -230,6 +244,7 @@ class EntityLinker:
                     pattern=re.compile(rf"(?<![\w.]){re.escape(symbol)}(?!\w)"),
                     ticker=t, relation="PEER", why=f"peer symbol {symbol}",
                     base_confidence=0.55, probe=symbol.lower(),
+                    needs_case_signal=True,
                 ))
 
         # 7. Customers / demand drivers whose capex is our revenue.

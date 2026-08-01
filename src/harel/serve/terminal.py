@@ -252,6 +252,10 @@ def _coverage_warning_he(entry: dict[str, Any]) -> str:
     """Composed from the structured entry, never translated from the sentence -
     prose drifts, data does not."""
     kind = entry["kind"]
+    if kind == "no_collector":
+        return (f"למקור {_ltr(entry['source'])} אין קולקטור: הסוג "
+                f"{_ltr(entry['source_kind'])} לא ממומש בקוד, ולכן הוא מדולג "
+                f"בכל מעבר — מפתח API לא ישנה זאת")
     if kind == "missing_key":
         return (f"המקור {_ltr(entry['source'])} כבוי: "
                 f"{_ltr(entry['env'])} לא מוגדר")

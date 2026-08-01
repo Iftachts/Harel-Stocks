@@ -202,6 +202,12 @@ def cmd_doctor(args) -> int:
         for entry in health["unresolved_tickers"]:
             print(f"  {entry['ticker']:<6} {entry['hint']}")
 
+    if health["sources_without_a_collector"]:
+        print(f"\n{C.RED}Sources with no collector (skipped every pass):{C.RESET}")
+        for entry in health["sources_without_a_collector"]:
+            print(f"  {entry['source']:<22} kind '{entry['source_kind']}' is not "
+                  f"implemented {C.GREY}- an API key will not help{C.RESET}")
+
     if health["missing_api_keys"]:
         print(f"\n{C.AMBER}Sources off - missing API keys:{C.RESET}")
         for entry in health["missing_api_keys"]:

@@ -982,8 +982,18 @@ class Views:
             "db": self.db.counts(),
             "sources_configured": len(self.config.sources),
             "sources_available": sum(1 for s in self.config.sources.values() if s.available),
+            # Two different blindnesses, reported apart. A source whose kind no
+            # collector implements cannot be switched on by supplying a key, and
+            # listing it under "missing API keys" sent you to go and get one.
+            "sources_without_a_collector": [
+                {"source": e["source"], "source_kind": e["source_kind"]}
+                for e in self.coverage_warning_entries()
+                if e["kind"] == "no_collector"
+            ],
             "missing_api_keys": [
                 {"source": k, "env_var": v} for k, v in self.config.missing_keys()
+                if k not in {e["source"] for e in self.coverage_warning_entries()
+                             if e["kind"] == "no_collector"}
             ],
             "running_degraded": [
                 {"source": k, "env_var": v} for k, v in self.config.degraded_sources()
@@ -1075,7 +1085,12 @@ class Views:
         out = []
         for entry in self.coverage_warning_entries():
             kind = entry["kind"]
-            if kind == "missing_key":
+            if kind == "no_collector":
+                out.append(
+                    f"source '{entry['source']}' is declared for kind "
+                    f"'{entry['source_kind']}', which no collector implements - "
+                    f"it is skipped every pass and no API key will change that")
+            elif kind == "missing_key":
                 out.append(f"source '{entry['source']}' is off: "
                            f"{entry['env']} is not set")
             elif kind == "degraded":
@@ -1097,8 +1112,30 @@ class Views:
 
     def coverage_warning_entries(self) -> list[dict[str, Any]]:
         """Everything wrong with coverage, as data rather than sentences."""
+        from .collect.base import registered_kinds
+
         warnings: list[dict[str, Any]] = []
+        # A source can be declared in sources.yaml for a kind no collector
+        # implements. `build_collectors` looks the kind up in the registry,
+        # finds nothing, and skips it with a debug line - so the source is
+        # counted as configured, polls nothing, and warns about nothing.
+        # `fcc_filings` has sat like that behind a "set FCC_API_KEY" message
+        # that describes the wrong problem: supplying the key would have
+        # cleared the warning and collected exactly as much as before. A source
+        # with no code behind it has to say so, or the panel is lying about
+        # which of the two blindnesses this is.
+        implemented = set(registered_kinds())
+        unimplemented = {
+            s.key for s in self.config.sources.values()
+            if s.enabled and s.kind not in implemented
+        }
+        for key in sorted(unimplemented):
+            warnings.append({"kind": "no_collector", "source": key,
+                             "source_kind": self.config.sources[key].kind})
         for key, env in self.config.missing_keys():
+            if key in unimplemented:
+                # Naming the key too would invite someone to go and get it.
+                continue
             warnings.append({"kind": "missing_key", "source": key, "env": env})
         for key, env in self.config.degraded_sources():
             warnings.append({"kind": "degraded", "source": key, "env": env})

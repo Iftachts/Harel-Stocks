@@ -284,7 +284,10 @@ def test_morning_brief_surfaces_coverage_warnings(ran):
     _, views = ran
     warnings = " ".join(views.morning_brief(hours=LOOKBACK)["coverage_warnings"])
     assert "maya_tase" in warnings, "the MAYA fallback must be declared"
-    assert "COURTLISTENER_TOKEN" in warnings, "sources off for a missing key must be named"
+    # maya_schedule, not courtlistener: courtlistener has no collector at all,
+    # so naming it as merely key-less was the panel describing the wrong fault.
+    assert "TASE_API_KEY" in warnings, "sources off for a missing key must be named"
+    assert "courtlistener" in warnings, "a source with no collector must still be declared"
 
 
 def test_morning_brief_warns_about_uncollected_tickers(db, config_with_unresolved):
@@ -313,8 +316,13 @@ def test_health_reports_missing_keys_and_content(ran):
     _, views = ran
     health = views.health()
     assert health["db"]["items"] > 0
-    assert any(k["env_var"] == "COURTLISTENER_TOKEN" for k in health["missing_api_keys"])
+    assert any(k["env_var"] == "TASE_API_KEY" for k in health["missing_api_keys"])
     assert any(k["env_var"] == "TASE_API_KEY" for k in health["running_degraded"])
+    # courtlistener requires a token AND has no collector. It belongs in the
+    # second list only: an API key cannot switch on code that does not exist.
+    assert not any(k["source"] == "courtlistener" for k in health["missing_api_keys"])
+    assert any(k["source"] == "courtlistener"
+               for k in health["sources_without_a_collector"])
 
 
 def test_rerunning_the_pipeline_is_idempotent(config, db):
@@ -1397,3 +1405,44 @@ def test_one_document_filed_early_and_published_later_is_one_event(config, db):
     plain = RawItem(source="rss", external_id="x", title="Something else",
                     published_at=now, meta={}, **common)
     assert dedupe_key(plain) != dedupe_key(late)
+
+
+def test_a_source_with_no_collector_says_so_instead_of_asking_for_a_key(db, config):
+    """Two blindnesses that look identical on the panel and are not.
+
+    A source can be declared in sources.yaml for a `kind` no collector
+    implements. `build_collectors` looks the kind up in the registry, finds
+    nothing, and skips it with a debug line - so the source counts as
+    configured, polls nothing, and the only message about it was "set
+    FCC_API_KEY". Supplying that key would have cleared the warning and
+    collected exactly as much as before: nothing. `fcc_filings` and
+    `courtlistener` were both sitting behind it.
+    """
+    from harel.collect.base import registered_kinds
+    from harel.serve.terminal import _coverage_warning_he
+
+    views = Views(db=db, config=config)
+    entries = views.coverage_warning_entries()
+    orphans = {e["source"]: e for e in entries if e["kind"] == "no_collector"}
+    implemented = set(registered_kinds())
+
+    # The rule, not today's list: every enabled source whose kind has no
+    # collector must be named, and nothing else may be.
+    expected = {s.key for s in views.config.sources.values()
+                if s.enabled and s.kind not in implemented}
+    assert set(orphans) == expected, "the panel must name exactly the unimplemented sources"
+
+    # And such a source must never ALSO be reported as merely missing a key -
+    # that is the message that sends someone off to get one.
+    keyless = {e["source"] for e in entries if e["kind"] == "missing_key"}
+    assert not (keyless & expected), \
+        "a source with no collector was still asking for an API key"
+    assert not ({e["source"] for e in views.health()["missing_api_keys"]} & expected)
+
+    for entry in orphans.values():
+        assert entry["source_kind"] not in implemented
+        # Both languages compose from the entry rather than translating prose.
+        assert "API" in _coverage_warning_he(entry)
+    if orphans:
+        english = " ".join(views._coverage_warnings())
+        assert "no collector implements" in english
