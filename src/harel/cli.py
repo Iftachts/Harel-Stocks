@@ -441,7 +441,13 @@ def cmd_explain(args) -> int:
           f"   {C.GREY}({when.get('age_hours')}h ago, {when.get('session_at_publication')}){C.RESET}")
     print(f"  bell       {when.get('vs_last_close')}")
     lag = when.get("detection_lag_minutes")
-    if lag is not None:
+    if lag is not None and lag < 0:
+        # Negative means we had it before its stated publication date - the
+        # public-inspection lead time, not a lag. Printed as a negative it read
+        # as "-220 min after it was published".
+        print(f"  we saw it  {C.GREEN}{-lag} min BEFORE its publication date "
+              f"- lead time, not lag{C.RESET}")
+    elif lag is not None:
         colour = C.GREY if lag < 30 else C.AMBER
         print(f"  we saw it  {colour}{lag} min after it was published{C.RESET}")
     print()
@@ -774,17 +780,38 @@ def _print_items(items: list[dict[str, Any]], show_reasons: bool = False) -> Non
                 print(f"          {C.GREY}. {reason}{C.RESET}")
 
 
-def _ago(iso: str) -> str:
+def _ago(iso: str | None) -> str:
+    """Age of a timestamp, for a dense terminal column.
+
+    The three defences here all exist because this reads the same column
+    `serve.hebrew._parse` reads, and only that one was hardened:
+
+    * a bare `TypeError` on `None`, from a row whose date never arrived;
+    * a naive datetime, which cannot be subtracted from an aware `now` at all -
+      no `published_at` is stored naive today, but the parser accepts one;
+    * a timestamp in the FUTURE, which printed as `-1659m`. Federal Register
+      documents carry a scheduled publication date, so this is on screen in
+      `harel feed` now. A future date is a schedule, not an age.
+    """
+    if not iso:
+        return "-"
     try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    except ValueError:
-        return iso[:10]
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return str(iso)[:10]
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     minutes = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+    if minutes < 0:
+        minutes = -minutes
+        prefix = "in "
+    else:
+        prefix = ""
     if minutes < 60:
-        return f"{int(minutes)}m"
+        return f"{prefix}{int(minutes)}m"
     if minutes < 60 * 48:
-        return f"{int(minutes // 60)}h"
-    return f"{int(minutes // 1440)}d"
+        return f"{prefix}{int(minutes // 60)}h"
+    return f"{prefix}{int(minutes // 1440)}d"
 
 
 def _split(value: str | None) -> list[str] | None:

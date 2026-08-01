@@ -334,11 +334,15 @@ def load_config(config_dir: Path | str | None = None) -> Config:
     events.sort(key=lambda e: e.base, reverse=True)
 
     noise = sco_raw.get("noise") or {}
+    hard_cap_default = float(noise.get("hard_cap_default", 12))
 
     def _noise_patterns(key: str) -> list[NoisePattern]:
+        # `hard_cap_default` is what a noise pattern gets when it does not name
+        # its own cap. It was declared in scoring.yaml and then duplicated here
+        # as a literal 12, so editing the config moved nothing.
         return [
             NoisePattern(pattern=re.compile(np["pattern"], re.IGNORECASE | re.UNICODE),
-                         cap=float(np.get("cap", 12)))
+                         cap=float(np.get("cap", hard_cap_default)))
             for np in (noise.get(key) or [])
         ]
 
@@ -351,7 +355,7 @@ def load_config(config_dir: Path | str | None = None) -> Config:
         noise_form_types={k.upper(): float(v) for k, v in (noise.get("form_types") or {}).items()},
         noise_title_patterns=noise_titles,
         reactive_patterns=reactive,
-        noise_hard_cap_default=float(noise.get("hard_cap_default", 12)),
+        noise_hard_cap_default=hard_cap_default,
         require_corroboration_below_trust=float(
             noise.get("require_corroboration_below_trust", 0.7)
         ),
@@ -362,7 +366,13 @@ def load_config(config_dir: Path | str | None = None) -> Config:
         },
         recency=dict(sco_raw.get("recency") or {}),
         price_confirmation=dict(sco_raw.get("price_confirmation") or {}),
-        overrides=dict(sco_raw.get("overrides") or {}),
+        # Keyed by ticker, and every ticker in this system is uppercase. A
+        # lowercase YAML key half-applied its own block: `_compile_overrides`
+        # normalised the key it built its keyword patterns under, the relation
+        # lookup in `_score_link` did not, so `cgen:` gave CGEN its +20 keyword
+        # boost while silently dropping the 0.95 PRODUCT_RIVAL it sits with.
+        # Normalise once, here, so there is one spelling downstream.
+        overrides={str(k).upper(): v for k, v in (sco_raw.get("overrides") or {}).items()},
     )
 
     return Config(

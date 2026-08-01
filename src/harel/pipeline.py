@@ -18,7 +18,7 @@ from .dedupe import Clusterer
 from .enrich.linker import EntityLinker, direct_evidence
 from .enrich.materiality import MaterialityScorer, PriceContext
 from .http import HttpClient
-from .models import CalendarEntry, RawItem, ScoredItem
+from .models import FIELD_SEP, CalendarEntry, RawItem, ScoredItem
 
 log = logging.getLogger("harel.pipeline")
 
@@ -96,6 +96,15 @@ class Pipeline:
 
         for collector in collectors:
             key = collector.source.key
+            # `last_error` describes the pass that is running now, so it starts
+            # empty. Otherwise "the collector recorded a fault this time" cannot
+            # be told from "the same string has been sitting there since
+            # Tuesday", and a fault that repeats verbatim would flap on and off
+            # every other run.
+            prior = self.db.get_source_state(key)
+            if prior.get("last_error"):
+                self.db.set_source_state(key, last_error=None)
+
             started = time.monotonic()
             count = 0
             failure: str | None = None
@@ -124,11 +133,19 @@ class Pipeline:
             # ClinicalTrials are quiet for days at a time and were reading as
             # "never worked", which is the precise confusion this bookkeeping
             # exists to prevent.
+            #
+            # But quiet is not the same as clean. A collector can record its own
+            # failure and still return without raising - maya writes
+            # save_state(last_error="TEVA: 0 parseable records") and stops - and
+            # the success branch below then overwrote it with a fresh last_ok_at
+            # and a null error, so a MAYA schema break read as healthy-and-quiet
+            # in `harel doctor`. We do not erase an error the collector recorded
+            # during the pass we just ran.
+            recorded = self.db.get_source_state(key).get("last_error")
             now = datetime.now(timezone.utc).isoformat()
             state: dict[str, Any] = {"last_run_at": now, "items_last_run": count}
-            if failure:
-                prior = self.db.get_source_state(key)
-                state["last_error"] = failure[:400]
+            if failure or recorded:
+                state["last_error"] = str(failure or recorded)[:400]
                 state["consecutive_failures"] = int(
                     prior.get("consecutive_failures") or 0) + 1
             else:
@@ -262,7 +279,12 @@ class Pipeline:
             return seeds
         if (meta.get("seed_relation") or "DIRECT") != "DIRECT":
             return seeds
-        text = f"{row['title']} {row['summary'] or ''}"
+        # Joined as RawItem.text joins it. A plain space here would let the last
+        # word of the title and the first of the summary read as one phrase, and
+        # this call decides whether to KEEP a stored seed - so the separator is
+        # the difference between withdrawing an unsupported claim and confirming
+        # it against a sentence that was never written.
+        text = FIELD_SEP.join((row["title"], row["summary"] or ""))
         return [t for t in seeds
                 if (tc := self.config.ticker(t)) and direct_evidence(tc, text)]
 
@@ -459,7 +481,18 @@ _MONTH = ("january february march april may june july august september october "
 # date was ever written in full was the issuer's own release - exactly the feed
 # GILT and NICE do not have. A missing year is resolved to the next occurrence
 # inside the 120-day horizon below, so it cannot silently mean last year.
-_MONTH_ALT = "|".join(m[:3] + r"(?:" + m[3:] + r")?\.?" for m in _MONTH)
+_MONTH_FORMS: dict[str, tuple[str, ...]] = {
+    m: (m,) if len(m) <= 3 else (m, m[:3]) for m in _MONTH
+}
+# September is the one month AP style cuts to four letters, and "Sept." is how a
+# US press release writes it. Listed longest first because an alternation takes
+# the FIRST branch that matches, not the longest: built as `sep(?:tember)?\.?`,
+# September matched the "Sep" of "Sept. 5", left "t. 5" for the `\s+` that
+# follows, and threw the whole date away. Every AP-dated Q3 announcement went
+# unextracted - and September is a quarter end. Same hole as "Aug. 5", one month
+# later.
+_MONTH_FORMS["september"] = ("september", "sept", "sep")
+_MONTH_ALT = "|".join(form + r"\.?" for m in _MONTH for form in _MONTH_FORMS[m])
 _DATE_MDY = re.compile(
     r"\b(" + _MONTH_ALT + r")\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b",
     re.IGNORECASE)

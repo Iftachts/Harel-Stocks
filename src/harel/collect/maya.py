@@ -30,9 +30,10 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..config import SourceConfig
 from ..http import HttpError
 from ..models import RawItem
-from .base import Collector, register
+from .base import Collector, CollectorContext, register
 
 # Field-name candidates, in preference order. MAYA has used several spellings.
 TITLE_KEYS = ("subject", "Subject", "title", "Title", "headline", "reportName",
@@ -63,6 +64,12 @@ _UTC_OFFSET_RE = re.compile(r"[+-]\d{2}:?\d{2}$")
 
 @register("maya")
 class MayaCollector(Collector):
+    def __init__(self, source: SourceConfig, ctx: CollectorContext) -> None:
+        super().__init__(source, ctx)
+        # Names whose response held nothing we could parse. Collected here and
+        # reported once at the end of the pass - see collect().
+        self.unparseable: list[str] = []
+
     def collect(self) -> Iterator[RawItem]:
         official = bool(self.source.api_key)
         targets: list[tuple[str, Any, Any]] = []
@@ -110,6 +117,23 @@ class MayaCollector(Collector):
                 "in tase_id. These names are NOT being collected from MAYA."
             )
 
+        if self.unparseable:
+            # A field rename is the failure this collector is built to survive,
+            # and it used to leave no trace anywhere a human looks. save_state
+            # was the only signal and it is not one: it writes under the source
+            # key, so each name overwrote the previous name's message, and the
+            # generator finishes without raising, so the pipeline then stamps a
+            # fresh last_ok_at and clears last_error at the end of the same
+            # pass. `harel doctor` showed the biggest structural edge in this
+            # basket as healthy-and-quiet while it was returning nothing.
+            names = ", ".join(self.unparseable)
+            self.warn(
+                f"MAYA returned no parseable records for {len(self.unparseable)} "
+                f"of {len(targets)} names ({names}) - the response shape has "
+                f"changed; run `harel probe-maya`"
+            )
+            self.save_state(last_error=f"0 parseable records for {names}")
+
     # -- fetching ---------------------------------------------------------- #
     def _collect_company(self, ticker: str, tc: Any,
                          issuer_id: Any = None) -> Iterator[RawItem]:
@@ -128,7 +152,7 @@ class MayaCollector(Collector):
 
         records = _find_records(payload)
         if not records:
-            self.save_state(last_error=f"{ticker}: 0 parseable records")
+            self.unparseable.append(ticker)
             return
 
         emitted = 0

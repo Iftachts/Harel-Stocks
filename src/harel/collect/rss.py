@@ -22,7 +22,7 @@ import feedparser
 
 from ..enrich.linker import direct_evidence
 from ..http import HttpError
-from ..models import RawItem
+from ..models import FIELD_SEP, RawItem
 from .base import Collector, register
 
 # Google News dedupes poorly across near-identical queries, so we keep the
@@ -230,7 +230,16 @@ class RssCollector(Collector):
                 # this the Allot query's "PH, US allot P42b for anti-TB, HIV
                 # drive" was DIRECT news about Allot Communications at 0.92.
                 tc = self.cfg.ticker(seed_tickers[0])
-                if tc and not direct_evidence(tc, f"{item.title} {item.summary}"):
+                # Joined the way RawItem.text joins, not with a space. A plain
+                # space makes the last word of the headline and the first word
+                # of the snippet adjacent, and `direct_evidence` reads exactly
+                # that adjacency: "Semiconductor selloff drags down Nova" plus a
+                # snippet opening "Q2 earnings season starts" was admitted as
+                # Nova Ltd on the strength of "Nova Q2" - a sentence neither
+                # field contains. This test DISCARDS the item, so the space was
+                # letting a loose search result through the one guard it has.
+                if tc and not direct_evidence(
+                        tc, FIELD_SEP.join((item.title, item.summary))):
                     continue
                 item.meta["seed_why"] = f'found by our "{label}" search'
             elif seed_tickers:

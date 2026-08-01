@@ -23,6 +23,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..views import ISRAEL_TZ
+
 # --------------------------------------------------------------- chrome ---- #
 UI = {
     "brand": "טרמינל הראל",
@@ -156,40 +158,78 @@ def _parse(iso: str) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def ago(iso: str) -> str:
+# Hebrew counts one and two as words rather than as digits, and the dual is not
+# optional politeness: "לפני 2 שעות" is what a translation engine writes, not
+# what a reader writes. Note that a dual carries no digit at all, so a caller
+# must not wrap these in a numeric LTR island - there is nothing Latin in them.
+_DUAL = {"שעות": "שעתיים", "ימים": "יומיים"}
+
+
+def _count(whole: int, unit: str) -> str:
+    return _DUAL[unit] if whole == 2 else f"{whole} {unit}"
+
+
+def _calendar_days(earlier: datetime, later: datetime) -> int:
+    """Whole days between two instants on the reader's calendar.
+
+    "אתמול" and "מחר" are calendar words and were being computed from an elapsed
+    24-hour bucket, where `int(hours // 24) == 1` covers 24h through 47.99h. On
+    Saturday evening a story from Thursday read "אתמול", and the 13 Federal
+    Register documents dated Monday read "מחר".
+
+    The calendar is Tel Aviv's, not UTC's, because the reader is: a MAYA
+    disclosure filed 01:30 Israel time is Sunday's news to a trader here and
+    Saturday's to UTC, and on Monday morning that is the difference between
+    "אתמול" and a false "לפני יומיים".
+    """
+    return (later.astimezone(ISRAEL_TZ).date()
+            - earlier.astimezone(ISRAEL_TZ).date()).days
+
+
+def ago(iso: str, now: datetime | None = None) -> str:
     """Relative time, Hebrew, with the grammar the numbers actually need."""
     dt = _parse(iso)
     if dt is None:
         return str(iso)[:16]
-    minutes = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+    now = now or datetime.now(timezone.utc)
+    minutes = (now - dt).total_seconds() / 60
     # A timestamp in the future used to fall through to "הרגע", because -2880
     # minutes is also less than one. That is how a Federal Register document
     # scheduled to publish on Monday was presented on Saturday night as having
     # just come out. A future date is a schedule, not an age, and has to say so.
     if minutes < 0:
-        return in_future(dt)
+        return in_future(dt, now)
     if minutes < 1:
         return "הרגע"
+    # No dual here: Hebrew has שעתיים and יומיים but no "דקותיים", so the
+    # minutes bucket keeps its digit.
     if minutes < 60:
         return f"לפני {int(minutes)} דק׳"
     hours = minutes / 60
     if hours < 24:
         whole = int(hours)
-        return "לפני שעה" if whole == 1 else f"לפני {whole} שעות"
-    days = int(hours // 24)
-    return "אתמול" if days == 1 else f"לפני {days} ימים"
+        return "לפני שעה" if whole == 1 else "לפני " + _count(whole, "שעות")
+    days = _calendar_days(dt, now)
+    # 24 elapsed hours cannot land on the same calendar date, so the floor here
+    # is yesterday.
+    return "אתמול" if days <= 1 else "לפני " + _count(days, "ימים")
 
 
-def in_future(dt: datetime) -> str:
-    minutes = (dt - datetime.now(timezone.utc)).total_seconds() / 60
+def in_future(dt: datetime, now: datetime | None = None) -> str:
+    # `ago` read the clock and then this function read it again, so the two
+    # disagreed by the microseconds between the calls and an event exactly 48h
+    # out floored to one day - "מחר" for the day after tomorrow. One clock,
+    # passed in.
+    now = now or datetime.now(timezone.utc)
+    minutes = (dt - now).total_seconds() / 60
     if minutes < 60:
         return "בעוד פחות משעה"
     hours = minutes / 60
     if hours < 24:
         whole = int(hours)
-        return "בעוד שעה" if whole == 1 else f"בעוד {whole} שעות"
-    days = int(hours // 24)
-    return "מחר" if days == 1 else f"בעוד {days} ימים"
+        return "בעוד שעה" if whole == 1 else "בעוד " + _count(whole, "שעות")
+    days = _calendar_days(now, dt)
+    return "מחר" if days <= 1 else "בעוד " + _count(days, "ימים")
 
 
 def weekday(dt: datetime) -> str:

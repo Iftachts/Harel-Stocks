@@ -18,6 +18,7 @@ surfaces cannot drift apart.
 from __future__ import annotations
 
 import re
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
@@ -165,6 +166,18 @@ def _published_utc(row: dict[str, Any]) -> datetime | None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
+
+def _before_bell(row: dict[str, Any], cutoff: datetime) -> bool:
+    """Was this knowable in time to have caused the print we are explaining?
+
+    One rule in one place. It used to be spelled out twice, once per candidate
+    list, and the third list - sector context, which can be promoted into a
+    driver - never got it at all.
+    """
+    start = _event_start(row)
+    return start is None or start <= cutoff
+
+
 MAX_SUMMARY_CHARS = 420
 
 
@@ -207,11 +220,18 @@ def _compact(row: dict[str, Any], include_reasons: bool = False) -> dict[str, An
         # inspection filing before the publication. That is when the clock
         # actually started, and lead time is why the early copy is collected.
         out["first_published_at"] = row["first_published_at"]
-    if meta.get("forthcoming") and meta.get("scheduled_publication_date"):
+    # Whether a publication date is still ahead of us is a question about now,
+    # so it is answered now. `meta.forthcoming` was decided once, at collection
+    # time, and nothing ever cleared it - and a public-inspection copy leaves the
+    # PI feed and is never re-collected - so the terminal went on announcing
+    # "מתפרסם 31.7" days into August. Read against the publisher's own clock:
+    # the Federal Register publishes on Eastern dates.
+    scheduled = str(meta.get("scheduled_publication_date") or "")[:10]
+    if scheduled > datetime.now(MARKET_TZ).date().isoformat():
         # It exists, we can read it, and it has not published yet. `t` is when
         # we learned of it - not a publication time, and never an age.
         out["forthcoming"] = True
-        out["publishes_on"] = meta["scheduled_publication_date"]
+        out["publishes_on"] = scheduled
         out["discovered_at"] = row.get("collected_at")
     for key in ("form_type", "items", "item_labels", "nct_id", "status", "change",
                 "agencies", "document_number", "public_inspection", "sponsor",
@@ -458,10 +478,17 @@ class Views:
             # never offer it as this move's explanation. Which bell, though,
             # depends on the print we are explaining: see _driver_cutoff.
             cutoff = self._driver_cutoff(price)
-            pre_move = [r for r in candidates
-                        if (p := _event_start(r)) is None or p <= cutoff]
-            after_bell = [r for r in candidates
-                          if (p := _event_start(r)) is not None and p > cutoff]
+            pre_move = [r for r in candidates if _before_bell(r, cutoff)]
+            after_bell = [r for r in candidates if not _before_bell(r, cutoff)]
+            # Sector context is promotable below, so the bell has to bind it
+            # too - and it did not. A notice filed at 16:13 could be promoted
+            # and offered as the cause of a move that had finished at 16:00,
+            # the one thing _driver_cutoff exists to prevent. A late document
+            # stays visible as context, which is the honest label: read, not the
+            # cause. Only this end of the window decides causation, so the wider
+            # 36h reach above is left alone.
+            late_context = [r for r in sector_context if not _before_bell(r, cutoff)]
+            sector_context = [r for r in sector_context if _before_bell(r, cutoff)]
             # What the group did, and what is left over once you subtract it.
             tc = self.config.ticker(ticker)
             bench_sym = self.config.benchmark_for(tc.sector) if tc else None
@@ -487,6 +514,8 @@ class Views:
                         f"in the sector moved together")))
                 else:
                     context.append(row)
+            # Appended after the loop, so pre-bell context keeps the top slots.
+            context.extend(late_context)
 
             movers.append({
                 "ticker": ticker,
@@ -548,7 +577,11 @@ class Views:
             "names": len(moves),
             "up": sum(1 for m in moves if m > 0),
             "down": sum(1 for m in moves if m < 0),
-            "median_pct": sorted(moves)[len(moves) // 2],
+            # The real median, not the upper-middle element: on an even-length
+            # basket that reads high, and this number is a threshold input -
+            # peers at 0.1/0.5/1.2/2.0 cleared the 1.0pp "the group really moved"
+            # bar at 1.2 when the group's middle was 0.85.
+            "median_pct": statistics.median(moves),
         }
 
     def _sector_wide_corroboration(self, price: dict[str, Any],

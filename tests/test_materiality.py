@@ -121,6 +121,29 @@ def test_premarket_item_beats_the_same_item_after_the_close(parts):
     assert at(12).per_ticker_score["AUDC"] > at(22).per_ticker_score["AUDC"]
 
 
+def test_the_session_boosts_follow_the_tzdb_not_the_month(parts):
+    """`offset = 4 if 3 <= month <= 11 else 5` is a month-based DST guess, and
+    DST ends the first Sunday of November: through most of November an item
+    published at 08:45 ET was read as 09:45 and lost the pre-market boost,
+    while one published at 15:30 ET was read as 16:30 and lost the intraday
+    boost. Both are the difference between a gap and an archive entry."""
+    cfg, linker, scorer = parts
+
+    def boost_reason(published):
+        item = RawItem(
+            source="company_ir_rss", source_kind="rss", external_id="tz",
+            title="AudioCodes reports fourth quarter results and raises guidance",
+            url="https://example.com", published_at=published,
+        )
+        result = scorer.score(item, linker.link(item),
+                              now=published + timedelta(minutes=5))
+        return " ".join(r for r in result.reasons if "published" in r)
+
+    november = datetime(2026, 11, 20, tzinfo=timezone.utc)     # EST, UTC-5
+    assert "pre-market (08:45 ET)" in boost_reason(november.replace(hour=13, minute=45))
+    assert "intraday (15:30 ET)" in boost_reason(november.replace(hour=20, minute=30))
+
+
 def test_recency_decays(parts):
     fresh = score(parts, "Gilat wins $50 million defense satcom contract", minutes_old=10)
     stale = score(parts, "Gilat wins $50 million defense satcom contract",
@@ -221,6 +244,84 @@ def test_panw_ngs_arr_keyword_boost(parts):
         parts, "Palo Alto Networks reports next-generation security ARR above guidance"
     )
     assert boosted.per_ticker_score["PANW"] > plain.per_ticker_score["PANW"] + 10
+
+
+def test_a_lowercase_override_key_applies_its_whole_block(tmp_path):
+    """`cgen:` instead of `CGEN:` used to apply half its own block: the keyword
+    boosts were compiled under an uppercased key and fired, the relation
+    override was looked up under the raw key and was silently dropped. A trader
+    editing YAML got a score that matched neither reading."""
+    import shutil
+    from pathlib import Path
+
+    from harel.config import load_config
+
+    cdir = tmp_path / "config"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "config", cdir)
+    scoring = cdir / "scoring.yaml"
+    text = scoring.read_text(encoding="utf-8")
+    assert "\n  CGEN:\n" in text
+    scoring.write_text(text.replace("\n  CGEN:\n", "\n  cgen:\n"), encoding="utf-8")
+
+    cfg = load_config(cdir)
+    scorer = MaterialityScorer(cfg)
+    item = RawItem(
+        source="company_ir_rss", source_kind="rss", external_id="tigit",
+        title="Roche says tiragolumab met the primary endpoint in SKYSCRAPER-01",
+        url="https://example.com", published_at=NOW - timedelta(minutes=30),
+    )
+    result = scorer.score(item, EntityLinker(cfg).link(item), now=NOW)
+    assert any("relation PRODUCT_RIVAL override x0.95" in r for r in result.reasons), \
+        result.reasons
+
+
+# ------------------------------------------------------ sector read-across -- #
+def test_a_peer_story_is_weighted_by_its_sectors_own_read_across(parts):
+    """`peer_read_across` is tuned per sector and was parsed and then never
+    read, so the semicap comment - "WFE names trade almost 1:1 with peers'
+    guidance, the single most valuable indirect channel for NVMI/CAMT" - moved
+    no score at all. 0.85 there against 0.65 globally has to mean something."""
+    cfg, _, _ = parts
+    result = score(parts, "Onto Innovation raises full-year guidance on HBM demand")
+
+    peer = cfg.sector(cfg.ticker("CAMT").sector).peer_read_across
+    assert peer == 0.85
+    assert any(f"[CAMT] relation PEER x{peer:.2f}" in r for r in result.reasons), \
+        result.reasons
+
+
+def test_a_sector_that_barely_reads_across_scores_below_one_that_does(parts):
+    """The same regulator document, two sectors: semicap at 0.75 lives on
+    export-control rules, enterprise software at 0.30 does not."""
+    cfg, _, scorer = parts
+    from harel.models import Link
+
+    item = RawItem(
+        source="federal_register", source_kind="federal_register", external_id="fr",
+        title="[FR] Additional Export Controls: Semiconductor Manufacturing Equipment",
+        url="https://example.com", published_at=NOW - timedelta(minutes=30),
+    )
+    result = scorer.score(
+        item,
+        [Link("CAMT", "SECTOR_REG", 0.62, 'mentions "entity list"'),
+         Link("NICE", "SECTOR_REG", 0.62, 'mentions "entity list"')],
+        now=NOW,
+    )
+    assert result.per_ticker_score["CAMT"] > result.per_ticker_score["NICE"]
+
+
+def test_a_ticker_override_still_beats_its_sectors_read_across(parts):
+    """Kenon's peers are peers of the *assets*, not of the listed holding
+    company, so KEN carries PEER: 0.45 while its sector reads across at 0.50.
+    The narrower statement has to win, or the override is decoration."""
+    cfg, _, _ = parts
+    sector = cfg.sector(cfg.ticker("KEN").sector)
+    override = cfg.scoring.overrides["KEN"]["relation_overrides"]["PEER"]
+    assert override < sector.peer_read_across
+
+    result = score(parts, "NRG Energy raises full-year guidance on data-centre demand")
+    assert any(f"[KEN] relation PEER override x{override:.2f}" in r
+               for r in result.reasons), result.reasons
 
 
 def test_microsoft_bundling_is_classified_as_a_competitive_threat(parts):

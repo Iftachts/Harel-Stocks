@@ -18,7 +18,9 @@ from __future__ import annotations
 import csv
 import io
 from collections.abc import Iterator
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import datetime, time as dtime, timezone
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from ..http import HttpError
 from ..models import PriceSnapshot, RawItem
@@ -27,7 +29,10 @@ from .base import Collector, register
 STOOQ_URL = "https://stooq.com/q/d/l/?s={symbol}&i=d"
 YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 
-# US market hours in ET, expressed in UTC offsets we resolve at runtime.
+# The exchange's own clock. Every session boundary below is a wall-clock time in
+# New York, so it has to be resolved against the real tzdb - see current_session.
+MARKET_TZ = ZoneInfo("America/New_York")
+
 PREMARKET_START = dtime(4, 0)
 REGULAR_OPEN = dtime(9, 30)
 REGULAR_CLOSE = dtime(16, 0)
@@ -101,8 +106,12 @@ class PriceCollector(Collector):
         self.db.save_bars(ticker, bars)
 
         last_bar, prev_bar = bars[-1], bars[-2]
-        bar_date = datetime.strptime(last_bar["date"], "%Y-%m-%d").replace(
-            tzinfo=timezone.utc)
+        # A daily bar's observation time is that session's closing print, 16:00
+        # ET. Parsed as a bare date it is midnight UTC, which the terminal
+        # renders in ET as the PREVIOUS evening: a 2026-07-31 bar was displayed
+        # as "Thursday 20:00 ET" instead of Friday 16:00 ET.
+        closed_at = datetime.strptime(last_bar["date"], "%Y-%m-%d").replace(
+            hour=16, tzinfo=MARKET_TZ).astimezone(timezone.utc)
         adv20 = _mean([b["volume"] for b in bars[-21:-1]]) or None
         change_pct = (
             (last_bar["close"] - prev_bar["close"]) / prev_bar["close"] * 100
@@ -110,10 +119,11 @@ class PriceCollector(Collector):
         )
         return PriceSnapshot(
             ticker=ticker,
-            asof=bar_date,
-            # A daily bar's observation time is the session it closed, which is
-            # the bar date itself.
-            market_time=bar_date,
+            # `asof` is when we fetched, `market_time` when the exchange
+            # printed. Stooq set both to the bar date, so the quote panel
+            # reported a bar we had just downloaded as "fetched 20 hours ago".
+            asof=datetime.now(timezone.utc),
+            market_time=closed_at,
             last=last_bar["close"],
             prev_close=prev_bar["close"],
             change_pct=change_pct,
@@ -138,11 +148,17 @@ class PriceCollector(Collector):
         fired. Yahoo returns ~60 daily bars with volume in one call, so the data
         was there all along.
 
-        Refetched at most once a day per name: 3 months of daily bars do not
-        change between two five-minute passes.
+        Refetched at most once a day per name: the *history* behind today does
+        not change between two five-minute passes. Today's own bar does - it is
+        the session in progress - and `_refresh_today_bar` keeps that one
+        current out of the quote we already fetch, at no extra request.
         """
         existing = self.db.recent_bars(ticker, 1)
-        today = datetime.now(timezone.utc).date().isoformat()
+        # Bar dates are exchange dates, so "today" has to be one too. On UTC
+        # dates this guard stopped matching at 20:00 ET, when the UTC day has
+        # already rolled over, and refetched 3 months of history on every pass
+        # until midnight ET.
+        today = datetime.now(MARKET_TZ).date().isoformat()
         if existing and str(existing[-1].get("date", ""))[:10] >= today:
             return
 
@@ -169,13 +185,48 @@ class PriceCollector(Collector):
             if close is None:
                 continue          # Yahoo pads holidays with nulls
             bars.append({
-                "date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
+                # The exchange's date, the same one `_refresh_today_bar` keys
+                # on: two spellings of one session would be two rows for it.
+                "date": datetime.fromtimestamp(ts, MARKET_TZ).date().isoformat(),
                 "open": at("open") or close, "high": at("high") or close,
                 "low": at("low") or close, "close": close,
                 "volume": at("volume") or 0,
             })
         if bars:
             self.db.save_bars(ticker, bars)
+
+    def _refresh_today_bar(self, ticker: str, meta: dict[str, Any]) -> None:
+        """Keep the bar for the session in progress in step with the quote.
+
+        Yahoo's interval=1d chart includes today, so the first backfill after
+        the open stores a PARTIAL bar - and the once-a-day guard above then
+        returns early for the rest of the day. A name that opened 18.00 and
+        closed 20.50 kept its 09:35 values until the next morning, on the same
+        screen as the live quote (`views.ticker_brief` returns `recent_bars`
+        next to `price`), so the two disagreed all day.
+
+        The refresh comes out of the meta block of the quote we already
+        fetched: the bar and the quote can no longer disagree because they are
+        the same numbers, and it costs no second request against an endpoint
+        that rate-limits aggressively.
+        """
+        ts = meta.get("regularMarketTime")
+        close = meta.get("regularMarketPrice")
+        if not isinstance(ts, (int, float)) or not ts or close is None:
+            return
+        date = datetime.fromtimestamp(ts, MARKET_TZ).date().isoformat()
+        stored = next((b for b in self.db.recent_bars(ticker, 3)
+                       if str(b.get("date", ""))[:10] == date), {})
+        self.db.save_bars(ticker, [{
+            "date": date,
+            # meta carries no open. The backfill's bar does, and replacing the
+            # row must not throw it away.
+            "open": stored.get("open"),
+            "high": meta.get("regularMarketDayHigh") or stored.get("high") or close,
+            "low": meta.get("regularMarketDayLow") or stored.get("low") or close,
+            "close": close,
+            "volume": meta.get("regularMarketVolume") or stored.get("volume") or 0,
+        }])
 
     # -- Yahoo: including pre/post market ----------------------------------- #
     def _yahoo_snapshot(self, ticker: str) -> PriceSnapshot | None:
@@ -197,23 +248,14 @@ class PriceCollector(Collector):
             return None
         meta = result[0].get("meta") or {}
 
+        self._refresh_today_bar(ticker, meta)
+
         last = meta.get("regularMarketPrice")
         # `chartPreviousClose` is the close before the *requested range*, so with
         # range=5d it is last week's close and every move looks like a 5-day move.
         # `previousClose` is the prior session's close, which is what an intraday
         # move means. Keep the chart field only as a fallback.
         prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
-        # Pre/post prints live in a separate block on this endpoint.
-        for key in ("preMarketPrice", "postMarketPrice"):
-            if meta.get(key):
-                last = meta[key]
-
-        change_pct = (
-            (last - prev_close) / prev_close * 100
-            if last and prev_close else None
-        )
-        adv20 = self._adv_from_bars(ticker)
-        volume = meta.get("regularMarketVolume")
 
         # The exchange's own timestamp for the last print. Without it the only
         # time we had was our fetch time, so a Friday close pulled on Saturday
@@ -222,6 +264,25 @@ class PriceCollector(Collector):
         market_ts = meta.get("regularMarketTime")
         market_time = (datetime.fromtimestamp(market_ts, timezone.utc)
                        if isinstance(market_ts, (int, float)) and market_ts else None)
+
+        # Pre/post-market prints are the reason this source is here at all
+        # ("they matter a lot for an overnight-gap workflow"), and meta does not
+        # carry them: the v8 chart endpoint has no preMarketPrice/postMarketPrice
+        # key, so the loop that looked for them never fired once and `last` was
+        # always the 16:00 print. They are in the 5m series, stamped after
+        # regularMarketTime. TEVA closing 19.80, reporting after the bell and
+        # trading 22.50 at 19:34 ET was published as 19.80 / +10% / "afterhours":
+        # the whole after-hours move invisible, under an after-hours label.
+        extended = _last_extended_print(result[0], market_ts)
+        if extended is not None:
+            last, market_time = extended
+
+        change_pct = (
+            (last - prev_close) / prev_close * 100
+            if last and prev_close else None
+        )
+        adv20 = self._adv_from_bars(ticker)
+        volume = meta.get("regularMarketVolume")
 
         return PriceSnapshot(
             ticker=ticker,
@@ -292,11 +353,20 @@ class PriceCollector(Collector):
 
 
 def current_session(now: datetime | None = None) -> str:
-    """Which US session are we in? ET is UTC-5 / UTC-4; month-based approximation
-    is accurate enough for labelling a news item."""
+    """Which US session a moment falls in, on the exchange's own clock.
+
+    `offset = 4 if 3 <= month <= 11 else 5` was a month-based DST guess, and
+    DST does not turn on the 1st: it ends the first Sunday of November and
+    starts the second Sunday of March. So for most of November and the first
+    week of March every 13:30-14:30 UTC print was labelled "regular" while the
+    tape was still pre-market, and every 20:00-21:00 UTC print "afterhours"
+    with half an hour left in the session. That label is stored on the
+    snapshot, shown in the [TAPE] alert and read by the scoring timing boost.
+    """
     now = now or datetime.now(timezone.utc)
-    offset = 4 if 3 <= now.month <= 11 else 5
-    et_dt = now - timedelta(hours=offset)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    et_dt = now.astimezone(MARKET_TZ)
     et = et_dt.time()
     if et_dt.weekday() >= 5:
         return "closed"
@@ -307,6 +377,36 @@ def current_session(now: datetime | None = None) -> str:
     if REGULAR_CLOSE <= et < AFTERHOURS_END:
         return "afterhours"
     return "closed"
+
+
+def _last_extended_print(chart: dict[str, Any],
+                         regular_market_ts: Any) -> tuple[float, datetime] | None:
+    """Newest 5m bar that printed outside the regular session, with its time.
+
+    Matched on the bar's own clock rather than on "is it after hours *now*", so
+    the 19:55 print is still the last price at 03:00 the next morning, and the
+    same rule picks up pre-market prints: before the open, regularMarketTime is
+    still yesterday's close, so today's 08:00 bars sit after it.
+    """
+    if not isinstance(regular_market_ts, (int, float)) or not regular_market_ts:
+        return None                # nothing to measure "after the close" against
+    stamps = chart.get("timestamp") or []
+    quote = ((chart.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    for i in range(min(len(stamps), len(closes)) - 1, -1, -1):
+        ts = stamps[i]
+        if not isinstance(ts, (int, float)) or ts <= regular_market_ts:
+            break                  # timestamps ascend; everything older is older
+        close = closes[i]
+        if close is None:
+            continue               # Yahoo pads gaps in the extended session
+        # A bar's timestamp is the minute it OPENED, and the trade happened
+        # somewhere in the five minutes after it. Reporting the open is the
+        # end of that window we can actually stand behind.
+        printed = datetime.fromtimestamp(ts, timezone.utc)
+        if current_session(printed) in ("premarket", "afterhours"):
+            return float(close), printed
+    return None
 
 
 def _mean(values: list[float]) -> float:

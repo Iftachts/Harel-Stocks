@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "recall_number": "Z-1234-2026",
+      "recalling_firm": "Nova Biomedical Corporation",
+      "product_description": "StatStrip Glucose/Ketone Meter test strips, 50-count vial",
+      "reason_for_recall": "Test strips may report falsely elevated glucose results",
+      "classification": "Class II",
+      "status": "Ongoing",
+      "report_date": "20260729",
+      "recall_initiation_date": "20260715",
+      "distribution_pattern": "Nationwide and internationally"
+    }
+  ]
+}

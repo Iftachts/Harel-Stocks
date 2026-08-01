@@ -186,7 +186,12 @@ class EdgarSubmissionsCollector(Collector):
         Only fetched for filings we have not stored yet: the collector re-emits
         the same filings every pass, and the codes never change.
         """
-        raw_url = re.sub(r"/xslF345X0\d/", "/", url)
+        # The renderer directory carries a version and it is not always one
+        # digit. TEVA files xslF345X06 today, so this works today - but an
+        # xslF345X10 renderer would leave the URL untouched, return None below,
+        # and silently downgrade EVERY Form 4 back to plain "4", scored like an
+        # open-market purchase.
+        raw_url = re.sub(r"/xslF345X\d+/", "/", url)
         if raw_url == url or not raw_url.endswith(".xml"):
             return None
         try:
@@ -202,10 +207,9 @@ class EdgarSubmissionsCollector(Collector):
             self.warn(f"Form 4 detail failed ({type(exc).__name__}): {raw_url}")
             return None
 
-        codes = re.findall(_TAG.format("transactionCode"), body)
+        codes, qty = _form4_transactions(body)
         if not codes:
             return None
-        shares = re.findall(_TAG.format("transactionShares"), body)
         titles = re.findall(_TAG.format("officerTitle"), body)
         owners = re.findall(_TAG.format("rptOwnerName"), body)
 
@@ -218,16 +222,6 @@ class EdgarSubmissionsCollector(Collector):
         labels = [FORM4_CODES.get(c, (c, False))[0] for c in codes]
         signal = any(FORM4_CODES.get(c, (c, False))[1] for c in codes)
 
-        def total(values: list[str]) -> float:
-            out = 0.0
-            for v in values:
-                try:
-                    out += float(v)
-                except ValueError:
-                    continue
-            return out
-
-        qty = total(shares)
         who = (titles or owners or [""])[0]
         label = " / ".join(dict.fromkeys(labels))
         if qty:
@@ -449,6 +443,55 @@ FORM4_CODES = {
     "X": ("option exercise", False),
 }
 _TAG = r"<{0}>\s*(?:<value>)?\s*([^<\s][^<]*?)\s*(?:</value>)?\s*</{0}>"
+
+# Table I (nonDerivative) and Table II (derivative) rows. The tag name is
+# captured so each row's shares are attributed to the table they came from.
+_TXN_RE = re.compile(
+    r"<(?P<table>nonDerivative|derivative)Transaction\b[^>]*>"
+    r"(?P<row>.*?)</(?P=table)Transaction>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _form4_transactions(body: str) -> tuple[list[str], float]:
+    """Transaction codes, and a share count that is not counted twice.
+
+    ``<transactionShares>`` appears in BOTH tables of a Form 4, and an option
+    exercise is reported in both: once as the derivative exercised (Table II)
+    and once as the underlying stock acquired (Table I). Summing a flat regex
+    over the whole document therefore added the same shares twice - TEVA's four
+    most recent Form 4s printed "option exercise 43,478 sh" against a true
+    21,739, and 28,984 against a true 14,492. Doubling an insider's size is the
+    one number in that headline a reader would act on.
+
+    Table I is the stock that actually moved, so it wins whenever it exists; a
+    filing carrying only Table II (an option grant) has no other figure to give.
+    """
+    codes: list[str] = []
+    totals = {"nonderivative": 0.0, "derivative": 0.0}
+    tables: set[str] = set()
+
+    for match in _TXN_RE.finditer(body):
+        table = match.group("table").lower()
+        row = match.group("row")
+        tables.add(table)
+        code = re.search(_TAG.format("transactionCode"), row)
+        if code:
+            codes.append(code.group(1))
+        for value in re.findall(_TAG.format("transactionShares"), row):
+            try:
+                totals[table] += float(value)
+            except ValueError:
+                continue
+
+    if not tables:
+        # No transaction rows recognised - the document is shaped differently
+        # than we expect. Keep the flat code scan, because separating a grant
+        # from a purchase is the whole point of this fetch, but report no share
+        # count rather than guess which table a loose number belongs to.
+        return re.findall(_TAG.format("transactionCode"), body), 0.0
+
+    return codes, totals["nonderivative" if "nonderivative" in tables else "derivative"]
 
 
 def _fulltext_name(name: str) -> str:

@@ -1,5 +1,24 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
+from harel.config import load_config
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def edited_config(tmp_path, *edits: tuple[str, str], file: str = "scoring.yaml"):
+    """The shipped config with substitutions applied - the trader's own edit."""
+    cdir = tmp_path / "config"
+    shutil.copytree(REPO_ROOT / "config", cdir)
+    text = (cdir / file).read_text(encoding="utf-8")
+    for old, new in edits:
+        assert old in text, f"{file} no longer contains {old!r} - fix this test"
+        text = text.replace(old, new)
+    (cdir / file).write_text(text, encoding="utf-8")
+    return load_config(cdir)
+
 
 def test_universe_loads_and_is_complete(config):
     assert len(config.active_tickers) == 22
@@ -201,3 +220,41 @@ def test_noise_form_caps_do_not_suppress_genuinely_material_forms(config):
     caps = config.scoring.noise_form_types
     for form in ("8-K", "6-K", "424B5", "SC 13D"):
         assert form not in caps or caps[form] >= 35, f"{form} must not be capped as noise"
+
+
+def test_a_noise_pattern_without_a_cap_takes_the_configured_default(tmp_path):
+    """`noise.hard_cap_default` was declared in scoring.yaml and then hardcoded
+    a second time as a literal 12 in the loader, so editing it moved nothing."""
+    cfg = edited_config(
+        tmp_path,
+        ("  hard_cap_default: 12\n", "  hard_cap_default: 4\n"),
+        ('    - pattern: "\\\\bSelf-Regulatory Organizations\\\\b"\n      cap: 10\n',
+         '    - pattern: "\\\\bSelf-Regulatory Organizations\\\\b"\n'),
+    )
+    assert cfg.scoring.noise_hard_cap_default == 4
+    capless = [n.cap for n in cfg.scoring.noise_title_patterns
+               if n.pattern.pattern == "\\bSelf-Regulatory Organizations\\b"]
+    assert capless == [4]
+
+
+def test_scoring_overrides_are_keyed_by_uppercase_ticker(tmp_path):
+    """Every ticker in this system is uppercase, and a lowercase YAML key used
+    to apply half of its own block - keyword boosts under the uppercased key,
+    the relation override under a key nothing ever looked up."""
+    cfg = edited_config(tmp_path, ("\n  CGEN:\n", "\n  cgen:\n"))
+    assert "CGEN" in cfg.scoring.overrides
+    assert "cgen" not in cfg.scoring.overrides
+    assert cfg.scoring.overrides["CGEN"]["relation_overrides"]["PRODUCT_RIVAL"] == 0.95
+
+
+def test_every_real_sector_declares_the_read_across_it_is_scored_with(config):
+    """`read_across` and `peer_read_across` are the relation multiplier for a
+    sector's SECTOR_* and PEER links. A sector that omits one does not score
+    zero - it silently falls back to the global default in scoring.yaml, which
+    is the tuning quietly not happening."""
+    for key, sector in config.sectors.items():
+        if key == "unknown":
+            continue
+        assert 0 < sector.read_across <= 1, f"{key}: read_across={sector.read_across}"
+        assert 0 < sector.peer_read_across <= 1, (
+            f"{key}: peer_read_across={sector.peer_read_across}")

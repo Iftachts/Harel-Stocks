@@ -48,6 +48,20 @@ class Link:
         }
 
 
+# What separates title from summary from body in `RawItem.text`. It has to be a
+# character no matcher can step over: term regexes join the words of a phrase
+# with `\s+`, and `\s` matches a newline, so a two-word term used to be
+# satisfiable by one word at the end of one field and one at the start of the
+# next. "Analysts turn cautious on Nice" + "Results from the survey are due"
+# matched "Nice\nResults" and reached NICE at DIRECT 0.90 - the highest
+# confidence the linker can assign - on a sentence that does not exist. Google
+# News RSS produces that shape all day. The newlines around it keep `.` from
+# crossing too, for the scoring patterns that are compiled without DOTALL.
+# NUL and not one of the ASCII separator characters: Python counts \x1c-\x1f as
+# whitespace, so `\s+` steps straight over them.
+FIELD_SEP = "\n\x00\n"
+
+
 @dataclass(slots=True)
 class RawItem:
     """A single piece of collected information, before enrichment."""
@@ -84,8 +98,8 @@ class RawItem:
 
     @property
     def text(self) -> str:
-        """Everything the matchers should look at."""
-        return f"{self.title}\n{self.summary}\n{self.body}"
+        """Everything the matchers should look at, with the fields kept apart."""
+        return FIELD_SEP.join((self.title, self.summary, self.body))
 
 
 @dataclass(slots=True)

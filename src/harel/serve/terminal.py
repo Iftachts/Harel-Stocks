@@ -154,12 +154,36 @@ def _ltr(text: Any) -> str:
     return f"<span class='ltr'>{html.escape(str(text))}</span>"
 
 
+def _detection_lag_he(lag: int | None) -> str:
+    """How long we were blind to an item - or, when negative, how far ahead of it
+    we were.
+
+    A negative lag is not a fast detection. It means we hold the document before
+    the date it publishes under, which is the Federal Register public-inspection
+    lead time and the entire reason that source is polled. It was rendering as
+    "-220 דקות אחרי הפרסום" - a negative count of minutes after an event that
+    had not happened - and the `< 30` test below read it as comfortably on time.
+    24 items in the live database carry one.
+    """
+    if lag is None:
+        return "-"
+    if lag < 0:
+        return (f"{_ltr(-lag)} דקות <b>לפני</b> מועד הפרסום "
+                f"&middot; זמן קדימה, לא פיגור")
+    late = "" if lag < 30 else " <span class='bad'>&mdash; באיחור</span>"
+    return f"{_ltr(lag)} דקות אחרי הפרסום{late}"
+
+
 def _auto(text: str, cut: int | None = None) -> str:
     """Text that may be Hebrew or Latin: let the browser decide per string."""
-    value = html.escape(text or "")
+    value = text or ""
+    # Cut the text, then escape it. The other way round cuts inside an entity:
+    # "AT&T earnings" came out as "AT&a", which is what the reader saw - and an
+    # apostrophe is six characters once escaped, so on a headline carrying one
+    # the cut also landed nowhere near the length asked for.
     if cut:
         value = value[:cut]
-    return f"<span dir='auto'>{value}</span>"
+    return f"<span dir='auto'>{html.escape(value)}</span>"
 
 
 def _pct(value: float, digits: int = 1, suffix: str = "%") -> str:
@@ -284,7 +308,7 @@ def _section(title: str, items: list[dict[str, Any]], empty: str | None = None) 
             f"{html.escape(RELATION_LABEL_HE.get(rel, rel))}</td>"
             f"<td class='tm'>{_time_cell(it)}</td>"
             f"<td><a href='{html.escape(url)}' target='_blank' rel='noreferrer' "
-            f"dir='auto'>{html.escape(it['title'])[:190]}</a> "
+            f"dir='auto'>{html.escape(it['title'][:190])}</a> "
             f"{events}{corr_html}{_dig(it.get('uid'))}"
             f"<div class='why' dir='auto'>{why_he}</div></td>"
             f"<td class='src'>{_ltr(it['source'])}</td></tr>"
@@ -399,7 +423,7 @@ def _movers_section(movers: list[dict[str, Any]]) -> str:
         if m["drivers"]:
             top = m["drivers"][0]
             driver = (f"<a href='{html.escape(top.get('url') or '#')}' target='_blank' "
-                      f"rel='noreferrer' dir='auto'>{html.escape(top['title'])[:150]}</a>"
+                      f"rel='noreferrer' dir='auto'>{html.escape(top['title'][:150])}</a>"
                       f"{_dig(top.get('uid'))}")
         elif rel_pct is not None and abs(rel_pct) < 2.0:
             # Most of the move is the group. Saying "no matching news" here
@@ -416,7 +440,7 @@ def _movers_section(movers: list[dict[str, Any]]) -> str:
             driver += (
                 f"<div class='why'>אחרי הפעמון &middot; לא הגורם לתנועה הזאת: "
                 f"<a href='{html.escape(late.get('url') or '#')}' target='_blank' "
-                f"rel='noreferrer' dir='auto'>{html.escape(late['title'])[:120]}</a></div>"
+                f"rel='noreferrer' dir='auto'>{html.escape(late['title'][:120])}</a></div>"
             )
         # Written because the price moved. Shown, because a trader will find it
         # anyway and needs to know we classified it rather than missed it.
@@ -424,7 +448,7 @@ def _movers_section(movers: list[dict[str, Any]]) -> str:
             driver += (
                 f"<div class='why'>פרשנות שלאחר התנועה &middot; תגובה, לא קטליזטור: "
                 f"<a href='{html.escape(recap.get('url') or '#')}' target='_blank' "
-                f"rel='noreferrer' dir='auto'>{html.escape(recap['title'])[:120]}</a>"
+                f"rel='noreferrer' dir='auto'>{html.escape(recap['title'][:120])}</a>"
                 f"{_dig(recap.get('uid'))}</div>"
             )
         rows.append(
@@ -497,15 +521,10 @@ def render_item(views: Views, uid: str) -> str:
         ("מפרסם", _auto(str(origin.get("publisher") or "-"))),
         ("אספן", _ltr(origin.get("collector") or "-")),
         ("מזהה במקור", f"<span class='muted ltr'>"
-                       f"{html.escape(str(origin.get('id_at_source') or '-'))[:90]}</span>"),
+                       f"{html.escape(str(origin.get('id_at_source') or '-')[:90])}</span>"),
     ]))
 
-    lag = when.get("detection_lag_minutes")
-    if lag is None:
-        lag_html = "-"
-    else:
-        late = "" if lag < 30 else " <span class='bad'>&mdash; באיחור</span>"
-        lag_html = f"{_ltr(lag)} דקות אחרי הפרסום{late}"
+    lag_html = _detection_lag_he(when.get("detection_lag_minutes"))
 
     if when.get("undated"):
         pub_date = ("לא ידוע — הפיד לא נשא תאריך, ולכן החותמת למטה היא מתי "
@@ -597,7 +616,7 @@ def render_item(views: Views, uid: str) -> str:
             f"<tr class='item'><td class='src'>{_ltr(m['source'])}</td>"
             f"<td class='tm'>{_ltr(str(m.get('published_at') or '')[:16])}</td>"
             f"<td><a href='{html.escape(m.get('url') or '#')}' target='_blank' "
-            f"rel='noreferrer' dir='auto'>{html.escape(m['title'])[:150]}</a>"
+            f"rel='noreferrer' dir='auto'>{html.escape(m['title'][:150])}</a>"
             f"{_dig(m.get('uid'))}</td></tr>"
             for m in carried["members"]
         )

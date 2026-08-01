@@ -169,10 +169,7 @@ class ClinicalTrialsCollector(Collector):
             if old_status != status:
                 parts.append(f"status {old_status} -> {status}")
             if old_pcd != primary_completion:
-                direction = "pulled in" if primary_completion < old_pcd else "pushed out"
-                parts.append(
-                    f"primary completion {old_pcd} -> {primary_completion} ({direction})"
-                )
+                parts.append(_completion_change(old_pcd, primary_completion))
             if why_stopped:
                 parts.append(f"why stopped: {why_stopped}")
             change = "; ".join(parts) or "record updated"
@@ -206,11 +203,47 @@ class ClinicalTrialsCollector(Collector):
         )
 
 
-def _ct_date(value: str) -> datetime:
+def _completion_change(old: str, new: str) -> str:
+    """Describe a primary-completion-date change, and only claim a direction
+    when the two dates actually establish one.
+
+    The direction used to be decided by comparing the raw strings, and
+    ClinicalTrials.gov returns this field at either month or day precision. So
+    "2027-01" -> "2027-01-15" - a sponsor doing nothing but refining a month to
+    a day - sorted as "pushed out" and went out as a DELAY, which the module
+    docstring calls usually a negative. And clearing the field sorted as
+    "pulled in": fabricated good news off a removed value. Compare at the
+    coarser of the two precisions, and say "unknown" when there is nothing to
+    compare.
+    """
+    old_dt, old_month = _ct_precision(old)
+    new_dt, new_month = _ct_precision(new)
+    label = f"primary completion {old or 'unspecified'} -> {new or 'unspecified'}"
+
+    if old_dt is None or new_dt is None:
+        return f"{label} (direction unknown)"
+    if old_month or new_month:
+        # One side only names a month, so the day the other side names carries
+        # no information: compare the months they agree on stating.
+        old_dt = old_dt.replace(day=1)
+        new_dt = new_dt.replace(day=1)
+    if new_dt == old_dt:
+        return f"{label} (same date, restated more precisely)"
+    return f"{label} ({'pushed out' if new_dt > old_dt else 'pulled in'})"
+
+
+def _ct_precision(value: str) -> tuple[datetime | None, bool]:
+    """(parsed date, is it month-precision). None when there is no date at all -
+    an absent value is unknown, not an early one."""
     value = (value or "").strip()
-    for fmt in ("%Y-%m-%d", "%Y-%m"):
+    for fmt, month_only in (("%Y-%m-%d", False), ("%Y-%m", True)):
         try:
-            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc), month_only
         except ValueError:
             continue
-    return datetime.now(timezone.utc)
+    return None, False
+
+
+def _ct_date(value: str) -> datetime:
+    parsed, _ = _ct_precision(value)
+    return parsed if parsed is not None else datetime.now(timezone.utc)

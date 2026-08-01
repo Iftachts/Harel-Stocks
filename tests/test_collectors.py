@@ -211,6 +211,47 @@ def test_clinicaltrials_only_reports_actual_changes(config, db):
     assert second == [], "an unchanged registry snapshot is not news"
 
 
+def test_a_completion_date_refined_to_a_day_is_not_a_delay(config, db):
+    """The direction was decided by comparing the raw strings, and
+    ClinicalTrials.gov returns this field at either month or day precision. So
+    "2027-01" -> "2027-01-15", a sponsor doing nothing but naming a day inside
+    the month it already stated, sorted later as a string and went out as
+    "pushed out" - a delay, which this module's docstring calls usually a
+    negative. Clearing the field sorted the other way and became fabricated good
+    news."""
+    import copy
+
+    from harel.collect.clinicaltrials import _completion_change
+
+    assert "pushed out" not in _completion_change("2027-01", "2027-01-15")
+    assert "pulled in" not in _completion_change("2027-01", "2027-01-15")
+    # A value that is gone, or one that was never there, is unknown - not early.
+    assert "pulled in" not in _completion_change("2027-01-15", "")
+    assert "pushed out" not in _completion_change("", "2027-01-15")
+    # Real moves still read as moves, at either precision.
+    assert "pushed out" in _completion_change("2027-01-15", "2027-06-30")
+    assert "pulled in" in _completion_change("2027-06-30", "2027-01-15")
+    assert "pushed out" in _completion_change("2027-01", "2027-06")
+
+    # ...and the same through the collector, which is where it reaches a reader.
+    source = config.sources["clinicaltrials"]
+    month = fixture_json("clinicaltrials.json")
+    month["studies"][0]["protocolSection"]["statusModule"][
+        "primaryCompletionDateStruct"]["date"] = "2026-11"
+    day = copy.deepcopy(month)
+    day["studies"][0]["protocolSection"]["statusModule"][
+        "primaryCompletionDateStruct"]["date"] = "2026-11-30"
+
+    url = "clinicaltrials.gov/api/v2/studies"
+    list(ClinicalTrialsCollector(source, ctx(config, db, {url: month})).collect())
+    refined = [i for i in ClinicalTrialsCollector(source, ctx(config, db, {url: day})).collect()
+               if i.meta["nct_id"] == "NCT05555555"]
+
+    assert refined, "the fingerprint changed, so the item must still be emitted"
+    change = refined[0].meta["change"]
+    assert "pushed out" not in change and "pulled in" not in change, change
+
+
 # ------------------------------------------------------------------- FDA -- #
 def test_openfda_enforcement_matches_our_names_and_drops_the_rest(config, db):
     routes = {"api.fda.gov/drug/enforcement.json": fixture_json("openfda_enforcement.json")}
@@ -222,6 +263,103 @@ def test_openfda_enforcement_matches_our_names_and_drops_the_rest(config, db):
     assert "TEVA" in item.seed_tickers
     assert item.meta["classification"] == "Class II"
     assert "FDA RECALL" in item.title
+
+
+def test_a_four_letter_peer_name_cannot_file_a_strangers_recall_as_our_news(config, db):
+    """`peer_names` was the only matcher loop here with no minimum-length guard,
+    against the 26 peer names in universe.yaml shorter than five characters -
+    Nova, KLA, GSK, OCP, SQM, AES, Wiz, SES, Ada, Bing. openFDA answers
+    `recalling_firm:"Nova"` with 24 device records for Nova Biomedical and 8
+    drug records for Nova Products, neither of which is Nova Ltd, so a
+    blood-glucose-meter recall was emitted with relation PEER against Camtek - a
+    semiconductor inspection company. The three sibling loops and
+    rss._cross_read_terms already draw the line at five.
+
+    Nor is it Nova Ltd's own news. The length guard alone left the DIRECT leg
+    standing, because "Nova" IS Nova Ltd's name and `match_names` draws its line
+    at four - so the recall simply changed which company it libelled. What
+    actually separates the two is the word after the name, which is the guard
+    `EntityLinker` has always applied to an ordinary-word name and this second,
+    simpler matcher had never been told about.
+    """
+    from harel.collect.fda import _EntityMatcher
+
+    routes = {"device/enforcement.json": fixture_json("openfda_device_recall_nova.json")}
+    collector = OpenFdaCollector(config.sources["fda_enforcement"], ctx(config, db, routes))
+    items = list(collector.collect())
+
+    assert not any("CAMT" in i.seed_tickers for i in items), \
+        "a glucose meter recall is not competitor news for a chip-inspection company"
+    assert not any("NVMI" in i.seed_tickers for i in items), \
+        "Nova Biomedical is not Nova Ltd; naming no company we track, it links to none"
+
+    # The rule, not just this record: no PEER rule may be built from a name too
+    # short to be distinctive.
+    short = [why for _, _, relation, why in _EntityMatcher(collector).rules
+             if relation == "PEER" and len(why.split(" ", 1)[1]) < 5]
+    assert not short, f"peer rules built from names under five characters: {short}"
+
+    # And the guard must not have simply switched the name off: the real company
+    # still matches, because "Nova Ltd" and "Nova Measuring Instruments" read as
+    # a company where "Nova Biomedical Corporation" reads as someone else.
+    matcher = _EntityMatcher(collector)
+    assert ("NVMI", "DIRECT") in {
+        (t, rel) for t, rel, _ in matcher.match("Nova Ltd recalls a metrology tool")}
+    assert ("NVMI", "DIRECT") in {
+        (t, rel) for t, rel, _ in
+        matcher.match("Nova Measuring Instruments Ltd optical metrology system")}
+    assert matcher.match("Nova Biomedical Corporation glucose meter") == []
+
+
+def test_a_scraped_letter_is_dated_by_its_row_not_by_the_scrape(config, db):
+    """Every scraped link was stamped with the collection time, while DATE_RE
+    sat compiled and referenced nowhere beside the code that should have used
+    it. A warning letter issued 2026-03-15 and first collected 2026-08-01 was
+    filed as 2026-08-01 news - and since the href is the external_id, upsert
+    re-stamped it on every later pass too, so its age stayed at zero and it
+    could never fall out of a recency-ordered feed or a since_hours window."""
+    from harel.collect.fda import HtmlListingCollector
+
+    routes = {"fda.gov": fixture_text("fda_warning_letters.html")}
+    collector = HtmlListingCollector(
+        config.sources["fda_warning_letters"], ctx(config, db, routes)
+    )
+    items = {i.seed_tickers[0]: i for i in collector.collect()}
+
+    # The row states the posted date first and the letter's own issue date
+    # second; the letter date is the one next to the link.
+    assert items["TEVA"].published_at.date().isoformat() == "2026-03-15"
+    assert items["CGEN"].published_at.date().isoformat() == "2026-06-02"
+    assert not items["TEVA"].meta.get("undated")
+    assert items["TEVA"].meta["listing_date"] == "2026-03-15"
+
+
+def test_a_dateless_listing_row_keeps_the_stamp_it_was_first_given(config, db):
+    """The import-alert rows carry no date anywhere, so one has to be invented.
+    Inventing it *again* on every pass is the bug: external_id is the href, so
+    the uid is stable and upsert refreshes published_at, which kept the item
+    permanently minutes old. Freeze the first stamp and mark it undated - the
+    convention the feed already renders as "date unknown, seen <when>" and the
+    scorer already caps."""
+    from harel.collect.fda import HtmlListingCollector
+    from harel.models import ScoredItem
+
+    routes = {"fda.gov": fixture_text("fda_warning_letters.html")}
+    source = config.sources["fda_warning_letters"]
+
+    first = next(i for i in HtmlListingCollector(source, ctx(config, db, routes)).collect()
+                 if i.meta.get("undated"))
+    assert "KMDA" in first.seed_tickers
+    db.upsert_item(
+        ScoredItem(raw=first, links=[], events=[], score=5.0, per_ticker_score={},
+                   tier="NOISE", reasons=[]),
+        dedupe_key="d", cluster_id="c",
+    )
+
+    second = next(i for i in HtmlListingCollector(source, ctx(config, db, routes)).collect()
+                  if i.meta.get("undated"))
+    assert second.published_at == first.published_at, \
+        "a second pass re-stamped it, so it could never age out of the feed"
 
 
 # ------------------------------------------------------------------ RSS -- #
@@ -435,6 +573,32 @@ def test_maya_schedule_skips_names_without_an_issuer_number(config, db, monkeypa
     assert any("tase_issuer_id" in w and "TEVA" in w for w in collector.warnings)
 
 
+def test_a_maya_schema_break_reaches_the_run_report(config, db, monkeypatch):
+    """A rename in MAYA's schema is the failure this collector is built to
+    survive, and it used to leave no trace anywhere a human looks: the zero-record
+    path never called warn(), so nothing reached RunReport.warnings. Its only
+    signal was source_state.last_error, which is not one - it is written under
+    the source key so each name overwrote the last, and the generator finishes
+    without raising, so the pipeline stamps a fresh last_ok_at and clears
+    last_error at the end of the same pass. `harel doctor` showed the biggest
+    structural edge in this basket as healthy-and-quiet while it returned
+    nothing at all."""
+    monkeypatch.delenv("TASE_API_KEY", raising=False)
+    renamed = {"Data": [{"reportSubject": "דוח מיידי",
+                         "whenPublished": "2026-07-30T09:05:00"}]}
+    collector = MayaCollector(
+        config.sources["maya_tase"], ctx(config, db, {"mayaapi.tase.co.il": renamed})
+    )
+
+    assert list(collector.collect()) == []
+    assert any("no parseable records" in w for w in collector.warnings), \
+        "the only channel a human reads is RunReport.warnings"
+    assert any("TEVA" in w for w in collector.warnings), \
+        "name the affected tickers - one overwritten message is not a report"
+    assert "TEVA" in (db.get_source_state("maya_tase").get("last_error") or ""), \
+        "source_state must carry every affected name, not just the last one"
+
+
 def test_maya_finds_records_in_an_unexpected_envelope(config, db):
     """Field renames must degrade, not crash."""
     wrapped = {"Result": {"Data": {"Reports": fixture_json("maya_reports.json")}}}
@@ -612,6 +776,66 @@ def test_form4_classification_survives_a_second_pass(config, db):
     carried = db.stored_meta("sec_edgar_submissions", "acc:doc")
     assert carried and carried["insider"]["form_type"] == ROUTINE_FORM4, \
         "a later pass must reuse the classification instead of dropping it"
+
+
+def test_form4_never_counts_the_same_shares_in_both_tables(config, db):
+    """`<transactionShares>` appears in BOTH Form 4 tables and an option
+    exercise is reported in both - once as the derivative exercised, once as the
+    underlying stock acquired - so summing a flat regex over the document
+    doubled the size. TEVA's four most recent Form 4s printed "option exercise
+    43,478 sh" against a true 21,739, and 28,984 against a true 14,492.
+    Doubling an insider's size is the one number in that headline anyone acts
+    on."""
+    from harel.collect.edgar import EdgarSubmissionsCollector
+
+    url = "https://www.sec.gov/Archives/edgar/data/1/000/xslF345X05/doc.xml"
+    collector = EdgarSubmissionsCollector(
+        config.sources["sec_edgar_submissions"],
+        ctx(config, db, {"doc.xml": fixture_text("form4_exercise.xml")}),
+    )
+    detail = collector._form4_detail("4", url)
+
+    assert detail is not None
+    assert detail["shares"] == 21739, \
+        f"the same 21,739 shares were counted twice: {detail['label']}"
+    assert "43,478" not in detail["label"]
+    assert detail["codes"] == ["M"], "one exercise, reported in two tables"
+
+    # A grant that exists only in Table I still reports its own figure, and a
+    # Table II-only filing has no other number to give.
+    grant = EdgarSubmissionsCollector(
+        config.sources["sec_edgar_submissions"],
+        ctx(config, db, {"doc.xml": fixture_text("form4_grant.xml")}),
+    )._form4_detail("4", url)
+    assert grant["shares"] == 24000
+
+
+def test_form4_detail_survives_a_renderer_version_past_nine(config, db):
+    """The renderer directory is versioned and the version is not always one
+    digit. `/xslF345X0\\d/` matches what TEVA files today (X06) but not an
+    xslF345X10 - which would leave the URL unchanged, drop the detail fetch, and
+    silently downgrade EVERY Form 4 back to plain "4", scored like an
+    open-market purchase rather than routine paperwork."""
+    from harel.collect.edgar import EdgarSubmissionsCollector, ROUTINE_FORM4
+
+    for version in ("xslF345X06", "xslF345X10"):
+        collector = EdgarSubmissionsCollector(
+            config.sources["sec_edgar_submissions"],
+            ctx(config, db, {"doc.xml": fixture_text("form4_grant.xml")}),
+        )
+        detail = collector._form4_detail(
+            "4", f"https://www.sec.gov/Archives/edgar/data/1/000/{version}/doc.xml"
+        )
+        assert detail is not None, f"{version} lost the classification"
+        assert detail["form_type"] == ROUTINE_FORM4
+
+    # A URL with no renderer directory is still refused - that is what the
+    # equality guard is actually for.
+    plain = EdgarSubmissionsCollector(
+        config.sources["sec_edgar_submissions"],
+        ctx(config, db, {"doc.xml": fixture_text("form4_grant.xml")}),
+    )._form4_detail("4", "https://www.sec.gov/Archives/edgar/data/1/000/doc.xml")
+    assert plain is None
 
 
 def test_fulltext_query_keeps_the_suffix_when_the_name_is_a_common_word(config):

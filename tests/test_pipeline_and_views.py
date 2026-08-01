@@ -432,6 +432,37 @@ def test_a_source_that_finds_nothing_keeps_its_last_success(config, db):
     assert row["last_ok_at"] and row["items_last_run"] == 0
 
 
+def test_an_error_a_collector_recorded_survives_the_pass_that_recorded_it(
+        config, db, monkeypatch):
+    """Quiet is a success; quiet-after-recording-a-fault is not. maya answers
+    200, finds nothing it can parse, writes save_state(last_error="0 parseable
+    records") and returns without raising - and the pipeline, seeing a generator
+    that completed, wrote a fresh last_ok_at and a null error straight over the
+    top. A MAYA schema break therefore read as healthy-and-quiet in `harel
+    doctor`, which is the one thing source_state exists to prevent.
+
+    Driven through openFDA rather than maya so it tests the pipeline's rule and
+    not one collector's wording."""
+    from harel.collect.fda import OpenFdaCollector
+
+    def silently_broken(self):
+        self.save_state(last_error="0 parseable records - the schema changed")
+        return iter(())
+
+    monkeypatch.setattr(OpenFdaCollector, "collect", silently_broken)
+    Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+             client=FakeHttpClient({})).run(only=["fda_enforcement"])
+
+    state = db.get_source_state("fda_enforcement")
+    assert state.get("last_error"), "the collector's own record of failure was erased"
+    assert not state.get("last_ok_at"), "a pass that recorded a fault is not a success"
+    assert state.get("consecutive_failures") == 1
+
+    degraded = {s["source"] for s in
+                Views(db=db, config=config).health()["degraded_sources"]}
+    assert "fda_enforcement" in degraded, "a silent failure must reach `harel doctor`"
+
+
 def test_a_price_carries_its_provider_and_its_arithmetic(config, db):
     """-4.2% is a claim. A trader reconciling it against their broker needs to
     know it is a delayed Yahoo print and what it was divided by."""
@@ -686,6 +717,45 @@ def test_earnings_dates_are_read_out_of_the_announcement(config, db):
     assert _earnings_date(item(
         "Company Announces First Quarter 2020 Results Conference Call",
         "will host a call on May 4, 2020.")) is None
+
+
+def test_a_september_date_is_extracted_like_any_other_month():
+    """The month pattern was built as `sep(?:tember)?\\.?`, so against "Sept. 5"
+    it matched "Sep", failed "tember" on "t. 5", matched `\\.?` empty and then
+    handed the `\\s+` a "t" - no match at all. Every AP-dated Q3 announcement
+    lost its date silently, and September is a quarter end. Exactly the hole
+    "Aug. 5" fell through, one month later."""
+    from harel.pipeline import _DATE_MDY, _DATE_DMY, _earnings_date, _month_index
+    from harel.models import RawItem
+
+    # Written out rather than derived from the pattern, which is the thing on
+    # trial. Index 1 is the AP abbreviation - four letters for September only.
+    forms = {
+        1: ("January", "Jan."), 2: ("February", "Feb."), 3: ("March", "Mar."),
+        4: ("April", "Apr."), 5: ("May",), 6: ("June", "Jun."),
+        7: ("July", "Jul."), 8: ("August", "Aug."),
+        9: ("September", "Sept.", "Sept", "Sep."),
+        10: ("October", "Oct."), 11: ("November", "Nov."), 12: ("December", "Dec."),
+    }
+    for month, spellings in forms.items():
+        for spelling in spellings:
+            for text in (f"on {spelling} 5, 2026", f"on {spelling} 5"):
+                match = _DATE_MDY.search(text)
+                assert match, f"{text!r} did not parse at all"
+                assert _month_index(match.group(1)) == month, text
+            match = _DATE_DMY.search(f"on 5 {spelling} 2026")
+            assert match and _month_index(match.group(2)) == month, spelling
+
+    # And through the whole extractor, in whatever month is three weeks out.
+    ahead = datetime.now(timezone.utc) + timedelta(days=20)
+    spellings = forms[ahead.month]
+    ap = spellings[1] if len(spellings) > 1 else spellings[0]
+    got = _earnings_date(RawItem(
+        source="company_ir_rss", source_kind="rss", external_id="q3",
+        title="Gilat Schedules Third Quarter 2026 Results Conference Call", url="",
+        summary=f"will host a conference call on {ap} {ahead.day}, {ahead.year}.",
+        published_at=datetime.now(timezone.utc)))
+    assert got and got[0] == ahead.date().isoformat(), got
 
 
 def test_a_sector_date_is_not_the_companys_next_catalyst(ran, db):
@@ -1071,6 +1141,45 @@ def test_a_date_in_the_future_is_never_rendered_as_just_now():
     assert "לפני" in he.ago(past)
 
 
+def test_a_publication_date_stops_being_forthcoming_when_it_arrives(config, db):
+    """`forthcoming` was decided once, in the collector, and nothing ever
+    cleared it. A public-inspection copy leaves the PI feed the moment it
+    publishes and is never collected again, so its meta kept saying "not out
+    yet" for ever and the terminal went on announcing "מתפרסם 31.7" days into
+    August - a scheduled date, in the past, presented as news to come."""
+    now = datetime.now(timezone.utc)
+
+    def add(uid, scheduled, hours_ago):
+        filed = (now - timedelta(hours=hours_ago)).isoformat()
+        db.conn.execute(
+            "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, "
+            "title, url, published_at, collected_at, score, tier, meta_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (uid, "federal_register", "federal_register", uid,
+             f"[FR-EARLY] Airworthiness Directives ({uid})",
+             "https://example.invalid/fr", filed, filed, 30.0, "NORMAL",
+             # Exactly what the collector stored on the day it was filed.
+             json.dumps({"forthcoming": True, "public_inspection": True,
+                         "scheduled_publication_date": scheduled})))
+        db.conn.execute(
+            "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, "
+            "why, score) VALUES (?,?,?,?,?,?)",
+            (uid, "TATT", "SECTOR_REG", 0.6, "t", 30.0))
+
+    add("published", (now - timedelta(days=4)).date().isoformat(), hours_ago=150)
+    add("pending", (now + timedelta(days=3)).date().isoformat(), hours_ago=5)
+    db.conn.commit()
+
+    feed = Views(db=db, config=config).feed(min_score=0, hours=400, limit=50)
+    items = {i["uid"]: i for i in feed["items"]}
+    assert not items["published"].get("forthcoming"), \
+        "a date that has arrived is not a date to come, whatever meta was told"
+    assert "publishes_on" not in items["published"]
+    assert items["pending"]["forthcoming"] is True, \
+        "lead time is the whole reason the early copy is collected"
+    assert items["pending"]["publishes_on"] and items["pending"]["discovered_at"]
+
+
 def test_a_quote_separates_when_it_printed_from_when_we_fetched_it(config, db):
     """On a Saturday, Friday's closing print was labelled "בן 2 דק׳" - the age
     of our HTTP request wearing the price's name."""
@@ -1138,6 +1247,124 @@ def test_a_sector_keyword_match_is_context_and_never_a_driver(config, db):
 
     raised = {a["ticker"] for a in moving["unexplained"]}
     assert {"TSEM", "CAMT"} <= raised, "both moves are still open questions"
+
+
+# What lifts a sector-level match from context to cause is the basket moving
+# together. No sector in the shipped universe holds more than two names, so
+# `_sector_move` sees at most one peer and the rule below can never fire on real
+# config - but it is still the rule that decides whether a sector-wide document
+# may be called a cause, so these two run against a four-name sector.
+PEER_BLOCK = """
+  ZZBIOA:
+    name: "Synthetic biotech peer A"
+    sector: biotech_clinical
+    float_class: micro
+  ZZBIOB:
+    name: "Synthetic biotech peer B"
+    sector: biotech_clinical
+    float_class: micro
+  ZZBIOC:
+    name: "Synthetic biotech peer C"
+    sector: biotech_clinical
+    float_class: micro
+"""
+
+
+@pytest.fixture
+def config_with_a_full_sector(tmp_path):
+    import shutil
+
+    from conftest import REPO_ROOT
+    from harel.config import load_config
+
+    cdir = tmp_path / "config"
+    shutil.copytree(REPO_ROOT / "config", cdir)
+    universe = cdir / "universe.yaml"
+    universe.write_text(universe.read_text(encoding="utf-8") + PEER_BLOCK,
+                        encoding="utf-8")
+    return load_config(cdir)
+
+
+def _move(db, ticker, pct):
+    from harel.models import PriceSnapshot
+
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker=ticker, asof=now, market_time=now, last=100.0,
+                                prev_close=100.0, change_pct=pct, session="closed",
+                                provider="yahoo"))
+
+
+def test_the_sector_median_is_the_basket_middle_not_its_upper_half(
+        config_with_a_full_sector, db):
+    """`sorted(moves)[len(moves) // 2]` takes the upper-middle element, so an
+    even-numbered basket reads high. It gates whether a sector-wide document may
+    be promoted to a cause: peers at 0.1 / 0.5 / 1.2 / 2.0 cleared the 1.0pp
+    "the group really moved" bar at 1.2 when the middle of the group is 0.85."""
+    views = Views(db=db, config=config_with_a_full_sector)
+    for ticker, pct in (("CGEN", 0.1), ("ZZBIOA", 0.5),
+                        ("ZZBIOB", 1.2), ("ZZBIOC", 2.0)):
+        _move(db, ticker, pct)
+    _move(db, "ORMP", 3.0)
+    db.conn.commit()
+
+    sector = views._sector_move("ORMP")
+    assert sector["names"] == 4
+    assert sector["median_pct"] == pytest.approx(0.85)
+    assert views._sector_wide_corroboration(db.latest_price("ORMP"), sector) is False, \
+        "a basket whose middle moved 0.85% is not a sector event"
+
+
+def test_a_sector_document_after_the_bell_is_never_promoted_to_a_driver(
+        config_with_a_full_sector, db, monkeypatch):
+    """`_driver_cutoff` bound the candidate lists but not sector context - and
+    sector context is promoted into `drivers` the moment the basket corroborates
+    it. So a notice filed at 16:13 could be offered as the cause of a move that
+    had finished at 16:00, which is the single thing the bell test exists to
+    prevent."""
+    now = datetime.now(timezone.utc)
+    bell = now - timedelta(hours=3)
+    # The bell has its own test; pinning it here keeps this one off the calendar.
+    monkeypatch.setattr("harel.views.last_session_close", lambda when=None: bell)
+    views = Views(db=db, config=config_with_a_full_sector)
+
+    for ticker, pct in (("CGEN", 2.0), ("ZZBIOA", 2.2),
+                        ("ZZBIOB", 1.8), ("ZZBIOC", 2.5)):
+        _move(db, ticker, pct)
+    _move(db, "ORMP", 3.0)
+
+    def add(uid, title, published):
+        # Below the driver threshold on purpose: demoting an item from cause to
+        # context is what lowers its score, so this is the shape a sector
+        # document actually arrives in.
+        db.conn.execute(
+            "INSERT OR REPLACE INTO items (uid, source, source_kind, external_id, "
+            "title, url, published_at, collected_at, score, tier, meta_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (uid, "federal_register", "federal_register", uid, title,
+             "https://example.invalid/fr", published.isoformat(), now.isoformat(),
+             12.0, "NOISE", json.dumps({"document_number": uid})))
+        db.conn.execute(
+            "INSERT OR REPLACE INTO item_tickers (uid, ticker, relation, confidence, "
+            "why, score) VALUES (?,?,?,?,?,?)",
+            (uid, "ORMP", "SECTOR_REG", 0.62, 'mentions "insulin"', 12.0))
+
+    add("early", "[FR] Notice on insulin biosimilars, on public inspection 09:40",
+        bell - timedelta(hours=2))
+    add("late", "[FR] Notice on insulin biosimilars, filed at 16:13",
+        bell + timedelta(minutes=13))
+    db.conn.commit()
+
+    mover = next(m for m in views.whats_moving(min_abs_pct=1.0)["movers"]
+                 if m["ticker"] == "ORMP")
+    drivers = [d["title"] for d in mover["drivers"]]
+    context = [c["title"] for c in mover["possible_context"]]
+
+    assert any("09:40" in t for t in drivers), \
+        "a corroborated sector document from before the bell is still promotable"
+    assert not any("16:13" in t for t in drivers), \
+        "the move was over before this document existed"
+    assert any("16:13" in t for t in context), \
+        "hiding it is the same failure reversed - the reader must see what we read"
 
 
 def test_one_document_filed_early_and_published_later_is_one_event(config, db):

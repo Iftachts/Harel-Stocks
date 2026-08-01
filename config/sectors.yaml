@@ -7,9 +7,17 @@
 #   regulators      Collector ids (see config/sources.yaml) to run for this sector
 #   fr_agencies     federalregister.gov agency slugs to query
 #   fr_terms        Search terms used against the Federal Register API
-#   read_across     How strongly a *sector-level* story propagates to a ticker
-#                   (0.0-1.0 multiplier on the item's base materiality)
-#   peer_read_across  Same, but for a story about a named peer company
+#   read_across     How strongly a *sector-level* story propagates to a ticker:
+#                   the 0.0-1.0 relation multiplier used for this sector's
+#                   SECTOR_REG and SECTOR_THEME links, in place of the global
+#                   default in config/scoring.yaml
+#   peer_read_across  Same, for PEER links - a story about a named competitor
+#
+# Both replace the scoring.yaml `relations` default rather than scaling it, and
+# a per-ticker `overrides.<TICKER>.relation_overrides` beats both. They are on
+# one scale with `relations` on purpose: peer couplings here run 0.40-0.90
+# around a global PEER of 0.65, so 0.85 means "stronger than a normal peer
+# link", not "85% of one".
 # =============================================================================
 
 # Benchmark per sector. A move only means something relative to what the rest of

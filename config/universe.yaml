@@ -53,13 +53,17 @@ tickers:
       UZEDY: ["risperidone extended-release", "TV-46000"]
       COPAXONE: ["glatiramer", "Glatopa"]
       OLANZAPINE_LAI: ["TEV-'749", "olanzapine long-acting", "post-injection delirium"]
-      DUVAKITUG: ["TEV-48574", "anti-TL1A", "Sanofi"]
+      # Sanofi is the PARTNER on this program, not a product of it. A partner's
+      # name here read as "a story about our product": "Sanofi agrees to acquire
+      # Blueprint Medicines" arrived as TEVA, DIRECT, 0.82.
+      DUVAKITUG: ["TEV-48574", "anti-TL1A"]
       ICS_SABA: ["ProAir", "QVAR", "AirDuo"]
     competitor_products:
-      # A rival's readout/approval here moves TEVA
+      # A rival's readout/approval here moves TEVA. "duvakitug" and "Uzedy
+      # competitor" were our OWN program and a placeholder for a rival nobody
+      # named; neither is a rival product.
       ["Emgality", "Nurtec", "Ubrelvy", "Qulipta", "Vyepti", "Ingrezza",
-       "Xenazine", "Uzedy competitor", "Abilify Asimtufii", "tulisokibart",
-       "RVT-3101", "duvakitug"]
+       "Xenazine", "Abilify Asimtufii", "tulisokibart", "RVT-3101"]
     catalysts: [earnings, jpm_healthcare, esmo, aan]
 
   TSEM:
@@ -84,14 +88,17 @@ tickers:
        "semiconductor tariffs", "Section 232 semiconductors"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
+      # Vanguard International Semiconductor is a foundry, i.e. a peer, and it
+      # is listed as one above. A company here outranked its own PEER link.
       ["GlobalFoundries 22FDX", "UMC RF-SOI", "X-FAB SiC", "SkyWater foundry",
-       "Vanguard International Semiconductor", "TSMC specialty", "Samsung Foundry 8LPP"]
+       "TSMC specialty", "Samsung Foundry 8LPP"]
     products:
       SIPHO: ["silicon photonics", "800G", "1.6T optical", "co-packaged optics"]
       RF: ["RF SOI", "5G front end module", "antenna tuner"]
-      # Group keys become DIRECT match terms, so they must be as distinctive as
-      # a brand name. A bare "POWER" matched the word in any document body and
-      # tagged unrelated filings as Tower's own news.
+      # A bare "POWER" matched the word in any document body and tagged
+      # unrelated filings as Tower's own news, and renaming the key fixed only
+      # this one entry. The linker now decides for itself: nothing here
+      # identifies an issuer, so all of it links as a theme, not as Tower.
       POWER_MANAGEMENT: ["BCD", "power management", "GaN", "SiC"]
     catalysts: [earnings, semicon_west, isscc]
 
@@ -150,7 +157,7 @@ tickers:
       # News and MAYA still cover this name.
     peers: [ONTO, KLAC, NVMI, ASMPT, TER]
     peer_names: ["Onto Innovation", "KLA", "Nova", "ASMPT", "Besi",
-                 "Amkor", "ASE Technology", "JCET"]
+                 "Amkor", "ASE Technology", "JCET", "Rudolph Technologies"]
     themes:
       ["advanced packaging inspection", "HBM", "high bandwidth memory",
        "CoWoS", "hybrid bonding", "2.5D packaging", "3D packaging", "panel level packaging",
@@ -161,7 +168,7 @@ tickers:
       GOLDEN_EYE: ["Golden Eye inspection"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["Onto Innovation Dragonfly", "KLA ICOS", "Rudolph Technologies", "Cohu inspection",
+      ["Onto Innovation Dragonfly", "KLA ICOS", "Cohu inspection",
        "Nordson test", "Toray inspection"]
     peer_events_that_matter:
       ["TSMC CoWoS capacity expansion", "SK Hynix HBM capacity", "Micron HBM",
@@ -179,8 +186,10 @@ tickers:
     float_class: large
     ir_feeds:
     peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, LPSN, PEGA]
+    # Amazon Connect is AWS's contact-centre PRODUCT, so it belongs in
+    # competitor_products; the company here is Amazon.
     peer_names: ["Genesys", "Five9", "Verint", "Twilio", "Salesforce", "Zoom",
-                 "8x8", "Amazon Connect", "Microsoft Dynamics", "Pegasystems",
+                 "8x8", "Amazon", "Microsoft Dynamics", "Pegasystems",
                  "Sprinklr", "Zendesk"]
     themes:
       ["contact center as a service", "CCaaS", "agentic AI", "AI agents replacing seats",
@@ -212,7 +221,8 @@ tickers:
     ir_feeds:
       - https://ir.liveperson.com/rss/news-releases.xml
     peers: [NICE, VRNT, TWLO, ZM, EGHT]
-    peer_names: ["NICE", "Verint", "Twilio", "Genesys", "Intercom", "Zendesk", "Ada", "Sierra AI"]
+    peer_names: ["NICE", "Verint", "Twilio", "Genesys", "Intercom", "Zendesk",
+                 "Ada", "Sierra AI", "Kore.ai"]
     themes:
       ["conversational AI", "chatbot", "convertible notes", "debt exchange",
        "going concern", "Nasdaq minimum bid price", "reverse stock split",
@@ -222,8 +232,8 @@ tickers:
       LIVEPERSON_AI: ["LivePerson AI", "conversational AI platform"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["Intercom Fin", "Zendesk AI", "Salesforce Einstein", "Genesys Cloud CX", "Twilio Flex",
-       "Sprinklr Service", "Kore.ai", "Verint Da Vinci"]
+      ["Intercom Fin", "Zendesk AI", "Salesforce Einstein", "Genesys Cloud CX",
+       "Twilio Flex", "Sprinklr Service", "Verint Da Vinci"]
     risk_flags: [dilution_risk, delisting_risk, high_short_interest]
     catalysts: [earnings]
 
@@ -245,7 +255,7 @@ tickers:
     peers: [TBLA, OB, CRTO, MGNI, PUBM, TTD, DV, IAS, APPS, ZETA, GOOGL, META]
     peer_names: ["Taboola", "Outbrain", "Teads", "Criteo", "Magnite", "PubMatic",
                  "The Trade Desk", "DoubleVerify", "Integral Ad Science",
-                 "Digital Turbine", "Zeta Global", "Google", "Microsoft Advertising", "Bing"]
+                 "Digital Turbine", "Zeta Global", "Google", "Microsoft", "Bing"]
     themes:
       ["search advertising", "Microsoft Bing partnership", "publisher revenue share",
        "cookie deprecation", "privacy sandbox", "retail media", "CTV advertising",
@@ -276,7 +286,8 @@ tickers:
     ir_feeds:
     peers: [CTLP, FOUR, PYPL, ADYEN.AS, GPN, TOST, WLN.PA, MARA]
     peer_names: ["Cantaloupe", "Shift4", "PayPal", "Adyen", "Global Payments",
-                 "Toast", "Worldline", "Nuvei", "SumUp", "Verifone", "Ingenico"]
+                 "Toast", "Worldline", "Nuvei", "SumUp", "Verifone", "Ingenico",
+                 "PayRange", "USA Technologies", "Crane Payment Innovations"]
     themes:
       ["unattended payments", "vending payments", "EV charging payments",
        "interchange fees", "card scheme fees", "payment facilitator regulation",
@@ -288,8 +299,8 @@ tickers:
       NAYAX_CORE: ["Nayax Core", "unattended payment terminal"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["Cantaloupe ePort", "PayRange", "USA Technologies", "Ingenico terminal",
-       "Worldline terminal", "Adyen unattended", "Crane Payment Innovations"]
+      ["Cantaloupe ePort", "Ingenico terminal", "Worldline terminal",
+       "Adyen unattended"]
     catalysts: [earnings, nama_show, eu_vending]
 
   ORA:
@@ -305,7 +316,8 @@ tickers:
       - https://investor.ormat.com/rss/pressrelease.aspx
     peers: [NEE, BEP, CEG, VST, RUN, FSLR, ENPH, AES]
     peer_names: ["NextEra Energy", "Brookfield Renewable", "Constellation Energy",
-                 "Vistra", "Calpine", "Enel Green Power", "AES", "Sunrun", "Fluence"]
+                 "Vistra", "Calpine", "Enel Green Power", "AES", "Sunrun", "Fluence",
+                 "Fervo Energy"]
     themes:
       ["geothermal", "power purchase agreement", "PPA award", "energy storage",
        "BESS", "Inflation Reduction Act", "45U", "48E", "ITC", "PTC",
@@ -318,7 +330,7 @@ tickers:
       RECOVERED_ENERGY: ["recovered energy generation"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["Calpine geothermal", "Enel Green Power geothermal", "Fervo Energy", "Eavor Loop",
+      ["Calpine geothermal", "Enel Green Power geothermal", "Eavor Loop",
        "Tesla Megapack", "Fluence storage", "Turboden ORC"]
     geographies: ["Nevada", "Hawaii", "Puna", "Kenya", "Olkaria", "Indonesia", "Guatemala", "Honduras", "New Zealand"]
     catalysts: [earnings, analyst_day, ferc_orders]
@@ -350,8 +362,10 @@ tickers:
       SPECIALTY_PHOSPHATES: ["specialty phosphates", "phosphate fertilizer"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["Nutrien potash", "Mosaic phosphate", "K+S potash", "Uralkali potash", "Belaruskali",
-       "Albemarle bromine", "Lanxess bromine", "OCP phosphate", "Compass Minerals"]
+      # Belaruskali and Compass Minerals are producers, i.e. peers, and both are
+      # listed as such above. A company here outranked its own PEER link.
+      ["Nutrien potash", "Mosaic phosphate", "K+S potash", "Uralkali potash",
+       "Albemarle bromine", "Lanxess bromine", "OCP phosphate"]
     commodity_watch: [potash, bromine, phosphate, sulphur, ammonia]
     catalysts: [earnings, china_potash_contract, indian_potash_contract]
 
@@ -407,7 +421,8 @@ tickers:
       - https://www.tat-technologies.com/category/press-releases/feed/
     peers: [HEI, TDG, AIR, DCO, RTX, HON, GE, SPR]
     peer_names: ["HEICO", "TransDigm", "AAR Corp", "Ducommun", "Collins Aerospace",
-                 "Honeywell Aerospace", "Safran", "StandardAero", "MTU Aero Engines"]
+                 "Honeywell Aerospace", "Safran", "StandardAero", "MTU Aero Engines",
+                 "Triumph Group"]
     themes:
       ["aftermarket MRO", "APU overhaul", "landing gear overhaul", "heat exchanger",
        "PMA parts", "FAA airworthiness directive", "aircraft utilization",
@@ -419,8 +434,10 @@ tickers:
       LANDING_GEAR_MRO: ["landing gear overhaul"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["Honeywell APU", "Pratt Whitney APU", "Liebherr heat exchanger", "Collins Aerospace",
-       "AAR Corp", "HEICO parts", "Triumph Group"]
+      # "AAR Corp. reports fourth quarter results" is a competitor's earnings.
+      # As a rival PRODUCT it scored ~46% over the PEER link it should have had.
+      ["Honeywell APU", "Pratt Whitney APU", "Liebherr heat exchanger",
+       "HEICO parts"]
     catalysts: [earnings, mro_americas, paris_air_show, farnborough]
 
   GILT:
@@ -453,7 +470,9 @@ tickers:
       GILAT_ESA: ["electronically steered antenna", "ESA terminal"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["Hughes JUPITER", "Viasat terminal", "ST Engineering iDirect", "Comtech modem",
+      # ST Engineering iDirect is a ground-segment vendor, i.e. a peer, and is
+      # listed as one above. A company here outranked its own PEER link.
+      ["Hughes JUPITER", "Viasat terminal", "Comtech modem",
        "Kratos OpenSpace", "Starlink terminal", "OneWeb terminal", "Kymeta antenna"]
     catalysts: [earnings, satellite_conference, aix]
 
@@ -469,7 +488,9 @@ tickers:
     ir_feeds:
       - https://investors.allot.com/rss/news-releases.xml
     peers: [RDWR, CHKP, CSCO, NOK, ERIC, JNPR]
-    peer_names: ["Radware", "Check Point", "Sandvine", "Cisco", "Nokia Deepfield",
+    # Deepfield is Nokia's analytics PRODUCT and belongs in competitor_products;
+    # the company here is Nokia.
+    peer_names: ["Radware", "Check Point", "Sandvine", "Cisco", "Nokia",
                  "Ericsson", "Juniper", "Palo Alto Networks", "Netscout"]
     themes:
       ["deep packet inspection", "DPI", "network intelligence", "security as a service",
@@ -602,10 +623,15 @@ tickers:
        "AAT deficiency", "rabies immune globulin", "CMV immune globulin",
        "tender award Israeli Ministry of Health", "distribution agreement"]
     products:
-      KEDRAB: ["rabies immune globulin", "HyperRAB competitor"]
-      CYTOGAM: ["CMV immune globulin", "transplant"]
+      # "Phase 3" and "transplant" are the vocabulary of the whole industry, not
+      # Kamada's products: they put KMDA on "Merck's Phase 3 KEYNOTE-671 trial
+      # met its primary endpoint" at DIRECT 0.82 - ALERT, 75.2 - and on a
+      # pig-to-human heart transplant in Europe. "HyperRAB competitor" named
+      # Grifols' product, which is already in competitor_products below.
+      KEDRAB: ["rabies immune globulin"]
+      CYTOGAM: ["CMV immune globulin"]
       GLASSIA: ["alpha-1 antitrypsin", "Takeda royalty"]
-      INHALED_AAT: ["inhaled alpha-1 antitrypsin", "InnovAATe", "Phase 3"]
+      INHALED_AAT: ["inhaled alpha-1 antitrypsin", "InnovAATe"]
     competitor_products: ["HyperRAB", "Imogam", "Prolastin", "Zemaira", "Aralast"]
     catalysts: [earnings, fda_bla_decision, plasma_industry_data]
 
@@ -659,8 +685,11 @@ tickers:
     ir_feeds:
       - https://investors.brainsway.com/rss/news-releases.xml
     peers: [STIM, CMPS, JNJ, NUVA]
-    peer_names: ["Neuronetics", "NeuroStar", "Magstim", "MagVenture",
-                 "Compass Pathways", "Johnson & Johnson", "Spravato", "Greenbrook TMS"]
+    # NeuroStar is Neuronetics' device and Spravato is J&J's drug; both are
+    # products, and both companies are already named here.
+    peer_names: ["Neuronetics", "Magstim", "MagVenture", "Nexstim",
+                 "Magnus Medical", "Compass Pathways", "Johnson & Johnson",
+                 "Greenbrook TMS"]
     themes:
       ["transcranial magnetic stimulation", "Deep TMS", "FDA 510(k) clearance",
        "De Novo clearance", "CPT code reimbursement", "CMS coverage determination",
@@ -672,8 +701,9 @@ tickers:
       BRAINSWAY_360: ["BrainsWay 360"]
     # A rival's launch, approval or design win here reads across.
     competitor_products:
-      ["NeuroStar", "Neuronetics", "MagVenture", "Magstim", "Nexstim", "SAINT neuromodulation",
-       "Magnus Medical", "Spravato", "esketamine"]
+      # Four rival COMPANIES sat here and outranked their own PEER links:
+      # "Neuronetics reports third quarter revenue" arrived as a rival program.
+      ["NeuroStar", "SAINT neuromodulation", "Spravato", "esketamine"]
     catalysts: [earnings, apa_annual, clinical_tms_society]
 
   KEN:
@@ -727,8 +757,8 @@ tickers:
     peer_names:
       ["CrowdStrike", "Zscaler", "Fortinet", "SentinelOne", "Check Point",
        "Cloudflare", "Okta", "Tenable", "CyberArk", "Rubrik", "Wiz",
-       "Netskope", "Microsoft Defender", "Microsoft Security", "Cisco Security",
-       "Splunk", "Trellix", "Proofpoint"]
+       "Netskope", "Microsoft", "Microsoft Defender", "Microsoft Security",
+       "Cisco Security", "Splunk", "Trellix", "Proofpoint"]
     themes:
       ["platformization", "SASE", "secure access service edge", "zero trust",
        "next-generation firewall", "XDR", "SIEM replacement", "CNAPP",
