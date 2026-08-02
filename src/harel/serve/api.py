@@ -245,7 +245,7 @@ class CollectRunner:
                 "status": "done",
                 "collected": report.collected,
                 "stored": report.stored,
-                "dropped": report.deduped,
+                "dropped": report.dropped_unlinked,
                 "duration_sec": round(report.duration_sec, 1),
                 "sources": report.by_source,
                 "warnings": len(report.warnings),
