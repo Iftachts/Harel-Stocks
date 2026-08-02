@@ -17,6 +17,7 @@ surfaces cannot drift apart.
 
 from __future__ import annotations
 
+import json
 import re
 import statistics
 from datetime import datetime, timedelta, timezone
@@ -1062,6 +1063,51 @@ class Views:
         return {"count": len(out), "tickers": out}
 
     # ----------------------------------------------------------- health ---- #
+    # The hourly task is the cadence, so a pass older than that is already a
+    # miss; two hours of grace before the header starts saying so, and six
+    # before it says it loudly. A terminal that looks the same whether it was
+    # updated eight minutes or eight hours ago is the "silence or blindness"
+    # confusion in its most direct form - the whole page is the symptom.
+    STALE_AFTER_MIN = 120
+    VERY_STALE_AFTER_MIN = 360
+
+    def last_update(self) -> dict[str, Any]:
+        """When the system last collected - for the whole pipeline, not a name.
+
+        `run_log` has recorded this since the first commit and nothing ever read
+        it, so the only time on the terminal was the moment the HTML happened to
+        be rendered. That number moves every time you press F5 and says nothing
+        about the age of what is under it.
+        """
+        run = self.db.last_run("collect")
+        if not run or not run.get("finished_at"):
+            return {"ever": False, "status": "never"}
+        finished = _published_utc({"published_at": run["finished_at"]})
+        age_min = ((datetime.now(timezone.utc) - finished).total_seconds() / 60
+                   if finished else None)
+        status = "ok"
+        if age_min is None:
+            status = "unknown"
+        elif age_min >= self.VERY_STALE_AFTER_MIN:
+            status = "very_stale"
+        elif age_min >= self.STALE_AFTER_MIN:
+            status = "stale"
+        return {
+            "ever": True,
+            "status": status,
+            "finished_at": run["finished_at"],
+            "age_minutes": round(age_min) if age_min is not None else None,
+            "collected": run.get("collected"),
+            "stored": run.get("stored"),
+            "sources": run.get("sources"),
+            # A pass over one source is not "the system updated". Saying which
+            # it was keeps `harel collect --sources prices_yahoo` from reading
+            # as a full refresh.
+            "partial": bool(run.get("sources")
+                            and run["sources"] < len(self.config.sources) / 2),
+            "errors": len(json.loads(run.get("errors_json") or "[]")),
+        }
+
     def health(self) -> dict[str, Any]:
         states = self.db.source_health()
         degraded = [

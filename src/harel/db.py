@@ -399,6 +399,17 @@ class Database:
         )
         self.conn.commit()
 
+    def last_run(self, mode: str = "collect") -> dict[str, Any] | None:
+        """The most recent finished pass. Written since the beginning and read
+        by nothing until now, which is why the terminal could show a clock in
+        its header and still not tell you how old the data under it was."""
+        row = self.conn.execute(
+            "SELECT * FROM run_log WHERE mode = ? AND finished_at IS NOT NULL "
+            "ORDER BY finished_at DESC LIMIT 1",
+            (mode,),
+        ).fetchone()
+        return dict(row) if row else None
+
     # -- reads ------------------------------------------------------------- #
     def find_cluster(self, dedupe_key: str) -> str | None:
         row = self.conn.execute(

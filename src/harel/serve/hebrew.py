@@ -43,6 +43,12 @@ UI = {
     "collect_hint": "מעבר איסוף יחיד — אותו מעבר שרץ בכל שעה. נמשך כ-4 דקות.",
     "collect_reloading": "טוען מחדש",
 
+    "updated": "עודכן",
+    "updated_never": "המערכת מעולם לא אספה — הרץ איסוף",
+    "updated_stale": "הנתונים לא טריים",
+    "updated_partial": "מעבר חלקי",
+    "rendered": "הדף נוצר",
+
     "coverage_warnings": "אזהרות כיסוי",
     "unexplained": "תנועות ללא הסבר",
     "news_alerts": "התראות חדשות (24 שעות)",

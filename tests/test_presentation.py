@@ -236,3 +236,81 @@ def test_the_collect_result_isolates_its_numbers():
     done = _collect_control({"status": "done", "collected": 147, "stored": 75})
     assert "<span class='ltr'>147</span>" in done
     assert "<span class='ltr'>75</span>" in done
+
+
+# ------------------------------------------------------- last update ------ #
+def test_the_header_says_how_old_the_data_is_not_when_the_page_was_built():
+    """The only time in the header was the render clock, which changes on every
+    reload and describes nothing under it. A trader reading a quiet feed has to
+    be able to tell "nothing happened" from "nothing has been fetched since
+    Friday"."""
+    import re
+
+    from harel.serve.terminal import _last_update_he
+
+    fresh = _last_update_he({"ever": True, "status": "ok",
+                             "finished_at": "2026-08-02T07:11:00+00:00"})
+    assert "class='updated ok'" in fresh
+    assert "עודכן" in fresh
+
+    # An age is not enough on its own - the absolute clock is what you check
+    # against a broker screen - but it must be a real timestamp, not the
+    # render time.
+    assert "07:11" in fresh
+
+
+def test_a_stale_terminal_says_so_and_a_very_stale_one_says_it_louder():
+    """The hourly task is the cadence, so a pass older than that is a miss. A
+    page that looks identical whether it was updated eight minutes or eight
+    hours ago is the silence-versus-blindness confusion in its purest form."""
+    from harel.serve.terminal import _last_update_he
+
+    def cls(status, when):
+        out = _last_update_he({"ever": True, "status": status,
+                               "finished_at": when})
+        return out.split("class='updated ", 1)[1].split("'", 1)[0]
+
+    assert cls("ok", "2026-08-02T07:11:00+00:00") == "ok"
+    assert cls("stale", "2026-08-02T01:00:00+00:00") == "warn-age"
+    assert cls("very_stale", "2026-07-30T18:00:00+00:00") == "bad"
+
+
+def test_a_system_that_never_collected_does_not_render_a_blank():
+    from harel.serve.terminal import _last_update_he
+
+    for empty in (None, {"ever": False, "status": "never"}):
+        out = _last_update_he(empty)
+        assert "class='updated bad'" in out
+        assert "מעולם" in out
+
+
+def test_a_single_source_pass_is_not_reported_as_a_full_update(config, db):
+    """`harel collect --sources prices_yahoo` writes a run_log row like any
+    other pass. Reading that as "the system updated" would say the whole feed
+    is current when one collector ran."""
+    from harel.views import Views
+
+    db.log_run(started_at="2026-08-02T07:00:00+00:00",
+               finished_at="2026-08-02T07:00:30+00:00",
+               mode="collect", sources=1, collected=3, stored=1, deduped=0,
+               errors=[])
+    updated = Views(db=db, config=config).last_update()
+
+    assert updated["ever"] is True
+    assert updated["partial"] is True, "a one-source pass is not a full refresh"
+    assert "מעבר חלקי" in _last_update_render(updated)
+
+
+def _last_update_render(updated):
+    from harel.serve.terminal import _last_update_he
+    return _last_update_he(updated)
+
+
+def test_a_full_pass_is_not_labelled_partial(config, db):
+    from harel.views import Views
+
+    db.log_run(started_at="2026-08-02T07:00:00+00:00",
+               finished_at="2026-08-02T07:04:00+00:00",
+               mode="collect", sources=20, collected=150, stored=78, deduped=0,
+               errors=[])
+    assert Views(db=db, config=config).last_update()["partial"] is False

@@ -115,6 +115,12 @@ a:hover {{ text-decoration: underline; }}
   border: 1px solid #4a3800; border-radius: 2px; padding: 2px 10px;
 }}
 #collect:hover {{ background: #241a00; border-color: #ffb000; }}
+/* The age of the data, which is the first thing the header has to answer. */
+.updated {{ font-weight: bold; }}
+.updated.ok {{ color: #4ade80; }}
+.updated.warn-age {{ color: #ffa500; }}
+.updated.bad {{ color: #ff6b6b; }}
+.updated .muted {{ font-weight: normal; }}
 .collect-form {{ margin: 0; display: inline; }}
 .collect {{ font-size: 11px; }}
 .collect.running {{ color: #ffb000; }}
@@ -164,6 +170,34 @@ pre.raw {{
 def _ltr(text: Any) -> str:
     """An escaped LTR island - symbols, numbers, keys, timestamps."""
     return f"<span class='ltr'>{html.escape(str(text))}</span>"
+
+
+def _last_update_he(updated: dict[str, Any] | None) -> str:
+    """When the SYSTEM last collected - the age of everything below it.
+
+    The header used to carry one time, the moment the HTML was rendered, which
+    changes on every reload and describes nothing. A trader reading a quiet feed
+    has to be able to tell "nothing happened" from "nothing has been fetched
+    since Friday", and that is the one distinction this whole page exists to
+    make.
+    """
+    if not updated or not updated.get("ever"):
+        return (f"<span class='updated bad'>"
+                f"{html.escape(he.UI['updated_never'])}</span>")
+
+    status = updated.get("status")
+    cls = {"stale": "warn-age", "very_stale": "bad"}.get(status, "ok")
+    when = updated.get("finished_at")
+    bits = [f"{html.escape(he.UI['updated'])} "
+            f"{_ltr(he.ago(when))}"]
+    # The clock as well as the age: "לפני 3 שעות" is the useful number, but the
+    # absolute time is what you check against your broker screen.
+    bits.append(f"<span class='muted'>{_ltr(he.day_label(when))} "
+                f"{_ltr(str(when)[11:16])}</span>")
+    if updated.get("partial"):
+        bits.append(f"<span class='muted'>"
+                    f"({html.escape(he.UI['updated_partial'])})</span>")
+    return f"<span class='updated {cls}'>" + " &middot; ".join(bits) + "</span>"
 
 
 def _detection_lag_he(lag: int | None) -> str:
@@ -235,7 +269,9 @@ def render_terminal(views: Views, collect: dict[str, Any] | None = None) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     header = (
-        f"<span class='muted'>{_ltr(now)}</span>"
+        # Labelled, because an unlabelled clock in a header reads as the age of
+        # the data and this one is only the moment the HTML was built.
+        f"<span class='muted'>{he.UI['rendered']} {_ltr(now)}</span>"
         f"<span class='muted'>{_ltr(health['db']['items'])} {he.UI['items']} "
         f"&middot; {_ltr(health['db']['alerts_24h'])} {he.UI['alerts_24h']} &middot; "
         f"{_ltr(str(health['sources_available']) + '/' + str(health['sources_configured']))} "
@@ -276,7 +312,8 @@ def render_terminal(views: Views, collect: dict[str, Any] | None = None) -> str:
         parts.append(_section(he.UI["tase_overnight"], brief["tase_overnight"]))
     parts.append(_calendar_section(brief.get("calendar_next_7d") or []))
 
-    return _document(he.UI["brand"], header, "".join(parts), collect)
+    return _document(he.UI["brand"], header, "".join(parts), collect,
+                     views.last_update())
 
 
 def _coverage_warning_he(entry: dict[str, Any]) -> str:
@@ -739,7 +776,7 @@ def render_item(views: Views, uid: str,
                  f"/api/explain/{html.escape(data['uid'][:12])}</a></p></section>")
 
     return _document(f"{data['uid'][:8]} · {he.UI['brand']}", "", "".join(parts),
-                     collect)
+                     collect, views.last_update())
 
 
 # --------------------------------------------------------------------------- #
@@ -806,7 +843,8 @@ def render_sources(views: Views, collect: dict[str, Any] | None = None) -> str:
         "קורא היסטוריה. מיד אחרי איסוף ראשוני הוא נראה גבוה ליום, כי הפריטים "
         "באמת נראו באיחור.</p></section>"
     )
-    return _document(f"{he.UI['nav_sources']} · {he.UI['brand']}", "", body, collect)
+    return _document(f"{he.UI['nav_sources']} · {he.UI['brand']}", "", body, collect,
+                     views.last_update())
 
 
 # How often a page re-renders itself while a pass is running. A pass takes ~260s
@@ -858,7 +896,8 @@ def _collect_control(collect: dict[str, Any] | None) -> str:
 
 # --------------------------------------------------------------------------- #
 def _document(title: str, header_extra: str, body: str,
-              collect: dict[str, Any] | None = None) -> str:
+              collect: dict[str, Any] | None = None,
+              updated: dict[str, Any] | None = None) -> str:
     """The RTL shell. `dir='rtl'` on <html> is what makes every logical CSS
     property in the sheet above resolve the right way round."""
     # Only while a pass is actually running: a page that reloads itself for ever
@@ -872,6 +911,9 @@ def _document(title: str, header_extra: str, body: str,
         f"{refresh}"
         f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>"
         f"<header><h1><a href='/'>{he.UI['brand']}</a></h1>"
+        # Before anything else: how old is what you are looking at. Every other
+        # number on the page is only as good as this one.
+        f"{_last_update_he(updated)}"
         f"{header_extra}"
         f"<nav><a href='/'>{he.UI['nav_terminal']}</a>"
         f"<a href='/sources'>{he.UI['nav_sources']}</a>"
