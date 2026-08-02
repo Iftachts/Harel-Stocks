@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS run_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT, finished_at TEXT,
     mode       TEXT, sources INTEGER,
-    collected  INTEGER, stored  INTEGER, deduped INTEGER,
+    collected  INTEGER, stored  INTEGER, dropped_unlinked INTEGER,
     errors_json TEXT
 );
 """
@@ -167,6 +167,14 @@ class Database:
         self.conn = sqlite3.connect(str(self.path), check_same_thread=False,
                                     timeout=30.0)
         self.conn.row_factory = sqlite3.Row
+        # SQLite ignores a declared foreign key unless this is switched on, and
+        # it is off by default - so `item_tickers`' ON DELETE CASCADE, written
+        # since the first commit, has never once fired. `rescore` deletes items
+        # directly for its two purges, and 174 link rows were left pointing at
+        # items that no longer existed. Per-connection, not stored in the file,
+        # so it has to be set here rather than in SCHEMA; and it is a no-op
+        # inside a transaction, hence before `executescript`.
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
         self.conn.executescript(TRIGGERS)
         self._migrate()
@@ -197,6 +205,35 @@ class Database:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
         self._migrate_calendar_key()
+        self._rename_deduped_column()
+        self._sweep_orphan_links()
+
+    def _rename_deduped_column(self) -> None:
+        """`run_log.deduped` never counted a duplicate.
+
+        It counts items dropped for touching nothing in the universe, which is a
+        different fact with a different meaning for the collect/keep ratio. The
+        column is renamed rather than shadowed by a second one, because two
+        columns where one is always NULL is how the next reader gets it wrong.
+        """
+        cols = {r["name"] for r in
+                self.conn.execute("PRAGMA table_info(run_log)").fetchall()}
+        if "deduped" in cols and "dropped_unlinked" not in cols:
+            self.conn.execute(
+                "ALTER TABLE run_log RENAME COLUMN deduped TO dropped_unlinked")
+
+    def _sweep_orphan_links(self) -> int:
+        """Clear links left behind while the cascade was inert.
+
+        Turning `foreign_keys` on protects every deletion from here, but SQLite
+        does not go back and validate what is already stored - so the rows the
+        cascade should have taken when their item was purged simply stay. They
+        are invisible in the feed, which joins through `items`, and any count
+        over `item_tickers` is wrong by exactly that much.
+        """
+        cur = self.conn.execute(
+            "DELETE FROM item_tickers WHERE uid NOT IN (SELECT uid FROM items)")
+        return cur.rowcount or 0
 
     def _migrate_calendar_key(self) -> None:
         """Re-key `calendar` on the source rather than on the label.
@@ -456,11 +493,11 @@ class Database:
     def log_run(self, **fields: Any) -> None:
         self.conn.execute(
             """INSERT INTO run_log (started_at, finished_at, mode, sources,
-                                    collected, stored, deduped, errors_json)
+                                    collected, stored, dropped_unlinked, errors_json)
                VALUES (?,?,?,?,?,?,?,?)""",
             (fields.get("started_at"), fields.get("finished_at"), fields.get("mode"),
              fields.get("sources", 0), fields.get("collected", 0),
-             fields.get("stored", 0), fields.get("deduped", 0),
+             fields.get("stored", 0), fields.get("dropped_unlinked", 0),
              json.dumps(fields.get("errors", []), ensure_ascii=False, default=str)),
         )
         self.conn.commit()

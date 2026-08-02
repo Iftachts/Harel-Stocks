@@ -1667,3 +1667,92 @@ def test_the_sweep_reaches_dates_older_than_the_rescore_window(config, db):
 
     assert result["calendar_purged"] == 1
     assert _calendar_rows(db) == []
+
+
+# --------------------------------------------------------------------------- #
+# The run report has to describe the run.
+# --------------------------------------------------------------------------- #
+def test_a_declared_cascade_is_actually_enforced(config, db):
+    """`item_tickers` has declared ON DELETE CASCADE since the first commit, and
+    SQLite ignores a foreign key unless `PRAGMA foreign_keys` is on - it is off
+    by default. `rescore` deletes items directly for its two purges, so 174 link
+    rows were left pointing at items that no longer existed."""
+    from datetime import datetime, timezone
+
+    from harel.models import Link, RawItem, ScoredItem
+
+    assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+    raw = RawItem(source="federal_register", source_kind="federal_register",
+                  external_id="fr:cascade", title="[FR] Something", url="http://x",
+                  published_at=datetime.now(timezone.utc))
+    db.upsert_item(ScoredItem(raw=raw,
+                              links=[Link(ticker="TATT", relation="SECTOR_REG",
+                                          confidence=0.6, why="sector")],
+                              events=[], score=20.0, per_ticker_score={"TATT": 20.0},
+                              tier="NOISE", reasons=[]), "k", "c")
+    db.conn.commit()
+    assert db.conn.execute("SELECT COUNT(*) FROM item_tickers").fetchone()[0] == 1
+
+    db.conn.execute("DELETE FROM items WHERE uid = ?", (raw.uid,))
+    db.conn.commit()
+    assert db.conn.execute("SELECT COUNT(*) FROM item_tickers").fetchone()[0] == 0, \
+        "the cascade must take the links with the item"
+
+
+def test_links_orphaned_while_the_cascade_was_inert_are_swept(config, tmp_path):
+    """Turning the pragma on protects every deletion from here, but SQLite does
+    not go back and validate what is already stored."""
+    import sqlite3
+
+    from harel.db import Database
+
+    path = tmp_path / "orphans.db"
+    Database(path).close()
+    # Write an orphan the way the old behaviour would have left one: with the
+    # pragma off, so the insert is not rejected.
+    raw_conn = sqlite3.connect(path)
+    raw_conn.execute("INSERT INTO item_tickers (uid,ticker,relation,confidence) "
+                     "VALUES ('gone','TEVA','DIRECT',0.9)")
+    raw_conn.commit()
+    raw_conn.close()
+
+    db = Database(path)          # migration sweeps on open
+    assert db.conn.execute("SELECT COUNT(*) FROM item_tickers").fetchone()[0] == 0
+    db.close()
+
+
+def test_the_run_report_counts_what_was_new(config, db):
+    """`upsert_item` has always returned whether the row was new and the caller
+    always threw it away, so `new` was serialised into every run report and
+    every run_log row as a permanent zero."""
+    client = FakeHttpClient(ROUTES)
+    first = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                     client=client).run(only=SOURCES)
+    assert first.new > 0, "a first pass over an empty database must find new items"
+    # NOT equal to `stored`, and the gap is the point: one article reaches us
+    # from several per-ticker queries in the same pass, so `stored` counts
+    # upsert operations while `new` counts distinct items first seen. On the
+    # fixture corpus that is 75 items behind 256 stores.
+    assert first.new <= first.stored
+    distinct = db.conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+    assert first.new == distinct, "every row in an empty database was new"
+
+    second = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient(ROUTES)).run(only=SOURCES)
+    assert second.stored > 0, "the same items are still stored"
+    assert second.new == 0, "but nothing about them is new the second time"
+
+
+def test_the_drop_counter_does_not_claim_to_be_deduplication(config, db):
+    """It counts items that touched nothing in the universe. The CLI printed the
+    honest wording all along while the field, the dict key and the run_log
+    column all said `deduped`, which never happened."""
+    report = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient(ROUTES)).run(only=SOURCES)
+
+    assert "dropped_unlinked" in report.to_dict()
+    assert "deduped" not in report.to_dict()
+    cols = {r["name"] for r in db.conn.execute("PRAGMA table_info(run_log)")}
+    assert "dropped_unlinked" in cols and "deduped" not in cols
+    assert report.collected == report.stored + report.dropped_unlinked

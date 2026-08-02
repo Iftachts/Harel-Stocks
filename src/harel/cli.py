@@ -259,9 +259,12 @@ def cmd_collect(args) -> int:
     if _emit(args, report.to_dict()):
         return 0
 
+    # "stored 70" and "70 stored, 0 new" are different passes, and only the
+    # second one tells you whether anything actually arrived.
     print(f"{C.AMBER}collected{C.RESET} {report.collected}  "
-          f"{C.AMBER}stored{C.RESET} {report.stored}  "
-          f"{C.GREY}dropped (no universe link){C.RESET} {report.deduped}  "
+          f"{C.AMBER}stored{C.RESET} {report.stored} "
+          f"{C.GREY}({report.new} new){C.RESET}  "
+          f"{C.GREY}dropped (no universe link){C.RESET} {report.dropped_unlinked}  "
           f"in {report.duration_sec:.1f}s")
     for source, count in sorted(report.by_source.items(), key=lambda kv: -kv[1]):
         print(f"  {source:<40} {count}")

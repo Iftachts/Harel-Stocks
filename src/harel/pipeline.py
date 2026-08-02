@@ -37,8 +37,16 @@ class RunReport:
     finished_at: datetime | None = None
     collected: int = 0
     stored: int = 0
+    # Stored for the first time, as opposed to refreshed. `upsert_item` has
+    # always returned this and the caller has always thrown it away, so the
+    # field was serialised into every run report and every run_log row as a
+    # permanent zero.
     new: int = 0
-    deduped: int = 0
+    # NOT deduplication - it counts items dropped because nothing in the
+    # universe was touched. The CLI has printed the honest wording all along
+    # ("dropped, no universe link") while the field, the dict key and the
+    # run_log column all said something that never happened.
+    dropped_unlinked: int = 0
     by_source: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -57,7 +65,7 @@ class RunReport:
             "collected": self.collected,
             "stored": self.stored,
             "new": self.new,
-            "deduped": self.deduped,
+            "dropped_unlinked": self.dropped_unlinked,
             "by_source": self.by_source,
             "warnings": self.warnings,
             "errors": self.errors,
@@ -170,7 +178,7 @@ class Pipeline:
             finished_at=report.finished_at.isoformat(),
             mode="collect", sources=len(collectors),
             collected=report.collected, stored=report.stored,
-            deduped=report.deduped, errors=report.errors[:50],
+            dropped_unlinked=report.dropped_unlinked, errors=report.errors[:50],
         )
         self.db.checkpoint()
         return report
@@ -340,7 +348,7 @@ class Pipeline:
             # Nothing in our universe is touched - correct behaviour is to drop
             # it, not to store noise. Counted so `harel doctor` can show the
             # collect/keep ratio per source.
-            report.deduped += 1
+            report.dropped_unlinked += 1
             return False
 
         dedupe_key, cluster_id = clusterer.assign(item)
@@ -352,7 +360,8 @@ class Pipeline:
                              for ln in links if ln.ticker in prices},
             cluster_max_trust=cluster_trust,
         )
-        self.db.upsert_item(scored, dedupe_key, cluster_id)
+        if self.db.upsert_item(scored, dedupe_key, cluster_id):
+            report.new += 1
         self._extract_calendar(scored)
         return True
 
