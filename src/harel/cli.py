@@ -770,7 +770,7 @@ def _feed_probe_class():
     release and start describing a pipeline that does not exist. Defined in a
     function so `harel feed` does not import feedparser to print a list.
     """
-    from .collect.rss import MAX_BODY_LOOKUPS_PER_RUN, RssCollector, _announces_results
+    from .collect.rss import RssCollector, _announces_results
 
     class _FeedProbe(RssCollector):
         def __init__(self, source, ctx) -> None:
@@ -789,7 +789,7 @@ def _feed_probe_class():
             row: dict[str, Any] = {
                 "title": (entry.get("title") or "").strip() or "(untitled)",
                 "item": None, "error": None, "body_fetched": False,
-                "body_ok": False, "body_starved": False,
+                "body_starved": False,
             }
             # Appended BEFORE the call, so an entry that raises is still counted.
             # `_read_feed` catches that exception and moves on; a record it never
@@ -812,7 +812,9 @@ def _feed_probe_class():
             if row is None:
                 return
             row["body_fetched"] = self._body_lookups > before
-            row["body_ok"] = row["body_fetched"] and bool(item.body)
+            # Wanted the page and never asked for it: the shared per-run budget
+            # was already spent. It is spent in universe order, so this falls on
+            # whichever name is last (CGEN), and nothing else would ever say so.
             row["body_starved"] = wanted and not row["body_fetched"]
 
     return _FeedProbe
@@ -893,7 +895,7 @@ def _probe_feed(probe, target, *, linker, hours: float, since: datetime,
         item = row["item"]
         if item is None:
             records.append({
-                "title": row["title"], "outcome": "dropped",
+                "title": row["title"], "emitted": False, "outcome": "dropped",
                 "reason": (f"unreadable entry ({row['error']})" if row["error"]
                            else "no usable headline, and the page behind it gave none"),
             })
@@ -903,7 +905,13 @@ def _probe_feed(probe, target, *, linker, hours: float, since: datetime,
             "title": item.title, "url": item.url,
             "published_at": item.published_at.isoformat(),
             "age": _ago(item.published_at.isoformat()),
-            "body_fetched": row["body_fetched"], "outcome": "dropped", "reason": "",
+            "body_fetched": row["body_fetched"],
+            # Whether the COLLECTOR yielded it, kept apart from what the pipeline
+            # then did with it: a record can be emitted and still end up dropped,
+            # which is the whole difference between "the feed works" and "the
+            # feed feeds us".
+            "emitted": any(it is item for it in emitted),
+            "outcome": "dropped", "reason": "",
         }
         # Asked of dropped entries too, and deliberately: an entry that names a
         # future reporting date and is dropped anyway IS the ORA incident, and it
@@ -911,7 +919,7 @@ def _probe_feed(probe, target, *, linker, hours: float, since: datetime,
         dated = _earnings_date(item)
         record["earnings_date"] = dated[0] if dated else None
 
-        if not any(it is item for it in emitted):
+        if not record["emitted"]:
             record["reason"] = _drop_reason(
                 probe, item, issuer=issuer, seeds=seeds, relation=relation,
                 hours=hours, since=since, calendar_since=calendar_since)
@@ -957,7 +965,10 @@ def _probe_feed(probe, target, *, linker, hours: float, since: datetime,
         records.append(record)
 
     fetch_ok = status is not None and status < 400
-    if not fetch_ok:
+    # `error` can also be a collector that raised after a perfectly good fetch.
+    # `fetch_ok` stays honest about the fetch; the verdict does not, because a
+    # feed whose entries blew up the collector is not a feed that is working.
+    if not fetch_ok or error:
         verdict = "DEAD"
     elif not rows:
         verdict = "EMPTY"
@@ -1099,7 +1110,7 @@ def _print_verify_feeds(payload: dict[str, Any], show_records: bool = False) -> 
         colour = _VERDICT_COLOR.get(feed["verdict"], C.GREY)
         print(f"  {colour}{feed['verdict']:<5}{C.RESET} "
               f"{_feed_label(feed)[:20]:<21}{_verify_chain(feed)}")
-        if not feed["fetch_ok"] and feed["fetch_error"]:
+        if feed["fetch_error"]:
             print(f"        {C.RED}{feed['fetch_error'][:110]}{C.RESET}")
         if feed["verdict"] != "OK":
             print(f"        {C.GREY}{feed['url'][:120]}{C.RESET}")
@@ -1133,12 +1144,16 @@ def _print_verify_feeds(payload: dict[str, Any], show_records: bool = False) -> 
     if lost:
         print(f"\n{C.RED}{C.BOLD}DATES READ AND THEN DISCARDED{C.RESET}")
         for entry in lost:
-            print(f"  {C.RED}{entry['date']}{C.RESET}  {entry['feed']:<14}"
-                  f"{entry['title'][:70]}")
-            print(f"              {C.GREY}{entry['reason'][:110]}{C.RESET}")
+            # Padded AND truncated: a Google News query label ("KEN peer
+            # companies") is wider than an IR one and ran straight into the
+            # headline column.
+            print(f"  {C.RED}{entry['date']}{C.RESET}  {entry['feed'][:20]:<21}"
+                  f"{entry['title'][:66]}")
+            print(f"  {' ' * 12}{C.GREY}{entry['reason'][:110]}{C.RESET}")
 
+    print()
     if totals["dead"] or totals["empty"]:
-        print(f"\n{C.GREY}DEAD/EMPTY: fix the URL in config/universe.yaml "
+        print(f"{C.GREY}DEAD/EMPTY: fix the URL in config/universe.yaml "
               f"(ir_feeds) or config/sources.yaml (feeds). Google News still "
               f"covers any name whose IR feed is dead, at lower trust.{C.RESET}")
     if totals["mute"]:
@@ -1149,18 +1164,25 @@ def _print_verify_feeds(payload: dict[str, Any], show_records: bool = False) -> 
               f"{', '.join(payload['sources_off'])}{C.RESET}")
 
 
+# Last path segments that name no feed in particular. fda_press publishes two
+# feeds ending in `/rss.xml`, so the segment before it is the only one that tells
+# press-releases from medwatch.
+_GENERIC_FEED_SEGMENTS = {"", "rss.xml", "rss", "feed", "feed.xml", "index.xml"}
+
+
 def _feed_label(feed: dict[str, Any]) -> str:
     """A column-width name for a feed.
 
-    Per-ticker feeds already have one ("ORA IR"). A static feed's label IS its
-    URL, and two of them under one source can differ only in the last path
-    segment (fda_press: .../press-releases/rss.xml and .../medwatch/rss.xml), so
-    a truncated URL would print two identical rows.
+    A per-ticker feed already has one ("ORA IR"). A static feed's label IS its
+    URL, and a URL cut to twenty characters is either the same twenty for both
+    of a source's feeds or twenty characters of hostname.
     """
     if feed["label"] != feed["url"]:
         return feed["label"]
-    tail = feed["url"].split("://")[-1].split("/")
-    return "/".join(tail[-2:])[-20:] if len(tail) > 1 else tail[0][-20:]
+    parts = [p for p in feed["url"].split("://")[-1].split("/") if p]
+    while len(parts) > 1 and parts[-1].lower() in _GENERIC_FEED_SEGMENTS:
+        parts.pop()
+    return parts[-1][:20] if parts else feed["url"][:20]
 
 
 def _verify_chain(feed: dict[str, Any]) -> str:

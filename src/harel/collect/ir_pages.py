@@ -145,9 +145,19 @@ class IrPageCollector(Collector):
         if not rows:
             self.warn(f"{label}: no dated rows found on {url} - the page layout "
                       f"has changed and this name now has no first-party date")
+            # Also recorded against the SOURCE, not only the page, so it shows in
+            # `harel doctor` and not just in one run's warning list. The pipeline
+            # honours an error a collector recorded during the pass it just ran
+            # (see its `recorded` check), which is what keeps a broken parser
+            # from reading as healthy-and-quiet.
+            self.save_state(last_error=f"{label}: {url} parsed into no rows")
         else:
             before = int(prev.get("items_last_run") or 0)
             if before and len(rows) < before * COLLAPSE_RATIO:
+                # Not an error, because a company is allowed to prune its own
+                # archive. A halving is still the shape a re-theme takes - forty
+                # rows down to the two that happen to still match - and that
+                # reads as a quiet quarter to anyone not counting.
                 self.warn(f"{label}: {url} parsed {len(rows)} rows, down from "
                           f"{before} - the layout has probably changed")
 
@@ -191,7 +201,7 @@ class IrPageCollector(Collector):
                 item.meta["calendar_backfill"] = True
             yield item
 
-    def _row_to_item(self, row: "_Row", page_url: str, ticker: str,
+    def _row_to_item(self, row: _Row, page_url: str, ticker: str,
                      now: datetime) -> RawItem | None:
         if not row.title:
             return None
@@ -267,11 +277,13 @@ class IrPageCollector(Collector):
 # --------------------------------------------------------------------------- #
 # Parsing. Deliberately structure-blind: no CSS class or selector appears here.
 #
-# The first draft keyed on `li.item-news` and `div.prev-events-card`, which is a
-# parser that works on today's markup and reports a quiet quarter on tomorrow's.
-# What both pages actually have in common is not their classes - it is that each
-# entry is a date sitting next to a headline. So: find the dates, and pair each
-# with the nearest block of text that reads like a headline.
+# The obvious parser keys on `li.item-news` and `div.prev-events-card`, which is
+# what those two pages call their rows on 2026-08-02 and nothing either company
+# has promised to keep calling them. What the two layouts genuinely have in
+# common is not their classes - it is that an entry is a date sitting next to a
+# headline. So: find the dates, and pair each with the nearest block of text
+# that reads like a headline. A re-theme then still parses; a rename of the
+# markup does not quietly become a quarter with no announcements.
 # --------------------------------------------------------------------------- #
 _STRIPPED_TAGS = re.compile(
     r"(?is)<(script|style|noscript|nav|header|footer|select|option|svg)[^>]*>.*?</\1>")

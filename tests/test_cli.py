@@ -99,6 +99,31 @@ def test_a_live_feed_is_reported_by_what_reaches_the_calendar(monkeypatch, capsy
     assert code == 0
 
 
+def test_the_report_agrees_with_the_collector_it_claims_to_describe(
+        monkeypatch, capsys, config, db):
+    """The design rests on driving the real RssCollector rather than a second
+    copy of its rules, so assert exactly that: the entries the report calls
+    emitted are the ones a collection pass yields from the same feed. A parallel
+    reimplementation would pass every other test in this file and still be wrong
+    about the only thing this command is for."""
+    from harel.collect.base import CollectorContext
+    from harel.collect.rss import RssCollector
+
+    routes, _ = _issuer_routes()
+    payload, _, _ = _verify(monkeypatch, capsys, routes, "--only", "ormat")
+
+    collector = RssCollector(
+        config.sources["company_ir_rss"],
+        CollectorContext(config=config, client=FakeHttpClient(routes), db=db,
+                         lookback_hours=72.0),
+    )
+    collected = {item.title for item in collector.collect()
+                 if "ORA" in item.seed_tickers}
+    reported = {r["title"] for r in _feed(payload, "ORA IR")["records"]
+                if r["emitted"]}
+    assert reported == collected != set()
+
+
 def test_a_date_that_is_read_and_then_thrown_away_is_reported_loudly(
         monkeypatch, capsys):
     """The regression alarm. Push the announcement past the issuer back-read and

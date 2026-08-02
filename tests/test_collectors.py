@@ -1521,6 +1521,10 @@ def test_a_relayout_is_reported_and_not_read_as_a_quiet_quarter(config, db):
 
     assert [i.seed_tickers[0] for i in items] == ["AUDC"], "the other page still ran"
     assert any("no dated rows" in w for w in collector.warnings), collector.warnings
+    # And on the source itself, so it survives the run report into `harel
+    # doctor`. A parser that no longer understands its page must not read as
+    # healthy-and-quiet on the health screen.
+    assert "no rows" in db.get_source_state("company_ir_pages")["last_error"]
 
 
 def test_a_page_that_loses_most_of_its_rows_is_reported_too(config, db):
