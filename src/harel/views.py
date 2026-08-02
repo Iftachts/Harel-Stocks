@@ -627,6 +627,11 @@ class Views:
     # nothing in a news feed was ever going to raise it.
     UNEXPLAINED_RELATIVE_PCT = 3.0
 
+    # Below this, the name itself barely moved and the divergence belongs to the
+    # sector. Both are worth raising; describing the second as "an unusual move"
+    # makes a 0.6% stock sound like it jumped.
+    DECOUPLING_MAX_ABS_PCT = 1.5
+
     # How much of a sector has to move the same way before a sector-wide
     # document is allowed to be the reason. Two names is not a sector.
     SECTOR_CORROBORATION_MIN_NAMES = 3
@@ -700,16 +705,36 @@ class Views:
             if magnitude < self.UNEXPLAINED_RELATIVE_PCT:
                 continue
 
+            # Two different things reach this list and calling both "an unusual
+            # move" misdescribes one of them. TATT fell 4.6% - the stock moved.
+            # CGEN rose 0.6% while XBI fell 2.9% - the stock did almost nothing
+            # and the divergence is its sector's, which is worth raising for the
+            # opposite reason: not "what happened to it" but "why did it not
+            # follow". Same alert, different question, so it has to say which.
+            decoupled = abs(mover["change_pct"]) < self.DECOUPLING_MAX_ABS_PCT
+            kind = ("sector_decoupling" if decoupled
+                    else "unexplained_relative_move")
+
             bits = [f"{mover['ticker']} {mover['change_pct']:+.1f}%"]
             if relative is not None:
-                bits.append(f"{relative:+.1f}pp vs {mover['benchmark']} "
-                            f"({mover['benchmark_pct']:+.1f}%)")
+                if decoupled:
+                    # Lead with what the sector did, because that is the moving
+                    # part: "+0.6% while XBI fell 2.9%" reads as the fact it is.
+                    bits = [f"{mover['ticker']} {mover['change_pct']:+.1f}% "
+                            f"while {mover['benchmark']} "
+                            f"{mover['benchmark_pct']:+.1f}%",
+                            f"gap {relative:+.1f}pp"]
+                else:
+                    bits.append(f"{relative:+.1f}pp vs {mover['benchmark']} "
+                                f"({mover['benchmark_pct']:+.1f}%)")
             if mover.get("volume_multiple"):
                 bits.append(f"{mover['volume_multiple']:.1f}x volume")
             out.append({
                 "ticker": mover["ticker"],
-                "kind": "unexplained_relative_move",
-                "headline": "UNEXPLAINED RELATIVE MOVE - " + " | ".join(bits),
+                "kind": kind,
+                "decoupled": decoupled,
+                "headline": ("SECTOR DECOUPLING - " if decoupled
+                             else "UNEXPLAINED RELATIVE MOVE - ") + " | ".join(bits),
                 "change_pct": mover["change_pct"],
                 "relative_pct": relative,
                 # Named the benchmark in the English sentence but never returned

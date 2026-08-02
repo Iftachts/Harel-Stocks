@@ -23,7 +23,7 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import get_config
@@ -162,7 +162,16 @@ def _build_parser() -> argparse.ArgumentParser:
     pm.set_defaults(handler=cmd_probe_maya)
 
     vf = sub.add_parser("verify-feeds",
-                        help="check every configured RSS feed and report dead ones")
+                        help="per feed: is it alive, and is it doing its job")
+    vf.add_argument("--hours", type=float, default=72.0,
+                    help="news window to judge entries against (collect uses 72)")
+    vf.add_argument("--only", default=None,
+                    help="substring of a feed label or URL, e.g. ORA")
+    vf.add_argument("--queries", action="store_true",
+                    help="also check the per-ticker Google News searches "
+                         "(~70 extra requests)")
+    vf.add_argument("--reasons", action="store_true",
+                    help="one line per discarded record, not one per reason")
     vf.set_defaults(handler=cmd_verify_feeds)
 
     return p

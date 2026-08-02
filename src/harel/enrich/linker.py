@@ -427,6 +427,34 @@ class EntityLinker:
             key=lambda link: (-RELATION_RANK.get(link.relation, 0), -link.confidence),
         )
 
+    @staticmethod
+    def _agency_slugs(item: RawItem) -> set[str]:
+        """The regulators a document came from, as Federal Register slugs.
+
+        `meta.agency_slugs` is what the collector records now; older rows carry
+        only `meta.agencies`, the display names, and the slug is that name
+        lowercased with spaces hyphenated - "Homeland Security Department" ->
+        "homeland-security-department". Derived rather than re-collected so the
+        back catalogue is judged by the same rule.
+        """
+        meta = item.meta or {}
+        slugs = {str(s).lower() for s in (meta.get("agency_slugs") or []) if s}
+        for name in meta.get("agencies") or []:
+            if name:
+                slugs.add("-".join(str(name).lower().split()))
+        return slugs
+
+    def _agency_watches(self, item: RawItem, sector) -> bool:
+        """Does this document come from a regulator this sector actually watches?
+
+        A sector that names no agency is unchanged - the gate only applies where
+        the config has an opinion to enforce.
+        """
+        watched = {str(a).lower() for a in (sector.fr_agencies or [])}
+        if not watched:
+            return True
+        return bool(watched & self._agency_slugs(item))
+
     def _link_sector_regulatory(self, item: RawItem, offer) -> None:
         """A regulator document that names a sector term touches every ticker in
         that sector, even when no company is named."""
@@ -446,6 +474,17 @@ class EntityLinker:
                 continue
             matched = [term for term in sector.fr_terms if term.lower() in text]
             if not matched:
+                continue
+            if not self._agency_watches(item, sector):
+                # A term can be a term of art in one domain and boilerplate in
+                # another. Every SEC self-regulatory filing is headed "Notice of
+                # Filing, and Order Granting Accelerated Approval of a Proposed
+                # Rule Change" - so "accelerated approval", an FDA pathway and a
+                # biotech_clinical term, matched a Cboe BZX exchange-rule notice
+                # and offered it as regulatory context for Compugen and Oramed.
+                # The sector already names the regulator it watches; believing
+                # it costs nothing and the string test alone cannot tell an FDA
+                # approval from an exchange one.
                 continue
             for ticker in tickers:
                 offer(ticker, "SECTOR_REG", 0.62,

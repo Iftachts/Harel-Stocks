@@ -1503,3 +1503,70 @@ def test_a_peers_own_price_recap_is_not_commentary_on_our_move(ran):
             assert (item.get("relation") or "") in ("DIRECT", "SUBSIDIARY"), (
                 f"{item['title'][:60]!r} is a {item.get('relation')} story, "
                 f"not commentary on {mover['ticker']}'s move")
+
+
+def test_a_name_that_barely_moved_is_reported_as_decoupling_not_as_a_move(config, db):
+    """CGEN rose 0.6% while XBI fell 2.9%. The alert is right, the wording was
+    not: "תנועה חריגה" for a 0.6% stock reads as though it jumped, when the
+    moving part was its sector leaving without it. Different question - not
+    "what happened to it" but "why did it not follow" - so it says which."""
+    from harel.models import PriceSnapshot
+    from harel.serve.terminal import _unexplained_section
+
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="CGEN", asof=now, last=2.35, prev_close=2.335,
+                                change_pct=0.64, volume_multiple=1.42,
+                                session="closed", provider="yahoo"))
+    db.save_price(PriceSnapshot(ticker="XBI", asof=now, last=147.0, prev_close=151.5,
+                                change_pct=-2.94, session="closed", provider="yahoo"))
+    db.conn.commit()
+
+    alerts = Views(db=db, config=config).whats_moving(min_abs_pct=2.5)["unexplained"]
+    cgen = next(a for a in alerts if a["ticker"] == "CGEN")
+    assert cgen["kind"] == "sector_decoupling"
+    assert cgen["decoupled"] is True
+
+    rendered = _unexplained_section([cgen])
+    assert "התנתקות" in rendered
+    assert "תנועה חריגה" not in rendered
+
+
+def test_a_stock_that_really_moved_keeps_the_move_wording(config, db):
+    from harel.models import PriceSnapshot
+    from harel.serve.terminal import _unexplained_section
+
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(ticker="TATT", asof=now, last=30.0, prev_close=31.4,
+                                change_pct=-4.6, volume_multiple=1.5,
+                                session="closed", provider="yahoo"))
+    db.save_price(PriceSnapshot(ticker="ITA", asof=now, last=100.6, prev_close=100.0,
+                                change_pct=0.6, session="closed", provider="yahoo"))
+    db.conn.commit()
+
+    alerts = Views(db=db, config=config).whats_moving(min_abs_pct=2.5)["unexplained"]
+    tatt = next(a for a in alerts if a["ticker"] == "TATT")
+    assert tatt["kind"] == "unexplained_relative_move"
+    assert "תנועה חריגה" in _unexplained_section([tatt])
+
+
+def test_the_closing_print_is_labelled_as_the_close_not_as_the_last_trade(config, db):
+    """The movers board is computed from the session close, so calling it "the
+    last trade" is false of the tape: the panel said "עסקה אחרונה 16:00 ET"
+    while the real last print was 19:34. Both belong on screen, apart."""
+    from harel.models import PriceSnapshot
+    from harel.serve.terminal import _quote_label
+
+    now = datetime.now(timezone.utc)
+    db.save_price(PriceSnapshot(
+        ticker="CGEN", asof=now, last=2.35, prev_close=2.335, change_pct=0.64,
+        market_time=datetime(2026, 7, 31, 20, 0, tzinfo=timezone.utc),
+        extended_last=2.38, extended_change_pct=1.28,
+        extended_time=datetime(2026, 7, 31, 23, 49, tzinfo=timezone.utc),
+        session="closed", provider="yahoo"))
+    db.conn.commit()
+
+    label = _quote_label(Views(db=db, config=config).quote("CGEN"))
+    assert "סגירת הסשן" in label
+    assert "16:00 ET" in label
+    # The real last print, on its own line, not blended into the reference price.
+    assert "מסחר מאוחר" in label and "19:49 ET" in label

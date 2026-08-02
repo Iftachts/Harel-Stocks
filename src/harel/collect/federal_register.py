@@ -303,6 +303,12 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
     agency_names = doc.get("agency_names") or [
         a.get("name") for a in (doc.get("agencies") or []) if isinstance(a, dict)
     ]
+    # The slug, not just the display name. `sectors.yaml` declares the agencies
+    # a sector watches as slugs, and the linker now refuses a sector-regulatory
+    # link from a regulator the sector does not watch - so the comparison needs
+    # the same vocabulary on both sides rather than a name normalised into one.
+    agency_slugs = [a.get("slug") for a in (doc.get("agencies") or [])
+                    if isinstance(a, dict) and a.get("slug")]
 
     prefix = "[FR-EARLY]" if public_inspection else "[FR]"
     return collector.make_item(
@@ -337,6 +343,7 @@ def _doc_to_item(collector: Collector, doc: dict, tickers: list[str],
             "doc_type": doc.get("type"),
             "action": doc.get("action"),
             "agencies": agency_names,
+            "agency_slugs": agency_slugs,
             # PI calls the same thing `docket_numbers`.
             "docket_ids": doc.get("docket_ids") or doc.get("docket_numbers"),
             "topics": doc.get("topics"),

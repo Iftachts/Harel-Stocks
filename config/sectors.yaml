@@ -131,8 +131,13 @@ sectors:
   semiconductors_foundry:
     label: Semiconductors - foundry
     regulators: [federal_register, federal_register_public_inspection]
+    # DHS runs the UFLPA entity list, which is an import restriction on the
+    # chip supply chain and squarely this sector's business - it just is not
+    # filed by Commerce. Listed because the linker now refuses a sector
+    # match from an unwatched agency, and this one is genuinely watched.
     fr_agencies: [industry-and-security-bureau, commerce-department,
-                  trade-representative-office-of-united-states]
+                  trade-representative-office-of-united-states,
+                  homeland-security-department]
     fr_terms:
       ["semiconductor export controls", "entity list", "advanced computing",
        "foreign direct product rule", "Section 232 semiconductors",
@@ -146,7 +151,12 @@ sectors:
   semicap_metrology:
     label: Semicap - metrology / process control
     regulators: [federal_register, federal_register_public_inspection]
-    fr_agencies: [industry-and-security-bureau, commerce-department]
+    # DHS runs the UFLPA entity list, which is an import restriction on the
+    # chip supply chain and squarely this sector's business - it just is not
+    # filed by Commerce. Listed because the linker now refuses a sector
+    # match from an unwatched agency, and this one is genuinely watched.
+    fr_agencies: [industry-and-security-bureau, commerce-department,
+                  homeland-security-department]
     # These terms are matched against a document's title and abstract, not its
     # full text, so they have to read the way a rule titles itself. BIS writes
     # "Additional Export Controls: ... Semiconductor Manufacturing Equipment
@@ -167,7 +177,12 @@ sectors:
   semicap_inspection:
     label: Semicap - inspection / advanced packaging
     regulators: [federal_register, federal_register_public_inspection]
-    fr_agencies: [industry-and-security-bureau, commerce-department]
+    # DHS runs the UFLPA entity list, which is an import restriction on the
+    # chip supply chain and squarely this sector's business - it just is not
+    # filed by Commerce. Listed because the linker now refuses a sector
+    # match from an unwatched agency, and this one is genuinely watched.
+    fr_agencies: [industry-and-security-bureau, commerce-department,
+                  homeland-security-department]
     fr_terms: ["semiconductor manufacturing equipment", "entity list",
                "advanced packaging", "China chip equipment"]
     read_across: 0.75

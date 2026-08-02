@@ -424,13 +424,25 @@ def _unexplained_section(alerts: list[dict[str, Any]]) -> str:
         return ""
     rows = []
     for a in alerts:
-        bits = [f"{_ltr(a['ticker'])} {_pct(a['change_pct'])}"]
-        if a.get("relative_pct") is not None:
-            bench = f"{_ltr(a['benchmark'])} ({_pct(a.get('benchmark_pct') or 0)})"
-            bits.append(f"{_pct(a['relative_pct'], suffix='pp')} מול {bench}")
+        # "תנועה חריגה" for a name that rose 0.6% reads as though the stock
+        # jumped. It did not - its sector fell without it, which is a different
+        # question ("why did it not follow?") and deserves its own sentence.
+        decoupled = bool(a.get("decoupled"))
+        if decoupled and a.get("relative_pct") is not None:
+            direction = "חיובית" if (a.get("relative_pct") or 0) > 0 else "שלילית"
+            bits = [f"{_ltr(a['ticker'])} {_pct(a['change_pct'])} בזמן ש-"
+                    f"{_ltr(a['benchmark'])} {_pct(a.get('benchmark_pct') or 0)}",
+                    f"פער {_pct(a['relative_pct'], suffix='pp')}"]
+            lead = f"התנתקות {direction} מהסקטור — "
+        else:
+            bits = [f"{_ltr(a['ticker'])} {_pct(a['change_pct'])}"]
+            if a.get("relative_pct") is not None:
+                bench = f"{_ltr(a['benchmark'])} ({_pct(a.get('benchmark_pct') or 0)})"
+                bits.append(f"{_pct(a['relative_pct'], suffix='pp')} מול {bench}")
+            lead = "תנועה חריגה ללא הסבר — "
         if a.get("volume_multiple"):
             bits.append("מחזור " + _ltr(f"{a['volume_multiple']:.1f}x"))
-        headline = "תנועה חריגה ללא הסבר — " + " | ".join(bits)
+        headline = lead + " | ".join(bits)
 
         tail = ["לא נמצא קטליזטור שקדם לתנועה מעל ציון 20 ב-30 השעות האחרונות"]
         if a.get("post_move_commentary"):
@@ -1013,14 +1025,29 @@ def _quote_label(quote: dict[str, Any] | None) -> str:
         return (f"{_ltr(provider)} &middot; {fetched} &middot; "
                 f"<span class='muted'>זמן ההדפסה לא נרשם</span>")
 
+    # The post-market print, when there is one. It is NOT the number the movers
+    # board is computed from - that is the session close, deliberately - so it
+    # goes on its own line rather than being blended into the same sentence.
+    # Without it the panel said "עסקה אחרונה 16:00 ET" while the tape's real
+    # last print was 19:34, which is true of the reference price and false of
+    # the stock.
+    extended = ""
+    if quote.get("extended_time"):
+        move = quote.get("extended_change_pct")
+        extended = (f"<br><span class='muted'>מסחר מאוחר: "
+                    + (f"{_pct(move)} &middot; " if move is not None else "")
+                    + f"עסקה אחרונה {_ltr(he.eastern_label(quote['extended_time']))}"
+                    + "</span>")
+
     session = quote.get("session")
     if session == "closed":
         return (f"<span class='muted'>השוק סגור &middot; סשן אחרון: "
                 f"{_ltr(he.day_label(printed))}</span><br>"
-                f"{_ltr(provider)} &middot; עסקה אחרונה "
-                f"{_ltr(he.eastern_label(printed))} &middot; {fetched}")
+                f"{_ltr(provider)} &middot; סגירת הסשן "
+                f"{_ltr(he.eastern_label(printed))} &middot; {fetched}{extended}")
     return (f"{_ltr(provider)} &middot; עסקה אחרונה "
-            f"{_ltr(he.eastern_label(printed))} &middot; {fetched} &middot; מושהה")
+            f"{_ltr(he.eastern_label(printed))} &middot; {fetched} &middot; מושהה"
+            f"{extended}")
 
 
 def _first_public_he(item: dict[str, Any]) -> str:

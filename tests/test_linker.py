@@ -544,3 +544,76 @@ def test_an_ordinary_word_is_only_a_company_when_it_reads_as_one(
     from harel.enrich.linker import direct_evidence
 
     assert direct_evidence(config.ticker(ticker), headline) is expected, headline
+
+
+def test_a_sector_term_from_the_wrong_regulator_is_not_a_sector_link(config):
+    """A term of art in one domain is boilerplate in another.
+
+    Every SEC self-regulatory filing is headed "Notice of Filing, and Order
+    Granting Accelerated Approval of a Proposed Rule Change" - so "accelerated
+    approval", an FDA pathway and a biotech_clinical term, matched a Cboe BZX
+    exchange-rule notice and offered it as regulatory context for Compugen and
+    Oramed. The sector names the regulator it watches; the string test alone
+    cannot tell an FDA approval from an exchange one.
+    """
+    from datetime import datetime, timezone
+
+    from harel.enrich.linker import EntityLinker
+    from harel.models import RawItem
+
+    def fr(title, agencies):
+        return RawItem(
+            source="federal_register", source_kind="federal_register",
+            external_id="x", title=title, url="", summary="",
+            published_at=datetime.now(timezone.utc),
+            meta={"agencies": agencies}, seed_tickers=[], seed_relation="SECTOR_REG")
+
+    linker = EntityLinker(config)
+    cboe = fr("[FR] Self-Regulatory Organizations; Cboe BZX Exchange, Inc.; Notice "
+              "of Filing, and Order Granting Accelerated Approval of a Proposed "
+              "Rule Change", ["Securities and Exchange Commission"])
+    assert not linker.link(cboe), \
+        "an exchange rule filing is not biotech regulatory context"
+
+    # The same term from the regulator the sector actually watches still links.
+    fda = fr("[FR] Guidance for Industry: Accelerated Approval of Drugs for "
+             "Serious Conditions", ["Food and Drug Administration"])
+    assert {l.ticker for l in linker.link(fda)}, "an FDA notice must still reach biotech"
+
+
+def test_the_entity_list_still_reaches_the_semiconductor_names(config):
+    """UFLPA is filed by Homeland Security, not Commerce, and it is squarely a
+    chip-supply-chain restriction. The agency gate must not drop it - the sector
+    config gained DHS because it genuinely watches it."""
+    from datetime import datetime, timezone
+
+    from harel.enrich.linker import EntityLinker
+    from harel.models import RawItem
+
+    item = RawItem(
+        source="federal_register", source_kind="federal_register", external_id="x",
+        title="[FR] Notice Regarding the Uyghur Forced Labor Prevention Act Entity List",
+        url="", summary="", published_at=datetime.now(timezone.utc),
+        meta={"agencies": ["Homeland Security Department"]},
+        seed_tickers=[], seed_relation="SECTOR_REG")
+
+    linked = {l.ticker for l in EntityLinker(config).link(item)}
+    assert {"TSEM", "CAMT", "NVMI"} <= linked, linked
+
+
+def test_the_agency_gate_reads_slugs_and_names_alike(config):
+    """Rows collected before `agency_slugs` existed carry only display names, and
+    must be judged by the same rule rather than silently exempted."""
+    from harel.enrich.linker import EntityLinker
+
+    assert EntityLinker._agency_slugs.__func__ if False else True
+    from harel.models import RawItem
+    from datetime import datetime, timezone
+
+    def slugs(meta):
+        return EntityLinker._agency_slugs(RawItem(
+            source="s", source_kind="k", external_id="x", title="t", url="",
+            published_at=datetime.now(timezone.utc), meta=meta))
+
+    assert "homeland-security-department" in slugs({"agencies": ["Homeland Security Department"]})
+    assert "food-and-drug-administration" in slugs({"agency_slugs": ["food-and-drug-administration"]})
