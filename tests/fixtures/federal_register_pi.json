@@ -1,0 +1,53 @@
+{
+  "count": 2,
+  "results": [
+    {
+      "document_number": "2026-15652",
+      "title": "Medicare Program: Inpatient Rehabilitation Facility Prospective Payment System for Federal Fiscal Year 2027",
+      "html_url": "https://www.federalregister.gov/public-inspection/2026-15652/medicare-program-inpatient-rehabilitation-facility",
+      "pdf_url": "https://public-inspection.federalregister.gov/2026-15652.pdf",
+      "publication_date": "2026-08-03",
+      "filed_at": "2026-07-30T16:15:00.000-04:00",
+      "filing_type": "special",
+      "type": "Rule",
+      "num_pages": 137,
+      "docket_numbers": ["CMS-1830-F"],
+      "excerpts": null,
+      "toc_subject": "Medicare Program:",
+      "toc_doc": "Inpatient Rehabilitation Facility Prospective Payment System for Federal Fiscal Year 2027",
+      "agencies": [
+        {
+          "raw_name": "Centers for Medicare & Medicaid Services",
+          "name": "Centers for Medicare & Medicaid Services",
+          "id": 45,
+          "slug": "centers-for-medicare-medicaid-services"
+        }
+      ],
+      "agency_names": ["Health and Human Services Department", "Centers for Medicare & Medicaid Services"]
+    },
+    {
+      "document_number": "2026-15701",
+      "title": "Determination of Regulatory Review Period for Purposes of Patent Extension; TESTDRUG",
+      "html_url": "https://www.federalregister.gov/public-inspection/2026-15701/determination-of-regulatory-review-period",
+      "pdf_url": "https://public-inspection.federalregister.gov/2026-15701.pdf",
+      "publication_date": "2026-08-04",
+      "filed_at": "2026-07-31T08:45:00.000-04:00",
+      "filing_type": "regular",
+      "type": "Notice",
+      "num_pages": 4,
+      "docket_numbers": ["FDA-2026-E-1234"],
+      "excerpts": "The Food and Drug Administration has determined the regulatory review period for TESTDRUG.",
+      "toc_subject": null,
+      "toc_doc": null,
+      "agencies": [
+        {
+          "raw_name": "Food and Drug Administration",
+          "name": "Food and Drug Administration",
+          "id": 121,
+          "slug": "food-and-drug-administration"
+        }
+      ],
+      "agency_names": ["Health and Human Services Department", "Food and Drug Administration"]
+    }
+  ]
+}

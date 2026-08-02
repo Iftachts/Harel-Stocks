@@ -18,11 +18,30 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
-from ..config import Config
+from ..config import Config, SectorConfig
 from ..models import Link, RawItem, ScoredItem
 from .events import classify_events
+
+# The exchange's own clock. "Pre-market or not" is the difference between a gap
+# and a nothing, so it is resolved against the real tzdb - see _timing.
+MARKET_TZ = ZoneInfo("America/New_York")
+
+# config/sectors.yaml tunes how strongly other people's news reads across to a
+# name, per sector. That is the same question `relations` answers globally, on
+# the same 0-1 scale (peer couplings run 0.40-0.90 around a global PEER of
+# 0.65), so the sector's number *replaces* the global default for the relations
+# it describes, exactly as a per-ticker `relation_overrides` entry does.
+# Multiplying the two instead would have made semicap's 0.85 - written because
+# "WFE names trade almost 1:1 with peers' guidance" - lower the weight of a
+# peer's guidance, to 0.55.
+SECTOR_COUPLING = {
+    "SECTOR_REG": "read_across",
+    "SECTOR_THEME": "read_across",
+    "PEER": "peer_read_across",
+}
 
 # Base score when nothing in the taxonomy matched.
 DEFAULT_BASE_DIRECT = 28.0
@@ -58,7 +77,11 @@ class MaterialityScorer:
                 except (re.error, KeyError):
                     continue
             if boosts:
-                out[ticker.upper()] = boosts
+                # load_config uppercases these keys. Doing it here as well -
+                # and only here - is what let a `cgen:` block apply its keyword
+                # boosts under CGEN while the relation override it sits with,
+                # looked up under the raw key, was silently dropped.
+                out[ticker] = boosts
         return out
 
     # ---------------------------------------------------------------- score --
@@ -170,8 +193,16 @@ class MaterialityScorer:
 
         return base, reason
 
+    # An entry whose feed gave no date is stamped "now" so it is not dropped.
+    # That invented timestamp makes an evergreen marketing page look like it
+    # broke a minute ago, at full issuer trust, so it must not be rankable.
+    UNDATED_CAP = 10.0
+
     def _noise_cap(self, item: RawItem) -> float | None:
         caps: list[float] = []
+
+        if item.meta.get("undated"):
+            caps.append(self.UNDATED_CAP)
 
         form = str(item.meta.get("form_type") or "").upper()
         if form and form in self.scoring.noise_form_types:
@@ -181,6 +212,15 @@ class MaterialityScorer:
         for noise in self.scoring.noise_title_patterns:
             if noise.pattern.search(text):
                 caps.append(noise.cap)
+
+        # Post-move commentary: written because the price already moved, so it
+        # cannot be evidence of why. Matched on the TITLE only - a real filing
+        # whose body happens to quote the day's move must not be demoted.
+        for noise in self.scoring.reactive_patterns:
+            if noise.pattern.search(item.title):
+                caps.append(noise.cap)
+                item.meta["reactive_recap"] = True
+                break
 
         return min(caps) if caps else None
 
@@ -193,9 +233,15 @@ class MaterialityScorer:
 
     def _timing(self, item: RawItem, now: datetime) -> tuple[float, str]:
         """News that lands pre-open creates the gap; news mid-session moves the
-        tape immediately. Both beat a story that broke after the close."""
-        offset = 4 if 3 <= item.published_at.month <= 11 else 5
-        et = item.published_at - timedelta(hours=offset)
+        tape immediately. Both beat a story that broke after the close.
+
+        On the exchange's clock rather than `4 if 3 <= month <= 11 else 5`: DST
+        ends the first Sunday of November and starts the second Sunday of
+        March, so that guess was an hour out for most of November and the first
+        week of March - long enough to hand the pre-market boost to a story
+        published at the open, and to deny it to one published at 08:45.
+        """
+        et = item.published_at.astimezone(MARKET_TZ)
         if et.weekday() >= 5:
             return 0.0, ""
         minutes = et.hour * 60 + et.minute
@@ -213,7 +259,16 @@ class MaterialityScorer:
         reasons: list[str] = []
         ticker_cfg = self.config.ticker(link.ticker)
 
+        # How much news about something *else* moves this name. Most specific
+        # wins: the ticker's own relation_override, else its sector's tuned
+        # read-across, else the global default in scoring.yaml.
         relation_mult = self.scoring.relations.get(link.relation, 0.4)
+        coupling = _sector_coupling(
+            self.config.sector(ticker_cfg.sector) if ticker_cfg else None,
+            link.relation,
+        )
+        if coupling is not None:
+            relation_mult = coupling
         override = (self.scoring.overrides.get(link.ticker) or {}).get("relation_overrides") or {}
         if link.relation in override:
             relation_mult = float(override[link.relation])
@@ -240,7 +295,13 @@ class MaterialityScorer:
                 score += boost
                 reasons.append(f"+{boost:.0f} ticker keyword boost")
 
-        score += self._price_boost(price, reasons)
+        # Tape confirmation only means something for an item that is actually
+        # news. "News the tape is already confirming outranks news nothing
+        # reacted to" - but a chart-generated article that matched no event at
+        # all is not news, and +8 for coinciding with the move it was generated
+        # from is how it climbed above a guidance raise.
+        if hits:
+            score += self._price_boost(price, reasons)
         return score, reasons
 
     def _price_boost(self, price: PriceContext | None, reasons: list[str]) -> float:
@@ -259,6 +320,16 @@ class MaterialityScorer:
             total += boost
             reasons.append(f"+{boost:.0f} volume {price.volume_multiple:.1f}x ADV")
         return total
+
+
+def _sector_coupling(sector: SectorConfig | None, relation: str) -> float | None:
+    """The sector's own read-across weight for this relation, if it tuned one."""
+    field = SECTOR_COUPLING.get(relation)
+    if sector is None or field is None:
+        return None
+    # 0.0 means "this sector never filled it in" (the `unknown` sector, and any
+    # sector added without the field), not "a peer's news is worth nothing".
+    return float(getattr(sector, field, 0.0) or 0.0) or None
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:

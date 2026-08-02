@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!--
+  Shape of a Q4 `default.aspx` press-release page. Two things are load-bearing:
+
+  * the whole body is wrapped in <form id="aspnetForm" runat="server">, which is
+    what every ASP.NET WebForms page does. Stripping `form` as "chrome" deleted
+    the release and left 123 characters of <title>.
+  * the body carries a decoy date - the replay of the quarter just gone - in
+    the same <main> as the announcement, so it is the extractor and not the
+    scraper that has to reject it. A date behind us is a report, not a schedule.
+
+  {REPORT_DATE} / {CALL_DATE} / {PRIOR_DATE} are substituted by the test - see
+  the note in ir_feed_title_only.xml.
+-->
+<html lang="en">
+<head><title>Ormat Technologies Inc. - Ormat Technologies, Inc. to Host Conference Call Announcing Second Quarter 2026 Financial Results</title></head>
+<body>
+<form method="post" action="./default.aspx" id="aspnetForm">
+  <header>
+    <nav><a href="/">Investors</a> <a href="/news-events">News &amp; Events</a></nav>
+  </header>
+  <main>
+    <h1>Ormat Technologies, Inc. to Host Conference Call Announcing Second Quarter 2026 Financial Results</h1>
+    <div class="prior-event">Replay of the first quarter call, held {PRIOR_DATE}, remains available.</div>
+    <div class="release-date">Company Release - {RELEASE_DAY}</div>
+    <a href="/pdf">Download the PDF version</a>
+    <p>RENO, Nev., {RELEASE_LONG} (GLOBE NEWSWIRE) -- Ormat Technologies Inc. (NYSE: ORA) (the &ldquo;Company&rdquo; or &ldquo;Ormat&rdquo;), a leading geothermal and renewable energy company, today announced that it plans to publish its second quarter financial results in a press release that will be issued on {REPORT_DATE}, after the market closes.</p>
+    <p>In conjunction with this report, the Company has scheduled a conference call to discuss the results at 10:00 a.m. ET on {CALL_DATE}. Participants within the United States and Canada, please dial 1-800-715-9871 approximately 15 minutes prior to the scheduled start time.</p>
+  </main>
+  <footer>Ormat Technologies, Inc. All rights reserved.</footer>
+</form>
+</body>
+</html>

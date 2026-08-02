@@ -1,0 +1,89 @@
+{
+ "limit": 100,
+ "results": [
+  {
+   "internal_id": 356504696,
+   "Award ID": "70B02C26C00000008",
+   "Recipient Name": "ELBITAMERICA, INC.",
+   "Recipient UEI": "TBLKC12FCDH8",
+   "Award Amount": 215851905.04,
+   "Awarding Agency": "Department of Homeland Security",
+   "Awarding Sub Agency": "U.S. Customs and Border Protection",
+   "Description": "PERSISTENT SURVEILLANCE AND DETECTION EXTENSION",
+   "Base Obligation Date": "2026-03-20",
+   "Last Modified Date": "2026-05-28 08:06:55",
+   "generated_internal_id": "CONT_AWD_70B02C26C00000008_7014_-NONE-_-NONE-",
+   "awarding_agency_id": 766,
+   "agency_slug": "department-of-homeland-security"
+  },
+  {
+   "internal_id": 360840499,
+   "Award ID": "W91CRB26FA174",
+   "Recipient Name": "ELBIT SYSTEMS OF AMERICA - NIGHT VISION LLC",
+   "Recipient UEI": "MYE5L662RU13",
+   "Award Amount": 211897350.0,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "ENHANCED NIGHT VISION GOGGLE - BINOCULAR",
+   "Base Obligation Date": "2026-04-24",
+   "Last Modified Date": "2026-04-27 15:28:55",
+   "generated_internal_id": "CONT_AWD_W91CRB26FA174_9700_W91CRB24D0001_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 309318320,
+   "Award ID": "M6785422F1018",
+   "Recipient Name": "ELBIT SYSTEMS OF AMERICA - NIGHT VISION LLC",
+   "Recipient UEI": "MYE5L662RU13",
+   "Award Amount": 89442558.68,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Defense Contract Management Agency",
+   "Description": "SQUAD BINOCULAR NIGHT VISION GOGGLE SYS",
+   "Base Obligation Date": "2022-01-28",
+   "Last Modified Date": "2026-07-31 06:15:00",
+   "generated_internal_id": "CONT_AWD_M6785422F1018_9700_M6785419D1501_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 358871291,
+   "Award ID": "70B02C26F00000256",
+   "Recipient Name": "ELBITAMERICA, INC.",
+   "Recipient UEI": "TBLKC12FCDH8",
+   "Award Amount": 91139425.71,
+   "Awarding Agency": "Department of Homeland Security",
+   "Awarding Sub Agency": "U.S. Customs and Border Protection",
+   "Description": "CONSOLIDATE TOWERS AND SURVEILLANCE EQUIPMENT",
+   "Base Obligation Date": "2026-06-01",
+   "Last Modified Date": "2026-07-30 11:02:14",
+   "generated_internal_id": "CONT_AWD_70B02C26F00000256_7014_70B02C23D00000023_7014",
+   "awarding_agency_id": 766,
+   "agency_slug": "department-of-homeland-security"
+  },
+  {
+   "internal_id": 359959046,
+   "Award ID": "SPE4A726D0232",
+   "Recipient Name": "REAL-TIME LABORATORIES, LLC",
+   "Recipient UEI": "NZEFKM96LVX4",
+   "Award Amount": 12500000.0,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Defense Logistics Agency",
+   "Description": "IMAGE INTENSIFIER ASSEMBLY",
+   "Base Obligation Date": "2026-04-02",
+   "Last Modified Date": "2026-04-09 12:25:12",
+   "generated_internal_id": "CONT_AWD_SPE4A726D0232_9700_-NONE-_-NONE-",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  }
+ ],
+ "page_metadata": {
+  "page": 1,
+  "hasNext": false,
+  "last_record_unique_id": null,
+  "last_record_sort_value": "None"
+ },
+ "messages": [
+  "For searches, time period start and end dates are currently limited to an earliest date of 2007-10-01.  For data going back to 2000-10-01, use either the Custom Award Download feature on the website or one of our download or bulk_download API endpoints as listed on https://api.usaspending.gov/docs/endpoints. "
+ ]
+}

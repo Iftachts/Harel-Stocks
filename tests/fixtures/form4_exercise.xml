@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<!-- Shape of a real TEVA option exercise: the SAME 21,739 shares are reported
+     twice, once as the derivative security exercised (Table II) and once as the
+     underlying common stock acquired (Table I). -->
+<ownershipDocument>
+  <issuer>
+    <issuerCik>0000818686</issuerCik>
+    <issuerName>TEVA PHARMACEUTICAL INDUSTRIES LTD</issuerName>
+  </issuer>
+  <reportingOwner>
+    <reportingOwnerId><rptOwnerName>Doe John</rptOwnerName></reportingOwnerId>
+    <reportingOwnerRelationship>
+      <isDirector>0</isDirector>
+      <isOfficer>1</isOfficer>
+      <officerTitle>EVP, Chief Financial Officer</officerTitle>
+    </reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <securityTitle><value>Ordinary Shares</value></securityTitle>
+      <transactionDate><value>2026-07-29</value></transactionDate>
+      <transactionCoding><transactionCode>M</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>21739</value></transactionShares>
+        <transactionPricePerShare><value>0</value></transactionPricePerShare>
+      </transactionAmounts>
+      <postTransactionAmounts>
+        <sharesOwnedFollowingTransaction><value>184502</value></sharesOwnedFollowingTransaction>
+      </postTransactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+  <derivativeTable>
+    <derivativeTransaction>
+      <securityTitle><value>Employee Stock Option (right to buy)</value></securityTitle>
+      <transactionDate><value>2026-07-29</value></transactionDate>
+      <transactionCoding><transactionCode>M</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>21739</value></transactionShares>
+        <transactionPricePerShare><value>0</value></transactionPricePerShare>
+      </transactionAmounts>
+      <underlyingSecurity>
+        <underlyingSecurityTitle><value>Ordinary Shares</value></underlyingSecurityTitle>
+        <underlyingSecurityShares><value>21739</value></underlyingSecurityShares>
+      </underlyingSecurity>
+      <postTransactionAmounts>
+        <sharesOwnedFollowingTransaction><value>0</value></sharesOwnedFollowingTransaction>
+      </postTransactionAmounts>
+    </derivativeTransaction>
+  </derivativeTable>
+</ownershipDocument>

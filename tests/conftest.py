@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import json as _json
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,10 @@ class FakeHttpClient:
         self.routes = routes
         self.calls: list[str] = []
         self.headers_seen: list[dict[str, str]] = []
+        # POST bodies, in order. A POST puts the whole query in the body, so
+        # without recording it a test cannot tell which recipient was asked
+        # about - or notice someone "tidying" date_type out of the filters.
+        self.posts: list[tuple[str, dict]] = []
 
     def get(self, url, *, headers=None, params=None, etag=None,
             last_modified=None, allow_status=()):
@@ -92,6 +97,35 @@ class FakeHttpClient:
                 else:
                     text, body = payload, payload.encode()
                 return Response(200, text, body, {}, url)
+
+        if 404 in allow_status:
+            return Response(404, "", b"", {}, url)
+        from harel.http import HttpError
+
+        raise HttpError(404, url, "no fixture")
+
+    def post(self, url, *, json=None, headers=None, allow_status=()):
+        """Routes on the URL *and* the request body.
+
+        Every USASpending query goes to one URL and differs only in the body, so
+        a URL-only route could not serve one fixture per recipient. A needle is
+        matched against both, which lets a test key on "TAT TECHNOLOGIES".
+        """
+        body = json if isinstance(json, dict) else {}
+        self.posts.append((url, body))
+        self.calls.append(url)
+        self.headers_seen.append(dict(headers or {}))
+        haystack = url + " " + _json.dumps(body, sort_keys=True)
+
+        for needle, payload in self.routes.items():
+            if needle in haystack:
+                if callable(payload):
+                    payload = payload(body)
+                if isinstance(payload, (dict, list)):
+                    text = _json.dumps(payload)
+                    return Response(200, text, text.encode(), {}, url)
+                text = payload if isinstance(payload, str) else payload.decode()
+                return Response(200, text, text.encode(), {}, url)
 
         if 404 in allow_status:
             return Response(404, "", b"", {}, url)

@@ -204,10 +204,13 @@ events:
     base: 48
     label: Insider / large holder move
     patterns:
-      - "\\b(13D|13G|schedule 13D)\\b"
+      # 13D only. A 13D is an activist declaring intent; a 13G is a passive
+      # holder crossing 5%, usually an index fund, and lumping them together
+      # scored every routine custodian filing as an insider move.
+      - "\\b(13D|schedule 13D)\\b"
       - "\\b(activist (stake|investor)|builds? (a )?stake)\\b"
       - "\\bsecondary offering by (a )?(shareholder|holder)\\b"
-    form_types: ["SC 13D", "SC 13D/A", "SC 13G/A", "4"]
+    form_types: ["SC 13D", "SC 13D/A", "4"]
 
   operational_disruption:
     base: 70
@@ -275,12 +278,25 @@ noise:
     # for the `calendar` table; capping it keeps it out of the ranked feed while
     # the source still shows a live item count.
     "MAYA-SCHEDULE": 6
+    # A Form 4 whose only transaction codes are grants, option exercises, tax
+    # withholding or gifts is compensation plumbing, not a trade. Left as plain
+    # "4" these outranked real earnings at the top of the feed. Open-market
+    # buys and sells (codes P/S) keep form_type "4" and are not capped.
+    "4-ROUTINE": 12
     # Routine SEC/TASE paperwork with ~zero intraday information content
     "S-8": 8
     "424B3": 10          # resale prospectus - already-issued shares
     "424B2": 10
     "144": 6             # notice of proposed sale
-    "SC 13G": 14         # passive index holder crossing 5%
+    # A 13G is a PASSIVE crossing of 5% - an index fund rebalancing, usually.
+    # It is not an insider and usually not even a new decision. EDGAR labels
+    # these "SCHEDULE 13G", not "SC 13G", so the cap below never fired and
+    # fourteen of them scored 40 as "insider activity". Both spellings now.
+    # 13D is deliberately absent: an activist stake IS material.
+    "SC 13G": 14
+    "SC 13G/A": 12
+    "SCHEDULE 13G": 14
+    "SCHEDULE 13G/A": 12
     "SC 13F-HR": 6
     "ARS": 5
     "DEF 14A": 15
@@ -297,7 +313,62 @@ noise:
     "ARS/A": 5
     "6-K/A": 25
 
+  # --- Post-move commentary ---------------------------------------------- #
+  # Articles generated BECAUSE the stock already moved. They quote the move back
+  # at you and then guess at reasons, so they read as confirmation of a cause
+  # when they are an effect of it. Offering one as the driver of the move it
+  # describes is circular reasoning with a hyperlink.
+  #
+  # These carry a cap like any other noise pattern, AND `whats_moving` keeps
+  # them out of `drivers` and labels them "written after the move". One list,
+  # both uses, so the scoring and the label can never disagree.
+  reactive_patterns:
+    - pattern: "\\b(shares?|stock) (gap(s|ped)? (up|down)|trading (up|down)|moves? (higher|lower))\\b"
+      cap: 14
+    - pattern: "\\b(gap(s|ped)? (up|down) .{0,20}what'?s next|what'?s next for)\\b"
+      cap: 14
+    - pattern: "\\b(shares?|stock) (up|down|rises?|falls?|jumps?|sinks?|gains?|drops?) [0-9.]+ ?%"
+      cap: 14
+    - pattern: "\\b(price ?tracker|stock price (up|down)|trading (up|down) [0-9.]+ ?%)\\b"
+      cap: 14
+    - pattern: "\\b(gains?|rises?|falls?|slides?|climbs?) as investors (weigh|digest|assess|eye)\\b"
+      cap: 16
+    - pattern: "\\b(why (is|are) .{0,25} (stock|shares) (up|down|moving|rising|falling))\\b"
+      cap: 14
+    - pattern: "\\b(stocks? that are moving|movers?:|biggest movers)\\b"
+      cap: 12
+    # Hebrew market wraps do exactly the same job: "בורסת ת"א מתחזקת אחרי
+    # ההצהרה של טראמפ; טאואר עולה ב-3.5%" is the move being reported back, with
+    # the cause attributed to a macro headline - it was ranked as the driver of
+    # Tower's 6.2% day. The percentage-move form is the giveaway.
+    - pattern: '(בורסת|הבורסה) ת"א'
+      cap: 14
+    - pattern: '(עולה|עולות|יורדת|יורדות|מזנקת|צונחת|מטפסת|נופלת|מאבדת|מוסיפה|נסגרה|ננעלה)\s+ב[-־]?\s*[0-9]+([.,][0-9]+)?%'
+      cap: 14
+    - pattern: '(נעילה|מסחר) (חיובי|שלילי|מעורב)'
+      cap: 14
+    # "<Company> Is Up 14.1% After ..." - the same recap without the word
+    # "shares", which is how OPKO's got through.
+    - pattern: "\\b(is|are|was|were) (up|down) [0-9.]+ ?%"
+      cap: 14
+    - pattern: "\\b(soars?|plunges?|tumbles?|surges?|spikes?|slumps?) [0-9.]+ ?%"
+      cap: 14
+
   title_patterns:
+    # --- Automated stock-analysis content ---------------------------------- #
+    # Generated per ticker, on a schedule, from the price series alone:
+    # "Technical Analysis: Support, Resistance, Indicators", "Risk Assessment:
+    # Volatility", "Price Prediction", "Is Further Upside Left?". They contain
+    # nothing that did not come from the chart - and one of them, on base 28
+    # with no event and a tape-confirmation bonus, outranked a Teva guidance
+    # raise carrying base 86.
+    - pattern: "\\b(technical analysis|risk assessment|valuation analysis|price prediction|stock forecast|price forecast|chart analysis)\\b"
+      cap: 10
+    - pattern: "\\b(support,? resistance|moving averages?|RSI|MACD|fibonacci)\\b.{0,40}\\b(indicator|level|signal)"
+      cap: 10
+    - pattern: "\\b(is (further )?upside left|should you (buy|sell|own)|is it a (buy|sell)|worth (buying|watching)|hidden gem)\\b"
+      cap: 12
+
     - pattern: "\\b(annual general meeting|extraordinary general meeting|AGM|EGM|proxy statement|notice of meeting)\\b"
       cap: 15
     - pattern: "\\b(to (present|participate)|will (present|host|participate)|investor conference|webcast (of|will))\\b"
@@ -320,6 +391,33 @@ noise:
       cap: 12
     - pattern: "\\b(price target)\\b.{0,20}\\b(maintained|reiterat)"
       cap: 20
+    # 13F holdings filler. Automated "Fund X Buys N Shares of Y" pieces are
+    # generated in bulk from quarterly filings that are up to 45 days stale, and
+    # they were ranking third in the feed - above Teva's own earnings release.
+    # An institution rebalancing tells a day trader nothing.
+    - pattern: "\\b(buys?|sold|sells?|acquires?|purchases?)\\s+[\\d,\\.]+\\s+shares\\b"
+      cap: 10
+    - pattern: "\\b(raises|lowers|boosts|trims|reduces|increases|decreases|cuts)\\s+(its\\s+)?(stock\\s+)?(position|stake|holdings?)\\b"
+      cap: 10
+    - pattern: "\\bhas\\s+\\$[\\d,\\.]+\\s+(million|billion)\\s+(stock\\s+)?(position|holdings?|stake)\\b"
+      cap: 10
+    - pattern: "\\b(takes|acquires|makes)\\s+(a\\s+)?(new\\s+)?(position|stake)\\s+in\\b"
+      cap: 10
+    # The four above all require the verb and the noun to be adjacent, so
+    # "E20 Capital Ltd Purchases New Holdings in Tower Semiconductor" and
+    # "Migdal Insurance Boosts Ormat Technologies Stock Position" both slipped
+    # through - and the first was then offered as the driver of a 6.2% move.
+    # Anchored on an INSTITUTIONAL subject so that a company taking a stake in
+    # something (real M&A) is not caught by the same net.
+    - pattern: "\\b(capital|advisors?|advisers?|asset management|investment management|wealth|financial group|fund|partners|trust|insurance|bancorp|holdings? (llc|inc|ltd))\\b.{0,60}?\\b(buys?|purchases?|acquires?|takes|boosts?|raises?|lifts?|grows?|adds? to|sells?|sold|lowers?|trims?|reduces?|cuts?|decreases?)\\b.{0,45}?\\b(new\\s+)?(stock\\s+)?(position|stake|holdings?|shares)\\b"
+      cap: 10
+    - pattern: "\\b(13F|institutional (investors?|holdings?|ownership))\\b"
+      cap: 12
+    # SEC rule-filing housekeeping by an exchange. Reaches us because the
+    # Federal Register is a sector regulator channel, but a Nasdaq listing-rule
+    # amendment is not a pharma or semiconductor event.
+    - pattern: "\\bSelf-Regulatory Organizations\\b"
+      cap: 10
 
   # Aggregator-only, low-trust items never reach ALERT without corroboration
   require_corroboration_below_trust: 0.7
@@ -380,6 +478,13 @@ overrides:
     # TIGIT-class read-across is effectively direct news for Compugen
     relation_overrides:
       PRODUCT_RIVAL: 0.95
+  KEN:
+    # Kenon is a HOLDING company. NRG, Vistra and Talen are peers of OPC Energy
+    # and CPV - the assets - not of the listed entity, whose price also carries
+    # holding-company discount, currency and disposal news. The read-across is
+    # real but one step removed, so it is discounted rather than dropped.
+    relation_overrides:
+      PEER: 0.45
   PERI:
     # Bing/Google terms-of-trade changes have historically caused >30% gaps
     keyword_boosts:

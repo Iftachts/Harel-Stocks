@@ -38,7 +38,7 @@ tickers:
     sector: pharma_generics_branded
     float_class: large
     ir_feeds:
-      - https://www.tevapharm.com/news-and-media/latest-news/rss
+      - https://ir.tevapharm.com/rss/pressrelease.aspx
     peers: [VTRS, AMRX, PRGO, RDY, OGN, HIK.L, SDZ.SW, LLY, ABBV, PFE, ALKS, BIIB, NVO]
     peer_names:
       ["Viatris", "Sandoz", "Amneal", "Dr. Reddy's", "Sun Pharma", "Hikma",
@@ -53,13 +53,17 @@ tickers:
       UZEDY: ["risperidone extended-release", "TV-46000"]
       COPAXONE: ["glatiramer", "Glatopa"]
       OLANZAPINE_LAI: ["TEV-'749", "olanzapine long-acting", "post-injection delirium"]
-      DUVAKITUG: ["TEV-48574", "anti-TL1A", "Sanofi"]
+      # Sanofi is the PARTNER on this program, not a product of it. A partner's
+      # name here read as "a story about our product": "Sanofi agrees to acquire
+      # Blueprint Medicines" arrived as TEVA, DIRECT, 0.82.
+      DUVAKITUG: ["TEV-48574", "anti-TL1A"]
       ICS_SABA: ["ProAir", "QVAR", "AirDuo"]
     competitor_products:
-      # A rival's readout/approval here moves TEVA
+      # A rival's readout/approval here moves TEVA. "duvakitug" and "Uzedy
+      # competitor" were our OWN program and a placeholder for a rival nobody
+      # named; neither is a rival product.
       ["Emgality", "Nurtec", "Ubrelvy", "Qulipta", "Vyepti", "Ingrezza",
-       "Xenazine", "Uzedy competitor", "Abilify Asimtufii", "tulisokibart",
-       "RVT-3101", "duvakitug"]
+       "Xenazine", "Abilify Asimtufii", "tulisokibart", "RVT-3101"]
     catalysts: [earnings, jpm_healthcare, esmo, aan]
 
   TSEM:
@@ -72,7 +76,7 @@ tickers:
     sector: semiconductors_foundry
     float_class: mid
     ir_feeds:
-      - https://towersemi.com/feed/
+      - https://ir.towersemi.com/rss/news-releases.xml
     peers: [GFS, UMC, SMIC, VIS, SKYT, TSM, INTC, X-FAB]
     peer_names: ["GlobalFoundries", "UMC", "United Microelectronics", "SMIC",
                  "Vanguard International Semiconductor", "SkyWater", "X-FAB",
@@ -82,18 +86,25 @@ tickers:
        "power management IC", "SiGe", "CMOS image sensor", "300mm capacity",
        "foundry utilization", "wafer pricing", "CHIPS Act", "export controls",
        "semiconductor tariffs", "Section 232 semiconductors"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      # Vanguard International Semiconductor is a foundry, i.e. a peer, and it
+      # is listed as one above. A company here outranked its own PEER link.
+      ["GlobalFoundries 22FDX", "UMC RF-SOI", "X-FAB SiC", "SkyWater foundry",
+       "TSMC specialty", "Samsung Foundry 8LPP"]
     products:
       SIPHO: ["silicon photonics", "800G", "1.6T optical", "co-packaged optics"]
       RF: ["RF SOI", "5G front end module", "antenna tuner"]
-      # Group keys become DIRECT match terms, so they must be as distinctive as
-      # a brand name. A bare "POWER" matched the word in any document body and
-      # tagged unrelated filings as Tower's own news.
+      # A bare "POWER" matched the word in any document body and tagged
+      # unrelated filings as Tower's own news, and renaming the key fixed only
+      # this one entry. The linker now decides for itself: nothing here
+      # identifies an issuer, so all of it links as a theme, not as Tower.
       POWER_MANAGEMENT: ["BCD", "power management", "GaN", "SiC"]
     catalysts: [earnings, semicon_west, isscc]
 
   NVMI:
     name: Nova Ltd
-    aliases: ["Nova Ltd", "Nova Measuring Instruments", "נובה", "Nova Metrology"]
+    aliases: ["Nova", "Nova Ltd", "Nova Measuring Instruments", "נובה", "Nova Metrology"]
     cik: "0001109345"
     tase_id: "1084557"
     tase_issuer_id: 2177
@@ -101,7 +112,11 @@ tickers:
     sector: semicap_metrology
     float_class: mid
     ir_feeds:
-      - https://www.novami.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [KLAC, ONTO, ASML, AMAT, LRCX, TER, ACMR]
     peer_names: ["KLA", "KLA-Tencor", "Onto Innovation", "ASML", "Applied Materials",
                  "Lam Research", "Hitachi High-Tech", "Screen Holdings"]
@@ -110,6 +125,15 @@ tickers:
        "process control", "gate-all-around", "GAA", "high-NA EUV", "HBM",
        "advanced packaging", "China semiconductor export controls", "entity list",
        "SEMI billings", "foundry capex", "memory capex"]
+    products:
+      VERAFLEX: ["VeraFlex"]
+      METRION: ["Nova Metrion"]
+      PRISM_OCD: ["Nova PRISM", "optical CD metrology"]
+      ELIPSON: ["Nova Elipson"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["KLA SpectraFilm", "KLA Aleris", "Onto Innovation Atlas", "Hitachi High-Tech CD-SEM",
+       "Bruker metrology", "Screen Holdings metrology"]
     peer_events_that_matter:
       ["TSMC capex guidance", "Samsung capex", "Intel capex cut", "Micron capex",
        "SK Hynix capex", "ASML bookings", "Applied Materials guidance",
@@ -126,14 +150,26 @@ tickers:
     sector: semicap_inspection
     float_class: small
     ir_feeds:
-      - https://www.camtek.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [ONTO, KLAC, NVMI, ASMPT, TER]
     peer_names: ["Onto Innovation", "KLA", "Nova", "ASMPT", "Besi",
-                 "Amkor", "ASE Technology", "JCET"]
+                 "Amkor", "ASE Technology", "JCET", "Rudolph Technologies"]
     themes:
       ["advanced packaging inspection", "HBM", "high bandwidth memory",
        "CoWoS", "hybrid bonding", "2.5D packaging", "3D packaging", "panel level packaging",
        "chiplet", "OSAT capex", "bumping inspection", "AI accelerator packaging"]
+    products:
+      EAGLE_INSPECTION: ["Camtek Eagle", "Eagle inspection"]
+      HAWK_INSPECTION: ["Camtek Hawk", "Hawk inspection"]
+      GOLDEN_EYE: ["Golden Eye inspection"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Onto Innovation Dragonfly", "KLA ICOS", "Cohu inspection",
+       "Nordson test", "Toray inspection"]
     peer_events_that_matter:
       ["TSMC CoWoS capacity expansion", "SK Hynix HBM capacity", "Micron HBM",
        "Samsung HBM qualification", "Nvidia supply chain", "Amkor capex", "ASE capex"]
@@ -149,15 +185,42 @@ tickers:
     sector: enterprise_software_cx
     float_class: large
     ir_feeds:
-      - https://www.nice.com/rss/press-releases.xml
+      # None exists. Checked 2026-08-02: neither nice.com/press-releases nor
+      # nice.com/company/investors declares a feed, the IR site IS nice.com (Q4
+      # hosts only the webcasts, at events.q4inc.com), and no ir./investors.
+      # host answers for this domain. NICE distributes through Business Wire.
+      # Consequence, and it is the reported one: the 5 August reporting date was
+      # published on 22 July as "NiCE Provides Webcast and Dial-in Details for
+      # its Second Quarter 2026 Results Teleconference", and google_news never
+      # returned it - our query anchors on "NICE Ltd" / "NICE Systems" and that
+      # headline says only "NiCE". A bare "NICE" alias is not the answer; it is
+      # an ordinary English word, which is why the ticker is already on
+      # rss._ENGLISH_WORD_TICKERS.
+    # No feed, but no press release is needed either: the IR events page states
+    # the date outright - "Q2 2026 Earnings Release Conference Call / Date:
+    # Wednesday, August 5, 2026" - and it is server-rendered, so it can be read
+    # without a browser. Read by collect/ir_pages.py.
+    ir_pages:
+      - https://www.nice.com/company/investors/ir-events
     peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, LPSN, PEGA]
+    # Amazon Connect is AWS's contact-centre PRODUCT, so it belongs in
+    # competitor_products; the company here is Amazon.
     peer_names: ["Genesys", "Five9", "Verint", "Twilio", "Salesforce", "Zoom",
-                 "8x8", "Amazon Connect", "Microsoft Dynamics", "Pegasystems",
+                 "8x8", "Amazon", "Microsoft Dynamics", "Pegasystems",
                  "Sprinklr", "Zendesk"]
     themes:
       ["contact center as a service", "CCaaS", "agentic AI", "AI agents replacing seats",
        "conversational AI", "seat-based pricing disruption", "financial crime compliance",
        "AML software", "workforce engagement management"]
+    products:
+      CXONE: ["CXone", "NICE CXone"]
+      ACTIMIZE: ["Actimize", "financial crime detection"]
+      ENLIGHTEN_AI: ["Enlighten AI", "Enlighten Copilot"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Genesys Cloud CX", "Five9 Intelligent CX", "Verint Da Vinci", "Twilio Flex",
+       "Amazon Connect", "Salesforce Service Cloud", "Zoom Contact Center",
+       "Pegasystems Customer Service"]
     peer_events_that_matter:
       ["Salesforce Agentforce", "Five9 guidance cut", "Genesys IPO",
        "Twilio AI", "OpenAI voice agents", "Sierra AI funding"]
@@ -173,13 +236,21 @@ tickers:
     sector: enterprise_software_cx
     float_class: micro
     ir_feeds:
-      - https://ir.liveperson.com/rss/pressrelease.aspx
+      - https://ir.liveperson.com/rss/news-releases.xml
     peers: [NICE, VRNT, TWLO, ZM, EGHT]
-    peer_names: ["NICE", "Verint", "Twilio", "Genesys", "Intercom", "Zendesk", "Ada", "Sierra AI"]
+    peer_names: ["NICE", "Verint", "Twilio", "Genesys", "Intercom", "Zendesk",
+                 "Ada", "Sierra AI", "Kore.ai"]
     themes:
       ["conversational AI", "chatbot", "convertible notes", "debt exchange",
        "going concern", "Nasdaq minimum bid price", "reverse stock split",
        "customer churn", "restructuring", "activist investor"]
+    products:
+      CONVERSATIONAL_CLOUD: ["Conversational Cloud", "LiveEngage"]
+      LIVEPERSON_AI: ["LivePerson AI", "conversational AI platform"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Intercom Fin", "Zendesk AI", "Salesforce Einstein", "Genesys Cloud CX",
+       "Twilio Flex", "Sprinklr Service", "Verint Da Vinci"]
     risk_flags: [dilution_risk, delisting_risk, high_short_interest]
     catalysts: [earnings]
 
@@ -193,16 +264,28 @@ tickers:
     sector: adtech
     float_class: small
     ir_feeds:
-      - https://investors.perion.com/rss/pressrelease.aspx
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [TBLA, OB, CRTO, MGNI, PUBM, TTD, DV, IAS, APPS, ZETA, GOOGL, META]
     peer_names: ["Taboola", "Outbrain", "Teads", "Criteo", "Magnite", "PubMatic",
                  "The Trade Desk", "DoubleVerify", "Integral Ad Science",
-                 "Digital Turbine", "Zeta Global", "Google", "Microsoft Advertising", "Bing"]
+                 "Digital Turbine", "Zeta Global", "Google", "Microsoft", "Bing"]
     themes:
       ["search advertising", "Microsoft Bing partnership", "publisher revenue share",
        "cookie deprecation", "privacy sandbox", "retail media", "CTV advertising",
        "programmatic ad spend", "Google antitrust remedies", "ad tech divestiture",
        "AI search disruption", "SGE", "generative search"]
+    products:
+      PERION_WILDFIRE: ["Perion Wildfire"]
+      UNDERTONE: ["Undertone", "high impact advertising"]
+      PERION_SORT: ["Perion SORT", "cookieless targeting"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Taboola Realize", "Outbrain Onyx", "Criteo Commerce Media", "Magnite ClearLine",
+       "PubMatic Connect", "The Trade Desk Kokai", "Microsoft Advertising"]
     risk_flags: [single_partner_concentration]
     single_points_of_failure:
       ["Microsoft Bing search monetization terms", "Google ad policy change"]
@@ -218,15 +301,23 @@ tickers:
     sector: fintech_payments
     float_class: small
     ir_feeds:
-      - https://investors.nayax.com/rss/pressrelease.aspx
     peers: [CTLP, FOUR, PYPL, ADYEN.AS, GPN, TOST, WLN.PA, MARA]
     peer_names: ["Cantaloupe", "Shift4", "PayPal", "Adyen", "Global Payments",
-                 "Toast", "Worldline", "Nuvei", "SumUp", "Verifone", "Ingenico"]
+                 "Toast", "Worldline", "Nuvei", "SumUp", "Verifone", "Ingenico",
+                 "PayRange", "USA Technologies", "Crane Payment Innovations"]
     themes:
       ["unattended payments", "vending payments", "EV charging payments",
        "interchange fees", "card scheme fees", "payment facilitator regulation",
        "PSD3", "EU interchange regulation", "take rate compression",
        "merchant acquiring", "cashless vending mandate"]
+    products:
+      VPOS_TOUCH: ["VPOS Touch", "Nayax VPOS"]
+      MONYX_WALLET: ["Monyx Wallet"]
+      NAYAX_CORE: ["Nayax Core", "unattended payment terminal"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Cantaloupe ePort", "Ingenico terminal", "Worldline terminal",
+       "Adyen unattended"]
     catalysts: [earnings, nama_show, eu_vending]
 
   ORA:
@@ -242,13 +333,22 @@ tickers:
       - https://investor.ormat.com/rss/pressrelease.aspx
     peers: [NEE, BEP, CEG, VST, RUN, FSLR, ENPH, AES]
     peer_names: ["NextEra Energy", "Brookfield Renewable", "Constellation Energy",
-                 "Vistra", "Calpine", "Enel Green Power", "AES", "Sunrun", "Fluence"]
+                 "Vistra", "Calpine", "Enel Green Power", "AES", "Sunrun", "Fluence",
+                 "Fervo Energy"]
     themes:
       ["geothermal", "power purchase agreement", "PPA award", "energy storage",
        "BESS", "Inflation Reduction Act", "45U", "48E", "ITC", "PTC",
        "tax credit transferability", "FERC", "interconnection queue",
        "data center power demand", "behind the meter", "baseload clean power",
        "BLM geothermal leasing", "categorical exclusion geothermal"]
+    products:
+      ORMAT_ENERGY_CONVERTER: ["Ormat Energy Converter", "OEC unit"]
+      GEOTHERMAL_PLANT: ["binary geothermal", "geothermal power plant"]
+      RECOVERED_ENERGY: ["recovered energy generation"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Calpine geothermal", "Enel Green Power geothermal", "Eavor Loop",
+       "Tesla Megapack", "Fluence storage", "Turboden ORC"]
     geographies: ["Nevada", "Hawaii", "Puna", "Kenya", "Olkaria", "Indonesia", "Guatemala", "Honduras", "New Zealand"]
     catalysts: [earnings, analyst_day, ferc_orders]
 
@@ -262,7 +362,7 @@ tickers:
     sector: specialty_chemicals_fertilizer
     float_class: mid
     ir_feeds:
-      - https://www.icl-group.com/feed/
+      - https://investors.icl-group.com/rss/pressrelease.aspx
     peers: [NTR, MOS, CF, YAR.OL, SQM, CMP, ALB, IPI]
     peer_names: ["Nutrien", "Mosaic", "K+S", "Yara", "Uralkali", "Belaruskali",
                  "Arab Potash", "SQM", "Compass Minerals", "Albemarle", "OCP",
@@ -273,6 +373,16 @@ tickers:
        "LFP battery materials", "Dead Sea concession", "royalty", "Sheshinski",
        "REACH bromine restriction", "flame retardant regulation", "fertilizer export tariff",
        "Belarus sanctions potash", "Russia fertilizer sanctions", "food security"]
+    products:
+      POTASH_ICL: ["muriate of potash", "potash contract"]
+      BROMINE_ICL: ["elemental bromine", "flame retardant"]
+      SPECIALTY_PHOSPHATES: ["specialty phosphates", "phosphate fertilizer"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      # Belaruskali and Compass Minerals are producers, i.e. peers, and both are
+      # listed as such above. A company here outranked its own PEER link.
+      ["Nutrien potash", "Mosaic phosphate", "K+S potash", "Uralkali potash",
+       "Albemarle bromine", "Lanxess bromine", "OCP phosphate"]
     commodity_watch: [potash, bromine, phosphate, sulphur, ammonia]
     catalysts: [earnings, china_potash_contract, indian_potash_contract]
 
@@ -285,8 +395,25 @@ tickers:
     exchange: NASDAQ
     sector: defense
     float_class: mid
+    # `query` is what USASpending is asked; `accept` is what we will believe.
+    # recipient_search_text is fuzzy and walks the parent/child hierarchy, which
+    # is exactly why it is used - it reaches the operating subsidiaries that do
+    # the contracting, and no press feed names them. The same fuzziness returned
+    # REAL-TIME LABORATORIES, LLC to an Elbit query (verified 2026-08-02), so a
+    # row is kept only when its recipient name or UEI is one we listed here.
+    # Failing `accept` DROPS the row; it is never downgraded to a weaker link,
+    # because the whole claim this collector makes is "the config named this
+    # recipient". UEIs verified against live award rows on 2026-08-02.
+    federal_recipients:
+      query:  ["ELBIT SYSTEMS OF AMERICA"]
+      accept: ["ELBIT"]
+      uei:    ["TBLKC12FCDH8", "MYE5L662RU13", "QP32A82TA5G8"]
     ir_feeds:
-      - https://elbitsystems.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [RTX, LMT, GD, NOC, LHX, RHM.DE, BA.L, LDO.MI, HO.PA, KOG.OL, SAABB.ST]
     peer_names: ["RTX", "Lockheed Martin", "General Dynamics", "Northrop Grumman",
                  "L3Harris", "Rheinmetall", "BAE Systems", "Leonardo", "Thales",
@@ -298,6 +425,15 @@ tickers:
        "drone procurement", "air defense order", "foreign military sale",
        "DSCA notification", "arms export license", "arms embargo Israel",
        "ITAR", "offset obligations", "backlog record"]
+    products:
+      IRON_FIST: ["Iron Fist", "active protection system"]
+      HERMES_UAV: ["Hermes 900", "Hermes 450", "Hermes 650"]
+      PULS_LAUNCHER: ["PULS rocket", "Precise Universal Launching System"]
+      JMUSIC_DIRCM: ["J-MUSIC", "DIRCM", "infrared countermeasures"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Rafael Trophy", "Trophy APS", "Rheinmetall StrikeShield", "Leonardo Falco",
+       "Thales Watchkeeper", "Bayraktar TB2", "General Atomics MQ-9", "Anduril Ghost"]
     geographies: ["Israel", "United States", "Germany", "Netherlands", "UK", "Romania", "Sweden", "Australia", "India"]
     risk_flags: [export_license_risk, geopolitical_headline_risk]
     catalysts: [earnings, dsei, eurosatory, ila_berlin, dod_contract_daily]
@@ -311,16 +447,37 @@ tickers:
     exchange: NASDAQ
     sector: aerospace_mro
     float_class: micro
+    # See ESLT for what query/accept are for. TAT contracts almost entirely
+    # through subsidiaries that do not carry its name: of 100 awards on
+    # 2026-08-02, 79 were LIMCO AIREPAIR INC., 4 PIEDMONT AVIATION COMPONENT
+    # SERVICES, LLC and only 17 TAT TECHNOLOGIES LTD itself. Both subsidiaries
+    # are already in this entry's `aliases`; an accept list of just the parent
+    # name would have thrown away 83% of this name's federal business.
+    federal_recipients:
+      query:  ["TAT TECHNOLOGIES"]
+      accept: ["TAT TECHNOLOGIES", "LIMCO AIREPAIR", "PIEDMONT AVIATION"]
+      uei:    ["TZMTECJ51C87", "LLNNTHPDWYV1", "Y8RDAEXDFGK1"]
     ir_feeds:
-      - https://www.tat-technologies.com/feed/
+      - https://www.tat-technologies.com/category/press-releases/feed/
     peers: [HEI, TDG, AIR, DCO, RTX, HON, GE, SPR]
     peer_names: ["HEICO", "TransDigm", "AAR Corp", "Ducommun", "Collins Aerospace",
-                 "Honeywell Aerospace", "Safran", "StandardAero", "MTU Aero Engines"]
+                 "Honeywell Aerospace", "Safran", "StandardAero", "MTU Aero Engines",
+                 "Triumph Group"]
     themes:
       ["aftermarket MRO", "APU overhaul", "landing gear overhaul", "heat exchanger",
        "PMA parts", "FAA airworthiness directive", "aircraft utilization",
        "air traffic growth", "engine shop visits", "GTF powder metal", "aging fleet",
        "Boeing production rate", "Airbus delivery rate", "aerospace supply chain"]
+    products:
+      AVIATION_HEAT_TRANSFER: ["aircraft heat exchanger", "aviation heat transfer"]
+      APU_OVERHAUL: ["APU overhaul", "auxiliary power unit"]
+      LANDING_GEAR_MRO: ["landing gear overhaul"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      # "AAR Corp. reports fourth quarter results" is a competitor's earnings.
+      # As a rival PRODUCT it scored ~46% over the PEER link it should have had.
+      ["Honeywell APU", "Pratt Whitney APU", "Liebherr heat exchanger",
+       "HEICO parts"]
     catalysts: [earnings, mro_americas, paris_air_show, farnborough]
 
   GILT:
@@ -333,7 +490,16 @@ tickers:
     sector: satcom
     float_class: small
     ir_feeds:
-      - https://www.gilat.com/feed/
+      # None exists, re-checked 2026-08-02. /feed/ is the site-wide WordPress
+      # feed and is exactly as advertised - "Exceptional In-Flight Online
+      # Experience", "Phillips 66 Protecting Oil Pipelines" - marketing
+      # collateral that at trust 1.0 published as breaking company news. The
+      # real releases live under /pressreleases/, which has no feed of its own
+      # (/pressreleases/feed/ and /press-releases/feed/ both 404) and sits
+      # behind a Sucuri JS challenge that answers 307 to anything without a
+      # browser, wp-json included. So GILT's reporting date can only reach us
+      # second-hand: it arrives via google_news at confidence 0.8, labelled
+      # "(reported by google_news)" rather than as the issuer's own word.
     peers: [VSAT, SATS, CMTL, ASTS, IRDM, SES.PA, RKLB]
     peer_names: ["Viasat", "EchoStar", "Hughes Network Systems", "Comtech",
                  "ST Engineering iDirect", "SES", "Intelsat", "Eutelsat", "OneWeb",
@@ -343,6 +509,16 @@ tickers:
        "LEO constellation", "multi-orbit", "defense satcom", "SATCOM as a service",
        "military satellite communications", "FCC license", "spectrum allocation",
        "ground segment", "gateway order", "direct to device"]
+    products:
+      SKYEDGE: ["SkyEdge", "SkyEdge IV", "SkyEdge II-c"]
+      TAURUS_MODEM: ["Taurus modem"]
+      GILAT_ESA: ["electronically steered antenna", "ESA terminal"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      # ST Engineering iDirect is a ground-segment vendor, i.e. a peer, and is
+      # listed as one above. A company here outranked its own PEER link.
+      ["Hughes JUPITER", "Viasat terminal", "Comtech modem",
+       "Kratos OpenSpace", "Starlink terminal", "OneWeb terminal", "Kymeta antenna"]
     catalysts: [earnings, satellite_conference, aix]
 
   ALLT:
@@ -355,14 +531,24 @@ tickers:
     sector: network_security
     float_class: micro
     ir_feeds:
-      - https://www.allot.com/feed/
+      - https://investors.allot.com/rss/news-releases.xml
     peers: [RDWR, CHKP, CSCO, NOK, ERIC, JNPR]
-    peer_names: ["Radware", "Check Point", "Sandvine", "Cisco", "Nokia Deepfield",
+    # Deepfield is Nokia's analytics PRODUCT and belongs in competitor_products;
+    # the company here is Nokia.
+    peer_names: ["Radware", "Check Point", "Sandvine", "Cisco", "Nokia",
                  "Ericsson", "Juniper", "Palo Alto Networks", "Netscout"]
     themes:
       ["deep packet inspection", "DPI", "network intelligence", "security as a service",
        "SECaaS", "telco security", "carrier capex", "5G core", "ARR growth",
        "convertible loan", "Nasdaq listing compliance", "operator contract win"]
+    products:
+      NETWORKSECURE: ["NetworkSecure", "network-based security", "clean pipe security"]
+      DDOS_SECURE: ["DDoS Secure", "DDoS mitigation"]
+      ALLOT_SMART: ["Allot Smart", "deep packet inspection", "traffic management"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Sandvine ActiveLogic", "Nokia Deepfield", "Cisco Ultra Traffic", "Radware DefensePro",
+       "NetScout Arbor", "Procera PacketLogic", "Radcom ACE", "Huawei SmartCare"]
     risk_flags: [dilution_risk, delisting_risk, customer_concentration]
     catalysts: [earnings, mwc_barcelona]
 
@@ -376,7 +562,21 @@ tickers:
     sector: voice_networking
     float_class: small
     ir_feeds:
-      - https://www.audiocodes.com/feed/
+      # None exists, re-checked 2026-08-02. audiocodes.com declares no feed on
+      # the newsroom (/news/press-releases), the financial sub-section, or the
+      # IR lobby, and no ir./investors. host resolves. AudioCodes distributes
+      # through GlobeNewswire, whose per-organisation feed for this issuer
+      # (globenewswire.com/RssFeed/organization/8898/feed.xml) cannot be used:
+      # the host never answers us at all - every request read-times out, the
+      # same wall as dsca.mil and echa.europa.eu. The 4 August date reaches us
+      # through google_news instead; see the `_EARNINGS_SUBJECT` note in
+      # pipeline.py for why it was being dropped on arrival.
+    # No feed, but the date is on the site: this page lists every financial
+    # release, the 6 July row announces the reporting date, and the release
+    # behind it says "on August 4, 2026, before the market open". Read by
+    # collect/ir_pages.py, which follows the row for exactly that sentence.
+    ir_pages:
+      - https://www.audiocodes.com/news/press-releases/financial
     peers: [RBBN, CSCO, MSFT, ZM, FIVN, AVYA, NICE]
     peer_names: ["Ribbon Communications", "Cisco", "Microsoft Teams", "Zoom",
                  "Avaya", "Mitel", "Oracle Communications", "Five9", "Genesys"]
@@ -385,6 +585,14 @@ tickers:
        "Operator Connect", "Teams Direct Routing", "UCaaS", "voice AI agents",
        "conversational AI for contact center", "Microsoft licensing change",
        "share buyback", "dividend"]
+    products:
+      MEDIANT_SBC: ["Mediant SBC", "session border controller"]
+      VOCA_CIC: ["Voca CIC", "conversational IVR"]
+      LIVE_FOR_TEAMS: ["Live for Teams", "Teams Direct Routing", "Operator Connect"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Ribbon SBC", "Oracle Acme Packet", "Cisco CUBE", "Sangoma SBC", "Metaswitch Perimeta",
+       "Avaya Aura", "Anywhere365"]
     single_points_of_failure:
       ["Microsoft Teams certification/partner program change",
        "Microsoft bundling native voice"]
@@ -400,7 +608,6 @@ tickers:
     sector: diagnostics_pharma
     float_class: small
     ir_feeds:
-      - https://www.opko.com/feed/
     peers: [LH, DGX, ASND, PFE, NVO, MRK, EXAS, NTRA]
     peer_names: ["Labcorp", "Quest Diagnostics", "Ascendis Pharma", "Pfizer",
                  "Novo Nordisk", "Merck", "Exact Sciences", "Natera", "Guardant"]
@@ -427,7 +634,7 @@ tickers:
     sector: biotech_clinical
     float_class: micro
     ir_feeds:
-      - https://oramed.com/feed/
+      - https://oramed.com/category/press-releases/feed/
     peers: [NVO, LLY, BIOX, SCLX, MNKD]
     peer_names: ["Novo Nordisk", "Eli Lilly", "Biocon", "Scilex", "MannKind",
                  "Diasome", "Generex"]
@@ -436,6 +643,13 @@ tickers:
        "protein oral delivery", "POD technology", "type 2 diabetes",
        "NASH MASH", "cash runway", "at-the-market offering", "ATM program",
        "reverse stock split", "Nasdaq minimum bid", "net cash vs market cap"]
+    products:
+      ORMD_0801: ["ORMD-0801", "oral insulin"]
+      ORMD_0901: ["ORMD-0901", "oral GLP-1"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      ["Rybelsus", "oral semaglutide", "Afrezza", "inhaled insulin", "Mounjaro", "Ozempic",
+       "Tresiba", "Toujeo", "insulin icodec", "Awiqli"]
     risk_flags: [dilution_risk, binary_readout_risk, cash_shell_dynamics]
     catalysts: [earnings, ada_scientific_sessions, easd, fda_meeting]
 
@@ -449,7 +663,11 @@ tickers:
     sector: plasma_biopharma
     float_class: micro
     ir_feeds:
-      - https://www.kamada.com/feed/
+      # No press-release feed exists on this domain: /feed/ is the
+      # site-wide WordPress feed (marketing, case studies, blog) or is
+      # empty. At trust 1.0 that is worse than nothing - it published
+      # evergreen collateral as breaking company news. EDGAR, Google
+      # News and MAYA still cover this name.
     peers: [GRFS, ADMA, TAK, CSL.AX, EBS]
     peer_names: ["Grifols", "ADMA Biologics", "Takeda", "CSL Behring",
                  "Emergent BioSolutions", "Octapharma", "Kedrion", "BioLife Plasma"]
@@ -460,10 +678,15 @@ tickers:
        "AAT deficiency", "rabies immune globulin", "CMV immune globulin",
        "tender award Israeli Ministry of Health", "distribution agreement"]
     products:
-      KEDRAB: ["rabies immune globulin", "HyperRAB competitor"]
-      CYTOGAM: ["CMV immune globulin", "transplant"]
+      # "Phase 3" and "transplant" are the vocabulary of the whole industry, not
+      # Kamada's products: they put KMDA on "Merck's Phase 3 KEYNOTE-671 trial
+      # met its primary endpoint" at DIRECT 0.82 - ALERT, 75.2 - and on a
+      # pig-to-human heart transplant in Europe. "HyperRAB competitor" named
+      # Grifols' product, which is already in competitor_products below.
+      KEDRAB: ["rabies immune globulin"]
+      CYTOGAM: ["CMV immune globulin"]
       GLASSIA: ["alpha-1 antitrypsin", "Takeda royalty"]
-      INHALED_AAT: ["inhaled alpha-1 antitrypsin", "InnovAATe", "Phase 3"]
+      INHALED_AAT: ["inhaled alpha-1 antitrypsin", "InnovAATe"]
     competitor_products: ["HyperRAB", "Imogam", "Prolastin", "Zemaira", "Aralast"]
     catalysts: [earnings, fda_bla_decision, plasma_industry_data]
 
@@ -493,7 +716,11 @@ tickers:
       GS4224: ["Gilead PD-L1 small molecule"]
     competitor_products:
       ["tiragolumab", "vibostolimab", "domvanalimab", "belrestotug",
-       "ociperlimab", "SKYSCRAPER", "STAR-221", "GALAXIES"]
+       # Trial programme names must carry their number. Bare "SKYSCRAPER" and
+       # "GALAXIES" are ordinary English words and matched building and
+       # astronomy stories as competitor readouts.
+       "ociperlimab", "SKYSCRAPER-01", "SKYSCRAPER-05", "SKYSCRAPER-06",
+       "STAR-221", "GALAXIES Lung-301"]
     read_across_note: >
       Any large-pharma TIGIT-class readout (Roche tiragolumab, Merck vibostolimab,
       Arcus/Gilead domvanalimab, GSK/iTeos belrestotug) moves CGEN hard in both
@@ -511,16 +738,27 @@ tickers:
     sector: medical_devices
     float_class: micro
     ir_feeds:
-      - https://www.brainsway.com/feed/
+      - https://investors.brainsway.com/rss/news-releases.xml
     peers: [STIM, CMPS, JNJ, NUVA]
-    peer_names: ["Neuronetics", "NeuroStar", "Magstim", "MagVenture",
-                 "Compass Pathways", "Johnson & Johnson", "Spravato", "Greenbrook TMS"]
+    # NeuroStar is Neuronetics' device and Spravato is J&J's drug; both are
+    # products, and both companies are already named here.
+    peer_names: ["Neuronetics", "Magstim", "MagVenture", "Nexstim",
+                 "Magnus Medical", "Compass Pathways", "Johnson & Johnson",
+                 "Greenbrook TMS"]
     themes:
       ["transcranial magnetic stimulation", "Deep TMS", "FDA 510(k) clearance",
        "De Novo clearance", "CPT code reimbursement", "CMS coverage determination",
        "treatment resistant depression", "OCD indication", "smoking cessation",
        "adolescent depression", "installed base", "recurring revenue per system",
        "accelerated TMS protocol", "SAINT protocol"]
+    products:
+      DEEP_TMS: ["Deep TMS", "dTMS", "H-coil", "H1 coil"]
+      BRAINSWAY_360: ["BrainsWay 360"]
+    # A rival's launch, approval or design win here reads across.
+    competitor_products:
+      # Four rival COMPANIES sat here and outranked their own PEER links:
+      # "Neuronetics reports third quarter revenue" arrived as a rival program.
+      ["NeuroStar", "SAINT neuromodulation", "Spravato", "esketamine"]
     catalysts: [earnings, apa_annual, clinical_tms_society]
 
   KEN:
@@ -533,7 +771,6 @@ tickers:
     sector: power_holding
     float_class: micro
     ir_feeds:
-      - https://www.kenon-holdings.com/feed/
     peers: [VST, CEG, NRG, TLN, ZIM]
     peer_names: ["Vistra", "Constellation Energy", "NRG Energy", "Talen Energy",
                  "OPC Energy", "ZIM Integrated Shipping", "Calpine"]
@@ -542,6 +779,18 @@ tickers:
        "independent power producer", "gas-fired generation", "special dividend",
        "sum of the parts discount", "asset sale", "buyback",
        "Israeli electricity tariff", "IPP tender", "container freight rate"]
+    products:
+      OPC_ENERGY: ["OPC Energy", "OPC Rotem", "OPC Hadera"]
+      CPV_GROUP: ["CPV Group", "Competitive Power Ventures"]
+    # A rival's launch, approval or design win here reads across.
+    # Deliberately empty. This field means "a rival PRODUCT whose fate reads
+    # across to ours" - a molecule, a design socket, a named platform. It was
+    # filled with the peer *companies* already listed above, which promoted an
+    # NRG quarterly earnings preview to PRODUCT_RIVAL at 0.85 and scored it 36.
+    # A merchant power generator has no product rival; it has peers, and those
+    # belong in peer_names, where the read-across is labelled PEER and weighted
+    # for what it is. The rival query falls back to peer_names for this name.
+    competitor_products: []
     structure_note: >
       Holding company: value driven by OPC Energy (TASE: OPCE) and CPV.
       OPC's TASE disclosures and PJM/ERCOT auction results are effectively
@@ -563,8 +812,8 @@ tickers:
     peer_names:
       ["CrowdStrike", "Zscaler", "Fortinet", "SentinelOne", "Check Point",
        "Cloudflare", "Okta", "Tenable", "CyberArk", "Rubrik", "Wiz",
-       "Netskope", "Microsoft Defender", "Microsoft Security", "Cisco Security",
-       "Splunk", "Trellix", "Proofpoint"]
+       "Netskope", "Microsoft", "Microsoft Defender", "Microsoft Security",
+       "Cisco Security", "Splunk", "Trellix", "Proofpoint"]
     themes:
       ["platformization", "SASE", "secure access service edge", "zero trust",
        "next-generation firewall", "XDR", "SIEM replacement", "CNAPP",

@@ -39,6 +39,12 @@ HOST_RATE_LIMITS = {
 }
 DEFAULT_RATE = 2.0
 
+# Used for every host except sec.gov - see HttpClient._ua_for.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
+
 
 class _RateLimiter:
     """Simple per-host spacing. Threadsafe; good enough for a single-user box."""
@@ -92,6 +98,7 @@ class HttpClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.backoff_base = backoff_base
+        self.user_agent = user_agent
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -100,6 +107,22 @@ class HttpClient:
                 "Connection": "keep-alive",
             }
         )
+
+    def _ua_for(self, host: str) -> str:
+        """The SEC *mandates* a contact-bearing User-Agent and will ban clients
+        without one, so sec.gov always gets ours.
+
+        The IR platforms are the opposite problem: several of them (Q4 Inc hosts
+        such as ir.liveperson.com and investors.paloaltonetworks.com) do not
+        reject an unfamiliar agent, they simply never answer - each one burned
+        ~90s per pass in read timeouts and three retries while returning 200 in
+        1.5s to an ordinary browser string. These are public press-release feeds
+        published for syndication; the request is the same, only the header
+        differs.
+        """
+        if host.endswith("sec.gov"):
+            return self.user_agent
+        return BROWSER_UA
 
     def get(
         self,
@@ -113,6 +136,7 @@ class HttpClient:
     ) -> Response:
         host = urlsplit(url).netloc
         req_headers = dict(headers or {})
+        req_headers.setdefault("User-Agent", self._ua_for(host))
         if etag:
             req_headers["If-None-Match"] = etag
         if last_modified:
@@ -134,6 +158,57 @@ class HttpClient:
 
             if resp.status_code == 304:
                 return Response(304, "", b"", dict(resp.headers), resp.url, not_modified=True)
+
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < self.max_retries:
+                retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+                self._backoff(attempt, f"HTTP {resp.status_code}", url, retry_after)
+                continue
+
+            if resp.status_code >= 400 and resp.status_code not in allow_status:
+                raise HttpError(resp.status_code, url, resp.text[:400])
+
+            return Response(
+                resp.status_code, resp.text, resp.content, dict(resp.headers), resp.url
+            )
+
+        raise last_exc or HttpError(0, url, "exhausted retries")
+
+    def post(
+        self,
+        url: str,
+        *,
+        json: Any,
+        headers: dict[str, str] | None = None,
+        allow_status: tuple[int, ...] = (),
+    ) -> Response:
+        """Same politeness as `get`, for the one source that refuses a GET.
+
+        USASpending's award search answers **405 to GET** - the filter set is a
+        nested document that will not fit in a query string - so a POST is the
+        only way to reach it. Everything that makes `get` safe applies equally
+        and is repeated here rather than shared, because the two differ in one
+        respect worth keeping visible: there is no ETag or If-Modified-Since. A
+        POST is not conditionally cacheable, so this method has no 304 branch
+        and callers must not expect `not_modified`.
+        """
+        host = urlsplit(url).netloc
+        req_headers = dict(headers or {})
+        req_headers.setdefault("User-Agent", self._ua_for(host))
+        req_headers.setdefault("Content-Type", "application/json")
+
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            _limiter.wait(host)
+            try:
+                resp = self.session.post(
+                    url, json=json, headers=req_headers, timeout=self.timeout
+                )
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    raise
+                self._backoff(attempt, f"{type(exc).__name__}: {exc}", url)
+                continue
 
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < self.max_retries:
                 retry_after = _parse_retry_after(resp.headers.get("Retry-After"))

@@ -17,11 +17,167 @@ surfaces cannot drift apart.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
+import re
+import statistics
+from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
+from zoneinfo import ZoneInfo
 
 from .config import Config, get_config
 from .db import Database
+from .enrich.linker import causal_eligible
+
+MARKET_TZ = ZoneInfo("America/New_York")
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+MARKET_CLOSE_HOUR = 16
+
+# What a trust weight actually means, in words. The number alone ("trust 0.60")
+# tells a trader nothing about whether they should go and read the original.
+TRUST_MEANING = [
+    (0.95, "primary document - the issuer or the regulator itself"),
+    (0.85, "first-hand, but not the issuer's own words"),
+    (0.70, "reliable secondary reporting"),
+    (0.00, "aggregator - somebody else's reporting, rewritten"),
+]
+
+# What each relation means, in one line. This is the canonical copy: the REST
+# manifest and the MCP instructions both read it from here, so the explanation a
+# trader sees and the explanation the agent is given can never drift apart.
+RELATION_MEANING = {
+    "DIRECT": "the company's own news - treat as fact about the issuer",
+    "SUBSIDIARY": "a controlled entity; economically the same issuer",
+    "PRODUCT_RIVAL": "same molecule / mechanism / design socket - read across",
+    "CUSTOMER": "a customer's spend, which is our revenue",
+    "PEER": "a named competitor's own news - sector sentiment, not our fact",
+    "SUPPLIER": "an input we depend on",
+    "SECTOR_REG": "a regulator acting on our sector",
+    "SECTOR_THEME": "a thematic story touching the sector",
+    "MACRO": "a market-wide condition, not a company fact",
+}
+
+# Free price feeds, and what each one is actually giving you.
+PROVIDER_MEANING = {
+    "yahoo": "Yahoo chart endpoint - unofficial and delayed (~15 min), "
+             "includes pre/post-market prints",
+    "stooq": "Stooq daily bar - end-of-day only, never intraday",
+}
+
+# ---------------------------------------------------------------- Hebrew ---- #
+# The HTML terminal is Hebrew and right-to-left; the REST/MCP contract stays
+# English because that is what the agent is instructed in. These are the
+# parallel glossaries, kept next to their English twins so a new relation or
+# provider cannot be added to one and forgotten in the other - a test asserts
+# the key sets match.
+RELATION_MEANING_HE = {
+    "DIRECT": "החדשות של החברה עצמה - עובדה על המנפיק",
+    "SUBSIDIARY": "ישות מוחזקת; כלכלית אותו מנפיק",
+    "PRODUCT_RIVAL": "אותה מולקולה / אותו מנגנון / אותו סוקט - קריאה צולבת",
+    "CUSTOMER": "הוצאה של לקוח, שהיא ההכנסה שלנו",
+    "PEER": "חדשות של מתחרה בשמו - סנטימנט סקטוריאלי, לא עובדה עלינו",
+    "SUPPLIER": "תשומה שאנחנו תלויים בה",
+    "SECTOR_REG": "רגולטור שפועל על הסקטור שלנו",
+    "SECTOR_THEME": "סיפור תמטי שנוגע לסקטור",
+    "MACRO": "תנאי שוק רחב, לא עובדה על החברה",
+}
+
+# Short labels for the dense table column.
+RELATION_LABEL_HE = {
+    "DIRECT": "ישיר",
+    "SUBSIDIARY": "חברה־בת",
+    "PRODUCT_RIVAL": "מוצר מתחרה",
+    "CUSTOMER": "לקוח",
+    "PEER": "מתחרה",
+    "SUPPLIER": "ספק",
+    "SECTOR_REG": "רגולציה",
+    "SECTOR_THEME": "תמה",
+    "MACRO": "מאקרו",
+}
+
+TRUST_MEANING_HE = [
+    (0.95, "מסמך ראשוני - המנפיק או הרגולטור עצמו"),
+    (0.85, "מכלי ראשון, אך לא מפי המנפיק"),
+    (0.70, "דיווח משני אמין"),
+    (0.00, "אגרגטור - דיווח של מישהו אחר, בכתיבה מחדש"),
+]
+
+PROVIDER_MEANING_HE = {
+    "yahoo": "endpoint הגרפים של Yahoo - לא רשמי ומושהה (כ-15 דק׳), "
+             "כולל הדפסות טרום/אחרי המסחר",
+    "stooq": "נר יומי של Stooq - סוף יום בלבד, אף פעם לא תוך-יומי",
+}
+
+SESSION_LABEL_HE = {
+    "pre-market": "טרום-מסחר",
+    "regular session": "מסחר רגיל",
+    "after hours": "אחרי המסחר",
+    "overnight": "לילה",
+    "weekend": "סוף שבוע",
+    "premarket": "טרום-מסחר",
+    "regular": "מסחר רגיל",
+    "afterhours": "אחרי המסחר",
+    "closed": "סגור",
+}
+
+
+def last_session_close(now: datetime | None = None) -> datetime:
+    """The most recent US equity close at or before ``now``, in UTC.
+
+    Used to decide whether a story could have moved today's print. Mid-session
+    this returns yesterday's close, so everything published today is eligible;
+    after the bell it returns today's close, so a filing accepted at 16:13 ET
+    is not offered as the explanation for a move that finished at 16:00.
+    """
+    now = now or datetime.now(timezone.utc)
+    et = now.astimezone(MARKET_TZ)
+    close = et.replace(hour=MARKET_CLOSE_HOUR, minute=0, second=0, microsecond=0)
+    if et < close:
+        close -= timedelta(days=1)
+    while close.weekday() >= 5:          # roll back over Sat/Sun
+        close -= timedelta(days=1)
+    return close.astimezone(timezone.utc)
+
+
+def _event_start(row: dict[str, Any]) -> datetime | None:
+    """When this event first became knowable, not when this copy of it was filed.
+
+    The Federal Register publishes a document twice: on public inspection, and
+    again on publication days later. Collapsed into one cluster, the winning row
+    is whichever scored higher - usually the later copy - and testing that copy
+    against the closing bell put a document we could read on Friday morning
+    "after the bell" on Friday night. One event has one beginning, and the bell
+    test is a question about the beginning.
+    """
+    first = row.get("first_published_at")
+    if first:
+        earliest = _published_utc({"published_at": first})
+        current = _published_utc(row)
+        if earliest and (current is None or earliest < current):
+            return earliest
+    return _published_utc(row)
+
+
+def _published_utc(row: dict[str, Any]) -> datetime | None:
+    raw = row.get("published_at")
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _before_bell(row: dict[str, Any], cutoff: datetime) -> bool:
+    """Was this knowable in time to have caused the print we are explaining?
+
+    One rule in one place. It used to be spelled out twice, once per candidate
+    list, and the third list - sector context, which can be promoted into a
+    driver - never got it at all.
+    """
+    start = _event_start(row)
+    return start is None or start <= cutoff
+
 
 MAX_SUMMARY_CHARS = 420
 
@@ -42,20 +198,62 @@ def _compact(row: dict[str, Any], include_reasons: bool = False) -> dict[str, An
         out["ticker"] = row["ticker"]
         out["relation"] = row.get("relation")
         out["why"] = row.get("why")
+        # Separate from the score on purpose. A high relevance score is not
+        # proof of causation, and the agent downstream has to be able to tell
+        # "this matters to the name" from "this moved the name".
+        out["causal_eligible"] = causal_eligible(row.get("relation"))
+    if row.get("causal_basis"):
+        out["causal_basis"] = row["causal_basis"]
     if row.get("tickers"):
         out["tickers"] = row["tickers"]
     summary = (row.get("summary") or "").strip()
     if summary:
         out["summary"] = summary[:MAX_SUMMARY_CHARS]
     meta = row.get("meta") or {}
+    if meta.get("undated"):
+        # The feed gave no date, so `t` is when we FOUND it, not when it was
+        # published. Showing an invented timestamp as a publication time is how
+        # an evergreen marketing page reads as six-hour-old news.
+        out["published_unknown"] = True
+        out["discovered_at"] = row.get("collected_at")
+    if row.get("first_published_at"):
+        # An earlier copy of the same event exists in this cluster - the public
+        # inspection filing before the publication. That is when the clock
+        # actually started, and lead time is why the early copy is collected.
+        out["first_published_at"] = row["first_published_at"]
+    if meta.get("first_public_at"):
+        # When the document first became readable by anyone: the public
+        # inspection filing, not the Register publication and not our fetch.
+        # For a system explaining a Friday move that is the moment which decides
+        # whether it could have been known, and the drill-down was showing our
+        # collection time instead - hiding a 39-hour gap behind "seen 5h ago".
+        out["first_public_at"] = meta["first_public_at"]
+    # Whether a publication date is still ahead of us is a question about now,
+    # so it is answered now. `meta.forthcoming` was decided once, at collection
+    # time, and nothing ever cleared it - and a public-inspection copy leaves the
+    # PI feed and is never re-collected - so the terminal went on announcing
+    # "מתפרסם 31.7" days into August. Read against the publisher's own clock:
+    # the Federal Register publishes on Eastern dates.
+    scheduled = str(meta.get("scheduled_publication_date") or "")[:10]
+    if scheduled > datetime.now(MARKET_TZ).date().isoformat():
+        # It exists, we can read it, and it has not published yet. `t` is when
+        # we learned of it - not a publication time, and never an age.
+        out["forthcoming"] = True
+        out["publishes_on"] = scheduled
+        out["discovered_at"] = row.get("collected_at")
     for key in ("form_type", "items", "item_labels", "nct_id", "status", "change",
                 "agencies", "document_number", "public_inspection", "sponsor",
-                "classification", "synthetic", "kind"):
+                "classification", "synthetic", "kind", "filing_type"):
         if meta.get(key):
             out.setdefault("meta", {})[key] = meta[key]
     also = row.get("also") or []
     if also:
-        out["corroboration"] = len(also) + 1
+        # Count independent SOURCES, not cluster members. Twelve Form 4s filed
+        # the same afternoon are one source saying one thing twelve times, not
+        # twelve confirmations - and the agent manifest tells the model to trust
+        # this number when a single low-trust source claims something big.
+        sources = {row.get("source")} | {a.get("source") for a in also}
+        out["corroboration"] = len({s for s in sources if s})
         out["also"] = [{"source": a["source"], "url": a["url"]} for a in also[:5]]
     if include_reasons:
         out["reasons"] = row.get("reasons") or []
@@ -78,12 +276,26 @@ class Views:
         relations: Sequence[str] | None = None,
         events: Sequence[str] | None = None,
         include_reasons: bool = False,
+        include_tape: bool = False,
+        max_per_ticker: int | None = 3,
     ) -> dict[str, Any]:
         """The main ranked feed. Defaults are tuned for a day trader: last 24h,
-        material items only."""
+        material items only.
+
+        Tape markers are excluded by default. "[TAPE] X up 7% with no matching
+        news" is the *absence* of a story, carrying a forced score of 70, so on
+        a busy tape six of them outranked every real headline - the Teva
+        earnings story sat at 30 underneath them. They are not news and they
+        already have a home in `whats_moving`, which is the view built to answer
+        "what moved and why". Pass include_tape=True to see them here anyway.
+        """
         rows = self.db.feed(
             tickers=tickers, min_score=min_score, since_hours=hours,
             limit=limit, relations=relations, events=events,
+            include_tape=include_tape,
+            # Only when scanning the whole basket. Asking for one name means you
+            # want everything on it.
+            max_per_ticker=None if tickers else max_per_ticker,
         )
         return {
             "asof": datetime.now(timezone.utc).isoformat(),
@@ -147,7 +359,135 @@ class Views:
                     "hint": "FTS5 syntax: use quotes for phrases, OR / NOT / NEAR()"}
         return {"query": query, "count": len(rows), "items": [_compact(r) for r in rows]}
 
+    # ------------------------------------------------------------ quote ---- #
+    def quote(self, ticker: str) -> dict[str, Any] | None:
+        """The stored print for one symbol, with its provenance attached.
+
+        A percentage on a screen is a claim, and a day trader has to be able to
+        reconcile it against their own broker. That needs three things we used to
+        drop on the floor: which feed it came from, when we captured it, and what
+        the previous close we divided by actually was.
+        """
+        row = self.db.latest_price(ticker)
+        if not row:
+            return None
+        # Two clocks, and conflating them is how a Friday close became a
+        # "2 minute old" price on a Saturday. `asof` is when we fetched;
+        # `market_time` is when the exchange last printed. Only the second one
+        # is the age of the number on screen.
+        fetched = _published_utc({"published_at": row.get("asof")})
+        printed = _published_utc({"published_at": row.get("market_time")})
+        now = datetime.now(timezone.utc)
+        fetch_age_min = ((now - fetched).total_seconds() / 60 if fetched else None)
+        print_age_min = ((now - printed).total_seconds() / 60 if printed else None)
+        provider = (row.get("provider") or "").strip()
+        session = row.get("session") or "unknown"
+
+        if printed is None:
+            freshness = (
+                f"fetched {fetch_age_min:.0f} min ago; the exchange timestamp was "
+                f"not recorded for this print, so its true age is unknown"
+                if fetch_age_min is not None else "capture time unknown")
+        elif session == "closed":
+            freshness = (
+                f"market closed - this is the last print of the "
+                f"{printed.date().isoformat()} session, fetched "
+                f"{fetch_age_min:.0f} min ago"
+                if fetch_age_min is not None else
+                f"market closed - last print {printed.date().isoformat()}")
+        else:
+            freshness = (
+                f"last trade {print_age_min:.0f} min ago, fetched "
+                f"{fetch_age_min:.0f} min ago; the feed itself is delayed on "
+                f"top of that")
+
+        return {
+            "ticker": ticker.upper(),
+            "last": row.get("last"),
+            "prev_close": row.get("prev_close"),
+            "change_pct": (round(row["change_pct"], 2)
+                           if row.get("change_pct") is not None else None),
+            # Named so the two cannot be confused with each other. `change_pct`
+            # is the regular session, close against prior close, and it stops
+            # moving when the bell rings; these three are what happened after
+            # it. Blending them into one number made a finished session keep
+            # drifting, and made "this name against its sector index" compare
+            # hours the index did not trade.
+            "session_change_pct": (round(row["change_pct"], 2)
+                                   if row.get("change_pct") is not None else None),
+            "extended_last": row.get("extended_last"),
+            "extended_change_pct": (round(row["extended_change_pct"], 2)
+                                    if row.get("extended_change_pct") is not None else None),
+            "extended_time": row.get("extended_time"),
+            "volume": row.get("volume"),
+            "adv20": row.get("adv20"),
+            "volume_multiple": (round(row["vol_mult"], 2)
+                                if row.get("vol_mult") else None),
+            "session": row.get("session"),
+            "provider": provider or "unknown",
+            "provider_note": PROVIDER_MEANING.get(
+                provider, "provider not recorded (print predates provenance tracking)"),
+            "asof": row.get("asof"),
+            # Kept as the fetch age it always was, but no longer the only age on
+            # offer and no longer described as the age of the price.
+            "fetched_at": row.get("asof"),
+            "fetch_age_minutes": round(fetch_age_min) if fetch_age_min is not None else None,
+            "market_time": row.get("market_time"),
+            "market_age_minutes": round(print_age_min) if print_age_min is not None else None,
+            "age_minutes": round(fetch_age_min) if fetch_age_min is not None else None,
+            "freshness": freshness,
+            "math": (f"({row['last']} - {row['prev_close']}) / {row['prev_close']} "
+                     f"= {row['change_pct']:+.2f}%"
+                     if row.get("last") and row.get("prev_close")
+                     and row.get("change_pct") is not None else None),
+        }
+
     # ---------------------------------------------------- what's moving ---- #
+    # A move can be worth explaining for either of two reasons, and an absolute
+    # threshold only sees one of them.
+    #
+    # CGEN rose 1.9% on a day XBI fell 3.1% - a 5.0pp divergence from its own
+    # sector, on 1.4x volume, with nothing behind it. That is at least as odd as
+    # several moves that did make the list, and it was invisible because 1.9%
+    # never cleared the 2.5% absolute gate, so its relative move was never
+    # computed at all. A name holding up while its sector sells off is exactly
+    # the "what do they know?" question this panel exists to raise.
+    #
+    # The volume floor is what keeps the second path from firing on noise: a
+    # quiet name drifting against a moving index on a tenth of its usual volume
+    # is a spread, not a signal.
+    #
+    # The bar itself is UNEXPLAINED_RELATIVE_PCT and not a number of its own,
+    # because a second threshold here would silently outrank it: set the gate
+    # above the alert bar and a move that qualifies as unexplained can never be
+    # examined to find out. Anything that could be flagged has to get in.
+    RELATIVE_ENTRY_MIN_VOL_RATIO = 0.8
+
+    def _worth_explaining(self, ticker: str, price: dict[str, Any],
+                          min_abs_pct: float) -> bool:
+        if abs(price["change_pct"]) >= min_abs_pct:
+            return True
+        relative = self._relative_move(ticker, price)
+        if relative is None or abs(relative) < self.UNEXPLAINED_RELATIVE_PCT:
+            return False
+        vol_ratio = price.get("vol_mult")
+        return vol_ratio is not None and vol_ratio >= self.RELATIVE_ENTRY_MIN_VOL_RATIO
+
+    def _relative_move(self, ticker: str, price: dict[str, Any]) -> float | None:
+        """This name's session return minus its sector proxy's, in points.
+
+        Both sides are regular-session returns, which is the only basis on which
+        they are comparable: a small-cap's post-market drift and an ETF's are
+        different hours and different liquidity.
+        """
+        tc = self.config.ticker(ticker)
+        bench_sym = self.config.benchmark_for(tc.sector) if tc else None
+        bench = self.db.latest_price(bench_sym) if bench_sym else None
+        bench_pct = bench.get("change_pct") if bench else None
+        if bench_pct is None or price.get("change_pct") is None:
+            return None
+        return round(price["change_pct"] - bench_pct, 2)
+
     def whats_moving(self, min_abs_pct: float = 2.0) -> dict[str, Any]:
         """Price movers joined with their best explanation."""
         movers = []
@@ -155,20 +495,295 @@ class Views:
             price = self.db.latest_price(ticker)
             if not price or price.get("change_pct") is None:
                 continue
-            if abs(price["change_pct"]) < min_abs_pct:
+            if not self._worth_explaining(ticker, price, min_abs_pct):
                 continue
-            top = self.db.feed(tickers=[ticker], min_score=30, since_hours=30, limit=3)
+            candidates = [
+                # Must not be stricter than the feed's own threshold, or the
+                # two panels contradict each other: TEVA showed "no matching
+                # news" here while its guidance-change story sat in the feed
+                # directly below at 27.
+                r for r in self.db.feed(tickers=[ticker], min_score=20,
+                                        since_hours=30, limit=8)
+                # Our own "the tape moved and we found nothing" marker is not a
+                # story. Offering it as the driver of the move it describes is
+                # circular, and it is not an after-hours catalyst either.
+                if (r.get("meta") or {}).get("kind") != "unexplained_move"
+            ]
+            # Written *because* the price moved. An effect cannot be offered as
+            # the cause, so these leave the driver list entirely and are shown
+            # for what they are. Collected below the driver threshold on
+            # purpose: capping them as noise is what stops them ranking, and if
+            # that also made them invisible the reader would go looking for the
+            # article they can see on Twitter and conclude we had missed it.
+            reactive = [
+                r for r in self.db.feed(tickers=[ticker], min_score=0,
+                                        since_hours=30, limit=12)
+                if self._is_reactive(r)
+            ]
+            # A recap of a PEER's move is not commentary on ours. "Palo Alto
+            # Networks Stock Price Up 1.9%" was being offered under ALLT as
+            # post-move commentary, and a Neurocrine earnings reaction under
+            # TEVA - both true articles, neither one a description of the move
+            # on the row it sat in. Only a recap of THIS company's own move is
+            # the circular-reasoning case this list exists to name; the rest is
+            # peer tape, kept but not presented as though it were about us.
+            commentary = [r for r in reactive
+                          if (r.get("relation") or "") in ("DIRECT", "SUBSIDIARY")]
+            peer_commentary = [r for r in reactive if r not in commentary]
+            candidates = [r for r in candidates if not self._is_reactive(r)]
+
+            # Sector-level regulatory reading, gathered on its own terms. It is
+            # not a driver candidate, so it must not inherit the driver
+            # threshold: demoting an item from cause to context also lowers its
+            # score, and a context line that disappears exactly because we
+            # stopped believing it was the cause is the failure this is meant to
+            # prevent. The reader has to see what we read and set aside.
+            seen = {r["uid"] for r in candidates}
+            sector_context = [
+                r for r in self.db.feed(tickers=[ticker], min_score=0,
+                                        since_hours=36, limit=20)
+                if r["uid"] not in seen
+                and not causal_eligible(r.get("relation"))
+                and not self._is_reactive(r)
+                and (r.get("meta") or {}).get("kind") != "unexplained_move"
+            ]
+
+            # A story published after the closing bell cannot have caused the
+            # move that bell ended. Keep it - it is tomorrow's catalyst - but
+            # never offer it as this move's explanation. Which bell, though,
+            # depends on the print we are explaining: see _driver_cutoff.
+            cutoff = self._driver_cutoff(price)
+            pre_move = [r for r in candidates if _before_bell(r, cutoff)]
+            after_bell = [r for r in candidates if not _before_bell(r, cutoff)]
+            # Sector context is promotable below, so the bell has to bind it
+            # too - and it did not. A notice filed at 16:13 could be promoted
+            # and offered as the cause of a move that had finished at 16:00,
+            # the one thing _driver_cutoff exists to prevent. A late document
+            # stays visible as context, which is the honest label: read, not the
+            # cause. Only this end of the window decides causation, so the wider
+            # 36h reach above is left alone.
+            late_context = [r for r in sector_context if not _before_bell(r, cutoff)]
+            sector_context = [r for r in sector_context if _before_bell(r, cutoff)]
+            # What the group did, and what is left over once you subtract it.
+            tc = self.config.ticker(ticker)
+            bench_sym = self.config.benchmark_for(tc.sector) if tc else None
+            bench = self.db.latest_price(bench_sym) if bench_sym else None
+            bench_pct = bench.get("change_pct") if bench else None
+            # Through the same helper the entry gate uses, so a name cannot be
+            # admitted on one arithmetic and reported on another.
+            relative = self._relative_move(ticker, price)
+
+            # Relevance got an item this far. Causation is a second question,
+            # and it is asked here: a sector-level match may only explain a move
+            # if the whole basket moved the way the document would predict.
+            # Otherwise it is context, and context that is presented as a cause
+            # hides the question it should have raised.
+            sector_move = self._sector_move(ticker)
+            corroborated = self._sector_wide_corroboration(price, sector_move)
+            drivers, context = [], []
+            for row in pre_move + sector_context:
+                if causal_eligible(row.get("relation")):
+                    drivers.append(row)
+                elif corroborated:
+                    drivers.append(dict(row, causal_basis=(
+                        f"sector-level match, promoted: {sector_move['names']} names "
+                        f"in the sector moved together")))
+                else:
+                    context.append(row)
+            # Appended after the loop, so pre-bell context keeps the top slots.
+            context.extend(late_context)
+
             movers.append({
                 "ticker": ticker,
                 "change_pct": round(price["change_pct"], 2),
+                # Where this percentage came from, so it can be checked against a
+                # broker screen instead of taken on faith.
+                "quote": self.quote(ticker),
+                "benchmark": bench_sym,
+                "benchmark_pct": round(bench_pct, 2) if bench_pct is not None else None,
+                "relative_pct": relative,
                 "volume_multiple": (round(price["vol_mult"], 2)
                                     if price.get("vol_mult") else None),
                 "session": price.get("session"),
-                "explained": bool(top),
-                "drivers": [_compact(r) for r in top],
+                "explained": bool(drivers),
+                "drivers": [_compact(r) for r in drivers[:3]],
+                # Relevant, read, and deliberately not called a cause. Named so
+                # that a reader can see what we looked at and rejected instead
+                # of wondering whether we missed it.
+                "possible_context": [_compact(r) for r in context[:3]],
+                "after_the_bell": [_compact(r) for r in after_bell[:3]],
+                "post_move_commentary": [_compact(r) for r in commentary[:3]],
+                # A peer's own price recap. Reported apart so the agent can say
+                # "the sector was being written about" without claiming anyone
+                # wrote about this name.
+                "peer_commentary": [_compact(r) for r in peer_commentary[:3]],
             })
         movers.sort(key=lambda m: abs(m["change_pct"]), reverse=True)
-        return {"asof": datetime.now(timezone.utc).isoformat(), "movers": movers}
+        return {"asof": datetime.now(timezone.utc).isoformat(), "movers": movers,
+                "unexplained": self._unexplained_alerts(movers)}
+
+    # A move this far clear of its sector, with nothing to point at, is the
+    # question of the session - "what do they know?" - and it is not news, so
+    # nothing in a news feed was ever going to raise it.
+    UNEXPLAINED_RELATIVE_PCT = 3.0
+
+    # Below this, the name itself barely moved and the divergence belongs to the
+    # sector. Both are worth raising; describing the second as "an unusual move"
+    # makes a 0.6% stock sound like it jumped.
+    DECOUPLING_MAX_ABS_PCT = 1.5
+
+    # How much of a sector has to move the same way before a sector-wide
+    # document is allowed to be the reason. Two names is not a sector.
+    SECTOR_CORROBORATION_MIN_NAMES = 3
+    SECTOR_CORROBORATION_MIN_SHARE = 0.6
+    SECTOR_CORROBORATION_MIN_PCT = 1.0
+
+    def _sector_move(self, ticker: str) -> dict[str, Any] | None:
+        """What every other name in this ticker's sector did today.
+
+        A sector-wide regulatory document predicts a sector-wide move. If the
+        basket did not make one, the document did not cause anything - and if
+        the basket split, it certainly did not cause both halves.
+        """
+        tc = self.config.ticker(ticker)
+        if not tc:
+            return None
+        peers = [t for t in self.config.active_tickers
+                 if t != ticker and (self.config.ticker(t) or None)
+                 and self.config.ticker(t).sector == tc.sector]
+        moves = []
+        for peer in peers:
+            row = self.db.latest_price(peer)
+            if row and row.get("change_pct") is not None:
+                moves.append(row["change_pct"])
+        if not moves:
+            return None
+        return {
+            "names": len(moves),
+            "up": sum(1 for m in moves if m > 0),
+            "down": sum(1 for m in moves if m < 0),
+            # The real median, not the upper-middle element: on an even-length
+            # basket that reads high, and this number is a threshold input -
+            # peers at 0.1/0.5/1.2/2.0 cleared the 1.0pp "the group really moved"
+            # bar at 1.2 when the group's middle was 0.85.
+            "median_pct": statistics.median(moves),
+        }
+
+    def _sector_wide_corroboration(self, price: dict[str, Any],
+                                   sector_move: dict[str, Any] | None) -> bool:
+        """Did the basket move together, in this name's direction, and enough?"""
+        if not sector_move or sector_move["names"] < self.SECTOR_CORROBORATION_MIN_NAMES:
+            return False
+        change = price.get("change_pct")
+        if change is None or abs(change) < self.SECTOR_CORROBORATION_MIN_PCT:
+            return False
+        agreeing = sector_move["up"] if change > 0 else sector_move["down"]
+        if agreeing / sector_move["names"] < self.SECTOR_CORROBORATION_MIN_SHARE:
+            return False
+        # And the group's own move has to point the same way with real size -
+        # "most names were fractionally green" is not a sector event.
+        median = sector_move["median_pct"]
+        return (median > 0) == (change > 0) and abs(median) >= self.SECTOR_CORROBORATION_MIN_PCT
+
+    def _unexplained_alerts(self, movers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Moves that outran their sector with no verified catalyst.
+
+        The feed is built from stories, so a day with no story produced no
+        alert - however violently the tape moved. TSEM +6.2% against SOXX +1.2%,
+        with nothing behind it and results four days out, is precisely what a
+        short-term trader needs raised, and "0 alerts" was the wrong answer.
+
+        Deliberately *not* scored: this is the absence of information, and a
+        materiality score computed from an absent story would be fiction.
+        """
+        out = []
+        for mover in movers:
+            if mover["drivers"]:
+                continue
+            relative = mover.get("relative_pct")
+            magnitude = abs(relative) if relative is not None else abs(mover["change_pct"])
+            if magnitude < self.UNEXPLAINED_RELATIVE_PCT:
+                continue
+
+            # Two different things reach this list and calling both "an unusual
+            # move" misdescribes one of them. TATT fell 4.6% - the stock moved.
+            # CGEN rose 0.6% while XBI fell 2.9% - the stock did almost nothing
+            # and the divergence is its sector's, which is worth raising for the
+            # opposite reason: not "what happened to it" but "why did it not
+            # follow". Same alert, different question, so it has to say which.
+            decoupled = abs(mover["change_pct"]) < self.DECOUPLING_MAX_ABS_PCT
+            kind = ("sector_decoupling" if decoupled
+                    else "unexplained_relative_move")
+
+            bits = [f"{mover['ticker']} {mover['change_pct']:+.1f}%"]
+            if relative is not None:
+                if decoupled:
+                    # Lead with what the sector did, because that is the moving
+                    # part: "+0.6% while XBI fell 2.9%" reads as the fact it is.
+                    bits = [f"{mover['ticker']} {mover['change_pct']:+.1f}% "
+                            f"while {mover['benchmark']} "
+                            f"{mover['benchmark_pct']:+.1f}%",
+                            f"gap {relative:+.1f}pp"]
+                else:
+                    bits.append(f"{relative:+.1f}pp vs {mover['benchmark']} "
+                                f"({mover['benchmark_pct']:+.1f}%)")
+            if mover.get("volume_multiple"):
+                bits.append(f"{mover['volume_multiple']:.1f}x volume")
+            out.append({
+                "ticker": mover["ticker"],
+                "kind": kind,
+                "decoupled": decoupled,
+                "headline": ("SECTOR DECOUPLING - " if decoupled
+                             else "UNEXPLAINED RELATIVE MOVE - ") + " | ".join(bits),
+                "change_pct": mover["change_pct"],
+                "relative_pct": relative,
+                # Named the benchmark in the English sentence but never returned
+                # it, so a second language had nothing to put after "vs".
+                "benchmark": mover.get("benchmark"),
+                "benchmark_pct": mover.get("benchmark_pct"),
+                "volume_multiple": mover.get("volume_multiple"),
+                "session": mover.get("session"),
+                # Say what we looked at and did not find, so this reads as a
+                # question rather than as a claim. "no company story" was not
+                # quite true and contradicted the screen: there often IS a
+                # story, it is a price recap, and it was ruled out on purpose.
+                "checked": ("no eligible pre-move catalyst above score 20 in the "
+                            "last 30h" + (" (price recaps excluded as reactive)"
+                                          if mover.get("post_move_commentary") else "")
+                            + (" (sector-level regulatory matches held as context, "
+                               "not cause)" if mover.get("possible_context") else "")),
+                "post_move_commentary": mover.get("post_move_commentary") or [],
+                # What we read and would not call a cause. Suppressing it would
+                # be the same failure in the other direction: the reader sees
+                # the document elsewhere and concludes we never looked.
+                "possible_context": mover.get("possible_context") or [],
+                "next_catalyst": self._next_catalyst(mover["ticker"]),
+            })
+        out.sort(key=lambda a: abs(a.get("relative_pct") or a["change_pct"]), reverse=True)
+        return out
+
+    def _next_catalyst(self, ticker: str) -> dict[str, Any] | None:
+        """The nearest known date for THIS company.
+
+        A date only counts as the company's catalyst if it reaches the company
+        directly. An airworthiness directive taking effect for Textron Aviation
+        is a real date and a real sector link, but it was being offered as TAT
+        Technologies' "next known date", which is a different and false claim.
+        A sector date is still shown when there is nothing better - labelled as
+        the weak link it is.
+        """
+        entries = self.db.calendar([ticker], days_ahead=45)
+        if not entries:
+            return None
+        own = [e for e in entries if (e.get("relation") or "") in ("DIRECT", "SUBSIDIARY")]
+        if own:
+            return {**own[0], "strength": "company"}
+        weak = entries[0]
+        wording = {"SECTOR_REG": "sector-regulatory", "PRODUCT_RIVAL": "rival-product",
+                   "PEER": "peer"}.get(weak.get("relation") or "", "sector")
+        return {**weak, "strength": "weak",
+                "caveat": f"weak {wording} link - a date in the sector, "
+                          f"not this company's"}
 
     # --------------------------------------------------- morning brief ---- #
     def morning_brief(self, hours: float = 16.0) -> dict[str, Any]:
@@ -188,13 +803,18 @@ class Views:
             r for r in self.db.feed(min_score=25, since_hours=hours, limit=60)
             if r["source"] == "maya_tase"
         ]
+        moving = self.whats_moving(min_abs_pct=2.5)
         return {
             "asof": datetime.now(timezone.utc).isoformat(),
             "window_hours": hours,
             "alerts": [_compact(r, include_reasons=True) for r in alerts],
+            # Tape alerts are not news alerts and were never going to come out
+            # of a news feed. A basket can be violently repriced on a day when
+            # nobody publishes anything.
+            "unexplained_moves": moving["unexplained"],
             "high": [_compact(r) for r in high[:20]],
             "tase_overnight": [_compact(r) for r in overnight_tase[:15]],
-            "movers": self.whats_moving(min_abs_pct=2.5)["movers"][:10],
+            "movers": moving["movers"][:10],
             "calendar_next_7d": self.db.calendar(days_ahead=7),
             "coverage_warnings": self._coverage_warnings(),
         }
@@ -221,6 +841,229 @@ class Views:
             "same_story_from_other_sources": row["cluster"],
         }
 
+    # ---------------------------------------------------------- explain ---- #
+    def explain(self, uid: str) -> dict[str, Any]:
+        """Everything behind one line on the screen — for a trader who is going
+        to check it themselves before risking money on it.
+
+        `item()` returns the record. This returns the *audit*: which query found
+        it, how trusted that source is and why, what time it was published in all
+        three time zones that matter, whether it landed before or after the bell,
+        which rule attached it to which ticker, the arithmetic of the score, who
+        else carried the story, what the tape was doing, and a set of outside
+        links to verify the whole thing without us.
+
+        Nothing here is recomputed. It is the stored trace, unpacked.
+        """
+        full = self.db.resolve_uid(uid)
+        if not full:
+            return {"error": f"no item matching '{uid}'",
+                    "hint": "uids are sha1 hex; a unique prefix of 8+ chars is enough"}
+        row = self.db.item(full)
+        meta = row.get("meta") or {}
+        src = self.config.sources.get(row["source"])
+        trust = src.trust if src else None
+
+        pub = _published_utc(row)
+        collected = _published_utc({"published_at": row.get("collected_at")})
+        close = last_session_close()
+
+        undated = bool(meta.get("undated"))
+        timing: dict[str, Any] = {
+            "published_utc": None if undated else row.get("published_at"),
+            "publication_date": "unknown - the feed carried no date, so the "
+                                "timestamp below is when we found it, not when "
+                                "it was published" if undated else "as published",
+            # Structured twins of the sentences below, so a second language can
+            # compose its own prose instead of translating ours.
+            "undated": undated,
+            "before_last_close": bool(pub and pub <= close),
+            "last_close_et": close.astimezone(MARKET_TZ).strftime("%Y-%m-%d %H:%M"),
+        }
+        if pub:
+            timing.update({
+                "published_et": pub.astimezone(MARKET_TZ).strftime("%Y-%m-%d %H:%M ET"),
+                "published_israel": pub.astimezone(ISRAEL_TZ).strftime("%Y-%m-%d %H:%M IL"),
+                "age_hours": round((datetime.now(timezone.utc) - pub).total_seconds() / 3600, 1),
+                "session_at_publication": _market_session(pub),
+                "vs_last_close": (
+                    f"published before the {close.astimezone(MARKET_TZ):%Y-%m-%d %H:%M} ET "
+                    f"close - it can be a cause of that session's move"
+                    if pub <= close else
+                    f"published after the {close.astimezone(MARKET_TZ):%Y-%m-%d %H:%M} ET "
+                    f"close - it is the next session's setup, and cannot have caused "
+                    f"that session's move"
+                ),
+            })
+        timing["first_seen_by_us_utc"] = row.get("collected_at")
+        if pub and collected:
+            # How long we were blind to it. This is the number that says whether
+            # the system is fast enough to trade on, and nothing else reports it.
+            timing["detection_lag_minutes"] = round(
+                (collected - pub).total_seconds() / 60)
+
+        # The honest version of the same number. `published_at` for a Federal
+        # Register document is the date it publishes UNDER, which is scheduled -
+        # so a lag measured against it reports lead time, and a document that
+        # sat unfetched on public inspection since Friday morning still looked
+        # early. `first_public_at` is when anyone could have read it.
+        first_public = _published_utc({"published_at": meta.get("first_public_at")})
+        if first_public:
+            timing["first_public_at"] = meta["first_public_at"]
+            if collected:
+                timing["detection_lag_minutes_from_public"] = round(
+                    (collected - first_public).total_seconds() / 60)
+
+        links = [
+            {
+                "ticker": t["ticker"],
+                "relation": t["relation"],
+                "relation_means": RELATION_MEANING.get(t["relation"], ""),
+                "confidence": t["confidence"],
+                "why": t["why"],
+                "score": round(t["score"], 1),
+                "tier": self.config.scoring.tier_for(t["score"]),
+            }
+            for t in row.get("tickers") or []
+        ]
+
+        members = row.get("cluster") or []
+        carriers = {row["source"]} | {m["source"] for m in members if m.get("source")}
+
+        tiers = self.config.scoring.tiers
+        return {
+            "uid": row["uid"],
+            "title": row["title"],
+            "url": row.get("url"),
+            "where_it_came_from": {
+                "source": row["source"],
+                "source_label": src.label if src else row["source"],
+                "collector": row.get("source_kind"),
+                "trust": trust,
+                "trust_means": _trust_meaning(trust),
+                "typical_latency": src.latency if src else None,
+                # The single most useful line for "why am I seeing this": the
+                # exact query or feed that pulled it in.
+                "found_by": (meta.get("feed_label") or meta.get("query")
+                             or (src.label if src else row["source"])),
+                "feed_url": meta.get("feed"),
+                "publisher": meta.get("publisher"),
+                "id_at_source": row.get("external_id"),
+            },
+            "when": timing,
+            "who_it_is_about": links,
+            "how_it_scored": {
+                "score": round(row.get("score") or 0, 1),
+                "tier": row.get("tier"),
+                "thresholds": {"ALERT": tiers.get("alert", 75),
+                               "HIGH": tiers.get("high", 55),
+                               "NORMAL": tiers.get("normal", 35)},
+                "events": row.get("events") or [],
+                "trace": _trace(row.get("reasons") or []),
+                "note": "the stored trace, in order. Multipliers compound; "
+                        "'+' lines are added after; a cap overrides everything.",
+            },
+            "who_else_carried_it": {
+                "corroboration": len(carriers),
+                "counts": "distinct SOURCES, not documents",
+                "members": [
+                    {"source": m["source"], "title": m["title"], "url": m.get("url"),
+                     "published_at": m.get("published_at"), "uid": m["uid"]}
+                    for m in members
+                ],
+            },
+            "what_the_tape_did": [
+                q for q in (self.quote(t["ticker"]) for t in links) if q
+            ],
+            "check_it_yourself": self._verify_links(row, [t["ticker"] for t in links]),
+            "raw": {
+                "summary": row.get("summary"),
+                "body_excerpt": (row.get("body") or "")[:4000],
+                "meta": meta,
+            },
+        }
+
+    # ------------------------------------------------- driver plumbing ---- #
+    def _driver_cutoff(self, price: dict[str, Any]) -> datetime:
+        """The latest a story can have been published and still explain *this*
+        print.
+
+        The bug this fixes: the cutoff was always the last completed close, but
+        the price on screen is whatever the last snapshot holds. Mid-session
+        that snapshot is *today's* live move, so a story published at 13:40 ET
+        today - hours before the print it is being compared with - was stamped
+        "after the bell, not a cause". The bell in question had not rung.
+
+        While a session is running, everything published up to now precedes the
+        current print. Only once trading is over does "after the close" mean
+        anything.
+        """
+        if str(price.get("session") or "").lower() in ("premarket", "regular"):
+            return datetime.now(timezone.utc)
+        return last_session_close()
+
+    def _is_reactive(self, row: dict[str, Any]) -> bool:
+        """Was this written because the price moved?
+
+        Checked against the config patterns at read time rather than trusting
+        `meta.reactive_recap` alone, so it applies to everything already stored
+        instead of only to what has been re-scored since.
+        """
+        if (row.get("meta") or {}).get("reactive_recap"):
+            return True
+        title = row.get("title") or ""
+        return any(p.pattern.search(title) for p in self.config.scoring.reactive_patterns)
+
+    def _verify_links(self, row: dict[str, Any], tickers: Sequence[str]) -> list[dict[str, str]]:
+        """Outside places to confirm this, none of which are us."""
+        from urllib.parse import quote_plus
+
+        out: list[dict[str, str]] = []
+        if row.get("url"):
+            out.append({
+                "label": "the original document",
+                "label_he": "המסמך המקורי",
+                "url": row["url"],
+                "checks": "that it says what our headline says it says",
+                "checks_he": "שהוא אומר את מה שהכותרת שלנו אומרת שהוא אומר",
+            })
+        title = (row.get("title") or "")[:120]
+        if title:
+            out.append({
+                "label": "this headline on Google News",
+                "label_he": "הכותרת הזאת ב-Google News",
+                "url": f"https://news.google.com/search?q={quote_plus(title)}",
+                "checks": "who else is carrying it, and who had it first",
+                "checks_he": "מי עוד נושא אותה, ומי היה ראשון",
+            })
+        for ticker in dict.fromkeys(tickers):
+            tc = self.config.ticker(ticker)
+            if tc and tc.cik10:
+                out.append({
+                    "label": f"{ticker} filings on SEC EDGAR",
+                    "label_he": f"הגשות {ticker} ב-SEC EDGAR",
+                    "url": ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
+                            f"&CIK={tc.cik10}&type=&dateb=&owner=include&count=40"),
+                    "checks": "whether there is a filing behind the story, and its exact time",
+                    "checks_he": "האם יש הגשה מאחורי הסיפור, ומה השעה המדויקת שלה",
+                })
+            if tc and tc.tase_id:
+                out.append({
+                    "label": f"{ticker} immediate reports on MAYA (TASE)",
+                    "label_he": f"דיווחים מיידיים של {ticker} במאיה",
+                    "url": f"https://maya.tase.co.il/company/{tc.tase_id}?view=reports",
+                    "checks": "the Hebrew disclosure, which is often hours ahead of the US wire",
+                    "checks_he": "הדיווח בעברית, שלרוב מקדים את הוויר האמריקאי בשעות",
+                })
+            out.append({
+                "label": f"{ticker} quote",
+                "label_he": f"ציטוט {ticker}",
+                "url": f"https://finance.yahoo.com/quote/{ticker}",
+                "checks": "our price and volume numbers against a second screen",
+                "checks_he": "מספרי המחיר והמחזור שלנו מול מסך שני",
+            })
+        return out
+
     # --------------------------------------------------------- calendar ---- #
     def calendar(self, tickers: Sequence[str] | None = None,
                  days: int = 45) -> dict[str, Any]:
@@ -245,6 +1088,51 @@ class Views:
         return {"count": len(out), "tickers": out}
 
     # ----------------------------------------------------------- health ---- #
+    # The hourly task is the cadence, so a pass older than that is already a
+    # miss; two hours of grace before the header starts saying so, and six
+    # before it says it loudly. A terminal that looks the same whether it was
+    # updated eight minutes or eight hours ago is the "silence or blindness"
+    # confusion in its most direct form - the whole page is the symptom.
+    STALE_AFTER_MIN = 120
+    VERY_STALE_AFTER_MIN = 360
+
+    def last_update(self) -> dict[str, Any]:
+        """When the system last collected - for the whole pipeline, not a name.
+
+        `run_log` has recorded this since the first commit and nothing ever read
+        it, so the only time on the terminal was the moment the HTML happened to
+        be rendered. That number moves every time you press F5 and says nothing
+        about the age of what is under it.
+        """
+        run = self.db.last_run("collect")
+        if not run or not run.get("finished_at"):
+            return {"ever": False, "status": "never"}
+        finished = _published_utc({"published_at": run["finished_at"]})
+        age_min = ((datetime.now(timezone.utc) - finished).total_seconds() / 60
+                   if finished else None)
+        status = "ok"
+        if age_min is None:
+            status = "unknown"
+        elif age_min >= self.VERY_STALE_AFTER_MIN:
+            status = "very_stale"
+        elif age_min >= self.STALE_AFTER_MIN:
+            status = "stale"
+        return {
+            "ever": True,
+            "status": status,
+            "finished_at": run["finished_at"],
+            "age_minutes": round(age_min) if age_min is not None else None,
+            "collected": run.get("collected"),
+            "stored": run.get("stored"),
+            "sources": run.get("sources"),
+            # A pass over one source is not "the system updated". Saying which
+            # it was keeps `harel collect --sources prices_yahoo` from reading
+            # as a full refresh.
+            "partial": bool(run.get("sources")
+                            and run["sources"] < len(self.config.sources) / 2),
+            "errors": len(json.loads(run.get("errors_json") or "[]")),
+        }
+
     def health(self) -> dict[str, Any]:
         states = self.db.source_health()
         degraded = [
@@ -256,8 +1144,18 @@ class Views:
             "db": self.db.counts(),
             "sources_configured": len(self.config.sources),
             "sources_available": sum(1 for s in self.config.sources.values() if s.available),
+            # Two different blindnesses, reported apart. A source whose kind no
+            # collector implements cannot be switched on by supplying a key, and
+            # listing it under "missing API keys" sent you to go and get one.
+            "sources_without_a_collector": [
+                {"source": e["source"], "source_kind": e["source_kind"]}
+                for e in self.coverage_warning_entries()
+                if e["kind"] == "no_collector"
+            ],
             "missing_api_keys": [
                 {"source": k, "env_var": v} for k, v in self.config.missing_keys()
+                if k not in {e["source"] for e in self.coverage_warning_entries()
+                             if e["kind"] == "no_collector"}
             ],
             "running_degraded": [
                 {"source": k, "env_var": v} for k, v in self.config.degraded_sources()
@@ -274,25 +1172,233 @@ class Views:
             "source_state": states,
         }
 
+    # ---------------------------------------------------- source report ---- #
+    def sources_report(self) -> dict[str, Any]:
+        """Every configured source, what it is, and when it last actually worked.
+
+        `health()` answers "is anything broken". This answers the question a
+        trader asks instead: "did the system even look?" - which is a different
+        question, and the one that decides whether an empty screen means quiet.
+        """
+        # Two kinds of row live in `source_state`: one per source (written by the
+        # pipeline) and one per feed URL (written by the RSS collector, keyed
+        # "<source>:<url>"). Summing them double-counts, so the source-level row
+        # is the record and the per-URL rows only contribute failure detail.
+        by_key: dict[str, dict[str, Any]] = {}
+        for state in self.db.source_health():
+            key, sep, _url = str(state["source"]).partition(":")
+            entry = by_key.setdefault(key, {"feeds": 0, "items_last_run": 0,
+                                            "failing": 0, "last_ok_at": None,
+                                            "last_run_at": None, "last_error": None})
+            if sep:
+                entry["feeds"] += 1
+                if (state.get("consecutive_failures") or 0) >= 3:
+                    entry["failing"] += 1
+                    entry["last_error"] = state.get("last_error")
+                continue
+            entry["items_last_run"] = int(state.get("items_last_run") or 0)
+            entry["last_ok_at"] = state.get("last_ok_at")
+            entry["last_run_at"] = state.get("last_run_at")
+            if state.get("last_error"):
+                entry["last_error"] = state.get("last_error")
+
+        lags = self.db.detection_lag(hours=6)
+        out = []
+        for key, source in sorted(self.config.sources.items()):
+            seen = by_key.get(key, {})
+            lag = lags.get(key) or {}
+            note = " ".join((source.raw.get("notes") or "").split())
+            out.append({
+                "source": key,
+                "label": source.label,
+                "collector": source.kind,
+                "trust": source.trust,
+                "trust_means": _trust_meaning(source.trust),
+                "latency": source.latency,
+                "enabled": source.enabled,
+                "available": source.available,
+                "degraded": source.degraded,
+                "requires_key": source.requires,
+                "endpoints_tracked": seen.get("feeds", 0),
+                "items_last_run": seen.get("items_last_run", 0),
+                "last_ok_at": seen.get("last_ok_at"),
+                "last_run_at": seen.get("last_run_at"),
+                "failing_endpoints": seen.get("failing", 0),
+                "last_error": seen.get("last_error"),
+                # How stale this source's news is by the time we can act on it.
+                # The single most important number for deciding whether to trade
+                # off a source or merely to read it.
+                "median_lag_minutes": lag.get("median_minutes"),
+                "p90_lag_minutes": lag.get("p90_minutes"),
+                "lag_sample": lag.get("items", 0),
+                "note": note[:400],
+            })
+        return {
+            "asof": datetime.now(timezone.utc).isoformat(),
+            "sources": out,
+            "warnings": self._coverage_warnings(),
+        }
+
     # --------------------------------------------------------- internal ---- #
     def _coverage_warnings(self) -> list[str]:
-        warnings: list[str] = []
+        """The English sentences. `coverage_warning_entries` holds the same facts
+        structured, which is what the Hebrew terminal renders from - translating
+        prose would drift, composing from data cannot."""
+        out = []
+        for entry in self.coverage_warning_entries():
+            kind = entry["kind"]
+            if kind == "no_collector":
+                out.append(
+                    f"source '{entry['source']}' is declared for kind "
+                    f"'{entry['source_kind']}', which no collector implements - "
+                    f"it is skipped every pass and no API key will change that")
+            elif kind == "missing_key":
+                out.append(f"source '{entry['source']}' is off: "
+                           f"{entry['env']} is not set")
+            elif kind == "degraded":
+                out.append(
+                    f"source '{entry['source']}' is running on an unofficial "
+                    f"fallback endpoint because {entry['env']} is not set - it "
+                    f"may break without notice")
+            elif kind == "unresolved_ticker":
+                out.append(
+                    f"ticker '{entry['ticker']}' is unresolved and is NOT being "
+                    f"collected - {entry['hint']}")
+            elif kind == "disabled":
+                out.append(f"source '{entry['source']}' is disabled in config"
+                           + (f": {entry['reason'][:180]}" if entry["reason"] else ""))
+            elif kind == "failing":
+                out.append(f"source '{entry['source']}' has failed "
+                           f"{entry['count']} times: {entry['error']}")
+        return out
+
+    def coverage_warning_entries(self) -> list[dict[str, Any]]:
+        """Everything wrong with coverage, as data rather than sentences."""
+        from .collect.base import registered_kinds
+
+        warnings: list[dict[str, Any]] = []
+        # A source can be declared in sources.yaml for a kind no collector
+        # implements. `build_collectors` looks the kind up in the registry,
+        # finds nothing, and skips it with a debug line - so the source is
+        # counted as configured, polls nothing, and warns about nothing.
+        # `fcc_filings` has sat like that behind a "set FCC_API_KEY" message
+        # that describes the wrong problem: supplying the key would have
+        # cleared the warning and collected exactly as much as before. A source
+        # with no code behind it has to say so, or the panel is lying about
+        # which of the two blindnesses this is.
+        implemented = set(registered_kinds())
+        unimplemented = {
+            s.key for s in self.config.sources.values()
+            if s.enabled and s.kind not in implemented
+        }
+        for key in sorted(unimplemented):
+            warnings.append({"kind": "no_collector", "source": key,
+                             "source_kind": self.config.sources[key].kind})
         for key, env in self.config.missing_keys():
-            warnings.append(f"source '{key}' is off: {env} is not set")
+            if key in unimplemented:
+                # Naming the key too would invite someone to go and get it.
+                continue
+            warnings.append({"kind": "missing_key", "source": key, "env": env})
         for key, env in self.config.degraded_sources():
-            warnings.append(
-                f"source '{key}' is running on an unofficial fallback endpoint "
-                f"because {env} is not set - it may break without notice"
-            )
+            warnings.append({"kind": "degraded", "source": key, "env": env})
         for ticker in self.config.unresolved_tickers:
-            warnings.append(
-                f"ticker '{ticker}' is unresolved and is NOT being collected - "
-                f"{self.config.universe[ticker].resolution_hint}"
-            )
+            warnings.append({
+                "kind": "unresolved_ticker", "ticker": ticker,
+                "hint": self.config.universe[ticker].resolution_hint,
+            })
+        # A source switched off in config disappeared from this panel entirely,
+        # so "24/29 sources live" could not be reconciled with what was on
+        # screen. A source that is off on purpose still has to be visible - the
+        # whole point of this panel is that silence and blindness look different.
+        for source in self.config.sources.values():
+            if source.enabled:
+                continue
+            note = " ".join((source.raw.get("notes") or "").split())
+            reason = note.split("OFF:", 1)[-1].strip() if "OFF:" in note else note
+            warnings.append({"kind": "disabled", "source": source.key,
+                             "reason": reason})
+        # Failure counters are keyed "<source>:<url>" and survive a config edit,
+        # so a feed we have since fixed or switched off keeps reporting its old
+        # failures for ever. A warning nobody can act on trains you to ignore
+        # the panel, so only complain about feeds we are still actually polling.
+        live_urls = {u for s in self.config.sources.values() if s.enabled for u in s.feeds}
+        live_urls |= {u for t in self.config.active_tickers
+                      if self.config.ticker(t) for u in self.config.ticker(t).ir_feeds}
+
         for state in self.db.source_health():
-            if (state.get("consecutive_failures") or 0) >= 3:
-                warnings.append(
-                    f"source '{state['source']}' has failed "
-                    f"{state['consecutive_failures']} times: {state.get('last_error')}"
-                )
+            if (state.get("consecutive_failures") or 0) < 3:
+                continue
+            key = str(state["source"])
+            src_key, _, url = key.partition(":")
+            source = self.config.sources.get(src_key)
+            if source is None or not source.enabled:
+                continue                      # gone or already reported as disabled
+            if url and url not in live_urls:
+                continue                      # this URL is no longer configured
+            warnings.append({"kind": "failing", "source": key,
+                             "count": state["consecutive_failures"],
+                             "error": state.get("last_error")})
         return warnings
+
+
+# --------------------------------------------------------------------------- #
+def _trust_meaning(trust: float | None) -> str:
+    if trust is None:
+        return "unknown source - not in config/sources.yaml"
+    for floor, meaning in TRUST_MEANING:
+        if trust >= floor:
+            return meaning
+    return ""
+
+
+def _market_session(dt: datetime) -> str:
+    """Which US session a timestamp fell in. Uses the real America/New_York
+    rules rather than a month-based DST guess, because 'pre-market or not' is
+    the difference between a gap and a nothing."""
+    et = dt.astimezone(MARKET_TZ)
+    if et.weekday() >= 5:
+        return "weekend"
+    minutes = et.hour * 60 + et.minute
+    if minutes < 4 * 60:
+        return "overnight"
+    if minutes < 9 * 60 + 30:
+        return "pre-market"
+    if minutes < 16 * 60:
+        return "regular session"
+    if minutes < 20 * 60:
+        return "after hours"
+    return "overnight"
+
+
+_TICKER_PREFIX = re.compile(r"^\[([A-Z0-9.\-]{1,8})\]\s*(.*)$")
+
+
+def _step(text: str) -> dict[str, str]:
+    """Label one line of the scoring trace so a reader can see the shape of the
+    arithmetic without parsing it: what it started from, what scaled it, what was
+    added, and what overrode the lot."""
+    if text.startswith("+"):
+        kind = "add"
+    elif "cap" in text.lower():
+        kind = "cap"
+    elif "base=" in text:
+        kind = "base"
+    elif re.search(r"x\d", text):
+        kind = "multiply"
+    else:
+        kind = "note"
+    return {"kind": kind, "step": text}
+
+
+def _trace(reasons: list[str]) -> dict[str, Any]:
+    """Split the flat `reasons` list back into the item-wide steps and the
+    per-ticker steps it was built from."""
+    item_steps: list[dict[str, str]] = []
+    per_ticker: dict[str, list[dict[str, str]]] = {}
+    for reason in reasons:
+        match = _TICKER_PREFIX.match(reason)
+        if match:
+            per_ticker.setdefault(match.group(1), []).append(_step(match.group(2)))
+        else:
+            item_steps.append(_step(reason))
+    return {"item": item_steps, "per_ticker": per_ticker}

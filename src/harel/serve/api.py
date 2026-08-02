@@ -13,19 +13,32 @@ from typing import Any
 
 from ..config import get_config
 from ..db import Database
-from ..views import Views
+from ..views import RELATION_MEANING, Views
 
 
 def create_app(db_path: str | None = None):
     try:
         from fastapi import FastAPI, Query
-        from fastapi.responses import HTMLResponse
+        from fastapi.responses import HTMLResponse, JSONResponse
     except ImportError as exc:  # pragma: no cover
         raise SystemExit(
             "FastAPI is not installed. Run: pip install 'harel-terminal[serve]'"
         ) from exc
 
-    from .terminal import render_terminal
+    class Utf8JSONResponse(JSONResponse):
+        """Say the encoding out loud.
+
+        The default is bare `application/json`, and a client that falls back to
+        ISO-8859-1 when no charset is declared turns every Hebrew headline into
+        mojibake - which is half of what this basket is for. The HTML terminal
+        was fine only because it carries its own <meta charset>.
+        """
+        media_type = "application/json; charset=utf-8"
+
+    from .terminal import render_item, render_sources, render_terminal
+
+    # Defined before the routes below close over it.
+    runner = CollectRunner(db_path)
 
     db = Database(db_path)
     views = Views(db=db, config=get_config())
@@ -37,11 +50,35 @@ def create_app(db_path: str | None = None):
             "News and regulatory terminal for a 22-name Israeli equity basket, "
             "ranked for short-term trading. Read /agent/manifest first."
         ),
+        default_response_class=Utf8JSONResponse,
     )
 
     @app.get("/", response_class=HTMLResponse)
     def terminal() -> str:
-        return render_terminal(views)
+        return render_terminal(views, runner.status())
+
+    @app.post("/collect")
+    def collect_form():
+        """The header button. Starts a pass and redirects straight back.
+
+        303 rather than 200 so a reload of the resulting page is a GET and not a
+        second POST, and because the pass takes ~260s - the response cannot be
+        the finished result, only the acknowledgement that it began.
+        """
+        from fastapi.responses import RedirectResponse
+
+        runner.start()
+        return RedirectResponse("/", status_code=303)
+
+    @app.get("/item/{uid}", response_class=HTMLResponse)
+    def item_page(uid: str) -> str:
+        """The evidence behind one line of the feed, for a human who is going to
+        check it before trading it."""
+        return render_item(views, uid, runner.status())
+
+    @app.get("/sources", response_class=HTMLResponse)
+    def sources_page() -> str:
+        return render_sources(views, runner.status())
 
     @app.get("/agent/manifest")
     def manifest() -> dict[str, Any]:
@@ -57,10 +94,13 @@ def create_app(db_path: str | None = None):
         relations: str | None = None,
         events: str | None = None,
         reasons: bool = False,
+        include_tape: bool = Query(
+            False, description="include [TAPE] unexplained-move markers (see /api/moving)"),
     ) -> dict[str, Any]:
         return views.feed(
             tickers=_split(tickers), min_score=min_score, hours=hours, limit=limit,
             relations=_split(relations), events=_split(events), include_reasons=reasons,
+            include_tape=include_tape,
         )
 
     @app.get("/api/brief/{ticker}")
@@ -84,6 +124,16 @@ def create_app(db_path: str | None = None):
     def item(uid: str) -> dict[str, Any]:
         return views.item(uid)
 
+    @app.get("/api/explain/{uid}")
+    def explain(uid: str) -> dict[str, Any]:
+        """Full audit of one item: provenance, timing, link rules, score trace,
+        corroboration, tape context and outside verification links."""
+        return views.explain(uid)
+
+    @app.get("/api/sources")
+    def sources() -> dict[str, Any]:
+        return views.sources_report()
+
     @app.get("/api/calendar")
     def calendar(tickers: str | None = None, days: int = 45) -> dict[str, Any]:
         return views.calendar(_split(tickers), days=days)
@@ -96,6 +146,22 @@ def create_app(db_path: str | None = None):
     def health() -> dict[str, Any]:
         return views.health()
 
+    # -- collection on demand ---------------------------------------------- #
+    @app.post("/api/collect")
+    def collect_now() -> dict[str, Any]:
+        """Run one collection pass - the same one Task Scheduler runs hourly.
+
+        POST, not GET, because it changes the database: a GET would be fetched
+        by a link prefetcher or a browser preview and collect behind your back.
+        """
+        return runner.start()
+
+    @app.get("/api/collect/status")
+    def collect_status() -> dict[str, Any]:
+        """Poll target for the button, and how a page loaded mid-pass finds out
+        that one is already running - including one the scheduled task started."""
+        return runner.status()
+
     return app
 
 
@@ -103,6 +169,118 @@ def _split(value: str | None) -> list[str] | None:
     if not value:
         return None
     return [v.strip().upper() for v in value.split(",") if v.strip()]
+
+
+# The lookback `scripts/harel-hourly.ps1` passes. Wider than the interval on
+# purpose: sources publish late and backdate, and the deduper drops what we
+# already hold, so overlap costs a request rather than a row.
+COLLECT_LOOKBACK_HOURS = 12.0
+
+
+class CollectRunner:
+    """One collection pass at a time, off the request thread.
+
+    A pass measures ~260s against the live sources. That is far past any browser
+    or proxy timeout, so the request cannot wait for it: POST starts the work and
+    returns immediately. The terminal is server-rendered and script-free, so it
+    watches by carrying a meta refresh while `status()` says a pass is running -
+    which also means a pass started by the hourly scheduled task, or from another
+    tab, shows up without anything having to subscribe.
+
+    The lock makes a second click a no-op rather than a second pass - the same
+    thing `-MultipleInstances IgnoreNew` does for the scheduled task. It is an
+    in-process lock, so it cannot see a pass that Task Scheduler started in its
+    own process; if the two overlap, SQLite's WAL mode and the 30s busy timeout
+    let them share the file and the deduper makes the overlap idempotent. Two
+    passes at once is wasteful, not corrupting, and a cross-process lock would be
+    a lot of machinery to save a few minutes of duplicated fetching.
+    """
+
+    def __init__(self, db_path: str | None = None,
+                 hours: float = COLLECT_LOOKBACK_HOURS) -> None:
+        import threading
+
+        self.db_path = db_path
+        self.hours = hours
+        self._lock = threading.Lock()
+        self._thread: Any = None
+        self._state: dict[str, Any] = {"status": "idle"}
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            state = dict(self._state)
+        if state.get("status") == "running" and state.get("started_at"):
+            state["elapsed_sec"] = round(_age_seconds(state["started_at"]), 1)
+        return state
+
+    def start(self) -> dict[str, Any]:
+        import threading
+
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                state = dict(self._state)
+                state["already_running"] = True
+                return state
+            self._state = {
+                "status": "running",
+                "started_at": _utc_now_iso(),
+                "finished_at": None,
+            }
+            self._thread = threading.Thread(
+                target=self._run, name="harel-collect", daemon=True)
+            self._thread.start()
+            return dict(self._state, already_running=False)
+
+    def _run(self) -> None:
+        from ..pipeline import Pipeline
+
+        started = self._state.get("started_at")
+        db = None
+        try:
+            # Its own connection, and its own Database: this thread must not
+            # share the one the request handlers read through.
+            db = Database(self.db_path)
+            report = Pipeline(db=db, lookback_hours=self.hours).run()
+            result = {
+                "status": "done",
+                "collected": report.collected,
+                "stored": report.stored,
+                "dropped": report.deduped,
+                "duration_sec": round(report.duration_sec, 1),
+                "sources": report.by_source,
+                "warnings": len(report.warnings),
+                # Errors are the ones worth surfacing; warnings are per-ticker
+                # noise that the sources page already carries.
+                "errors": report.errors[:10],
+            }
+        except Exception as exc:                       # pragma: no cover - defensive
+            result = {"status": "error",
+                      "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            if db is not None:
+                db.close()
+        result["started_at"] = started
+        result["finished_at"] = _utc_now_iso()
+        with self._lock:
+            self._state = result
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _age_seconds(iso: str) -> float:
+    from datetime import datetime, timezone
+
+    try:
+        started = datetime.fromisoformat(iso)
+    except ValueError:
+        return 0.0
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).total_seconds()
 
 
 AGENT_MANIFEST: dict[str, Any] = {
@@ -113,24 +291,65 @@ AGENT_MANIFEST: dict[str, Any] = {
     "how_to_read_an_item": {
         "score": "0-100 materiality for a SHORT-TERM trader, not for a long-term thesis.",
         "tier": "ALERT >=75, HIGH 55-74, NORMAL 35-54. Below 35 is hidden by default.",
-        "relation": {
-            "DIRECT": "the company's own news - treat as fact about the issuer",
-            "SUBSIDIARY": "a controlled entity; economically the same issuer",
-            "PRODUCT_RIVAL": "same molecule / mechanism / design socket - read across",
-            "CUSTOMER": "a customer's spend, which is our revenue",
-            "PEER": "a named competitor's own news - sector sentiment, not our fact",
-            "SECTOR_REG": "a regulator acting on our sector",
-            "SECTOR_THEME": "a thematic story touching the sector",
-        },
+        # One definition, read by the manifest, the MCP instructions and the
+        # drill-down page alike, so what the agent is told and what the trader
+        # reads cannot drift apart.
+        "relation": RELATION_MEANING,
         "why": "plain-language justification for the link; quote it, do not invent one",
         "reasons": "the full scoring trace; use it to explain rankings",
         "corroboration": "number of independent sources carrying the same story",
+        "causal_eligible": (
+            "TRUE if this item may be offered as the CAUSE of a price move: "
+            "something in it named the company, its product, subsidiary, or a "
+            "peer/customer/supplier we track for it. FALSE for sector-level "
+            "matches - a regulator document that matched a sector keyword and "
+            "named nobody. A false value does NOT mean irrelevant; it means the "
+            "evidence is about a group, not about this company."
+        ),
+        "causal_basis": (
+            "present only when a sector-level item was promoted to driver "
+            "anyway, and says what promoted it (the whole basket moving "
+            "together in the same direction)."
+        ),
+        "t": (
+            "publication time. Compare against `first_published_at` when it is "
+            "present, and never treat a value in the future as an age."
+        ),
+        "first_published_at": (
+            "when this event FIRST became knowable, across every copy of it we "
+            "hold. A Federal Register document appears on public inspection days "
+            "before publication; both copies are one event and this is its start."
+        ),
+        "forthcoming": (
+            "the document exists and is readable but has NOT published yet. "
+            "`publishes_on` is the scheduled date. Say 'publishes on X', never "
+            "'published X ago'."
+        ),
     },
     "rules_for_the_agent": [
         "Never state that a PEER or SECTOR_* item is news about our company.",
         "Always cite `url` and `source`; never paraphrase a headline as fact.",
-        "Prefer items with corroboration >= 2 when a single low-trust source claims something big.",
+        "`corroboration` counts INDEPENDENT SOURCES, not documents. Prefer items "
+        "with corroboration >= 2 when a single low-trust source claims something big.",
+        "In /api/moving, `drivers` are stories that predate the closing bell and "
+        "could have caused the move. `after_the_bell` published after the close - "
+        "never present those as the cause of that day's move; they are the next "
+        "session's catalyst.",
+        "`possible_context` in /api/moving is what we read and deliberately did "
+        "NOT call a cause: relevant to the sector, naming no company. Report it "
+        "as context at low confidence, say no company-specific exposure was "
+        "found, and leave the move an open question. Do not upgrade it to an "
+        "explanation because nothing better is available - the same entity-list "
+        "notice sat behind one name up 4% and another down 3.5% in one session.",
+        "A high `score` is relevance, not causation. Gate any causal claim on "
+        "`causal_eligible`, never on the score alone.",
         "Check `coverage_warnings` in /api/morning before claiming 'no news'.",
+        "When the user asks why an item is ranked where it is, why it is tagged "
+        "with a ticker, or whether it can be trusted, call /api/explain/{uid} "
+        "rather than reasoning from the headline. It carries the provenance, the "
+        "scoring trace, the corroboration and outside links to verify it.",
+        "Every item has a human page at /item/{uid}. Offer that link when the "
+        "user says they want to check something themselves.",
         "An item with meta.kind == 'unexplained_move' means the tape moved and we "
         "found NO story - say so explicitly rather than inventing a cause.",
     ],
@@ -141,6 +360,11 @@ AGENT_MANIFEST: dict[str, Any] = {
         "/api/search": "SQLite FTS5 full-text over everything collected",
         "/api/moving": "price movers joined with their best explanation",
         "/api/item/{uid}": "full record incl. body and duplicate sources",
+        "/api/explain/{uid}": "the audit trail: which query found it, source trust, "
+                              "publication time vs the bell, why it links to each "
+                              "ticker, the score arithmetic, who else carried it, "
+                              "the tape, and links to verify it elsewhere",
+        "/api/sources": "every source, its trust, and when it last returned anything",
         "/api/calendar": "known upcoming catalysts",
         "/api/health": "source health, missing keys, unresolved tickers",
     },

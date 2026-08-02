@@ -12,3 +12,8 @@ data/*.db-wal
 data/*.db-shm
 *.html
 !docs/*.html
+# Recorded pages the collector tests parse. Without this the FDA warning-letter
+# fixture is ignored on the way in and the suite fails on a fresh clone with a
+# FileNotFoundError, on a machine where it had always passed.
+!tests/fixtures/*.html
+logs/

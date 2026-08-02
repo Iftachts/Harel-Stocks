@@ -73,11 +73,18 @@ warning in `harel doctor`, never a failed run.
 
 | Source | What | Latency |
 |---|---|---|
-| `prices_stooq` | daily OHLCV, ADV20, gap | end of day |
-| `prices_yahoo` | quote incl. pre/post market | ~15 min, unofficial |
+| `prices_yahoo` | quote incl. pre/post market, daily bars, ADV20 | ~15 min, unofficial |
+| ~~`prices_stooq`~~ | **off** — JavaScript browser challenge since 2026-08 | — |
 
 Used for score confirmation and for the `whats_moving` view. A move ≥5% with no
 story scoring ≥45 in the last 18 hours becomes a synthetic `[TAPE]` alert.
+
+Yahoo is now the only price source. Stooq's CSV endpoint answers with a
+"this site requires JavaScript" page under any header set, on both `.com` and
+`.pl`, so it was returning nothing and warning 22 times a pass. Nothing moved
+with it: `_yahoo_backfill_bars` already writes the daily bars that ADV20 and
+relative volume read. That leaves the tape on a single unofficial endpoint —
+see LIMITATIONS.
 
 ---
 

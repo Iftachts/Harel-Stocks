@@ -10,9 +10,11 @@ from . import (  # noqa: F401  (side-effect imports)
     edgar,
     fda,
     federal_register,
+    ir_pages,
     maya,
     prices,
     rss,
+    usaspending,
 )
 
 __all__ = ["Collector", "CollectorContext", "build_collectors", "register"]

@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<ownershipDocument>
+  <issuer>
+    <issuerCik>0001119774</issuerCik>
+    <issuerName>COMPUGEN LTD</issuerName>
+  </issuer>
+  <reportingOwner>
+    <reportingOwnerId><rptOwnerName>Levine Zurit</rptOwnerName></reportingOwnerId>
+    <reportingOwnerRelationship>
+      <isDirector>0</isDirector>
+      <isOfficer>1</isOfficer>
+      <officerTitle>SVP, Business Development</officerTitle>
+    </reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <transactionCoding><transactionCode>A</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>24000</value></transactionShares>
+        <transactionPricePerShare><value>0</value></transactionPricePerShare>
+      </transactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>

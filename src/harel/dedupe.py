@@ -23,6 +23,13 @@ from .models import RawItem
 _PUNCT = re.compile(r"[^\w\s֐-׿]+", re.UNICODE)
 _WS = re.compile(r"\s+")
 
+# Google News appends " - <publisher>" to every headline, and the same wire copy
+# is syndicated to regional mirrors, so one story arrived as
+# "…Here's What to Expect - Yahoo Finance" and again as
+# "…Here's What to Expect - Yahoo Finance Singapore" - two fingerprints, two
+# rows, and a corroboration count of two for a single article.
+_PUBLISHER_SUFFIX = re.compile(r"\s+[-–—|]\s+[^-–—|]{2,45}$")
+
 # Wire boilerplate that shifts the fingerprint without changing the story.
 _BOILERPLATE = re.compile(
     r"\b(globe ?newswire|business ?wire|pr ?newswire|globe|newswire|accesswire|"
@@ -40,6 +47,7 @@ _STOP = {
 
 def normalize_title(title: str) -> str:
     text = unicodedata.normalize("NFKC", title or "").lower()
+    text = _PUBLISHER_SUFFIX.sub("", text)
     text = _BOILERPLATE.sub(" ", text)
     text = _PUNCT.sub(" ", text)
     tokens = [t for t in _WS.split(text) if t and t not in _STOP and len(t) > 1]
@@ -47,7 +55,19 @@ def normalize_title(title: str) -> str:
 
 
 def dedupe_key(item: RawItem) -> str:
-    """Exact-match fingerprint: normalized title + publication day."""
+    """Exact-match fingerprint: normalized title + publication day.
+
+    Unless the source hands us a stable identifier for the underlying event, in
+    which case that identifier is the fingerprint and nothing else needs to
+    agree. The Federal Register publishes the same document twice - once on
+    public inspection, days early, and once on publication - under one document
+    number, with a different title prefix and a different date. Title-and-day
+    made those two stories. They are one document with one lifecycle, and the
+    number says so.
+    """
+    stable = str((item.meta or {}).get("dedupe_id") or "").strip()
+    if stable:
+        return hashlib.sha1(f"id|{stable}".encode("utf-8")).hexdigest()
     norm = normalize_title(item.title)
     day = item.published_at.date().isoformat()
     return hashlib.sha1(f"{norm}|{day}".encode("utf-8")).hexdigest()

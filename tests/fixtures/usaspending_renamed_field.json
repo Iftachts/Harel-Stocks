@@ -1,0 +1,87 @@
+{
+ "limit": 100,
+ "results": [
+  {
+   "internal_id": 360840499,
+   "Award ID": "W91CRB26FA174",
+   "Recipient Name": "ELBIT SYSTEMS OF AMERICA - NIGHT VISION LLC",
+   "Recipient UEI": "MYE5L662RU13",
+   "Award Amt": null,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "ENHANCED NIGHT VISION GOGGLE - BINOCULAR",
+   "Base Obligation Date": "2026-04-24",
+   "Last Modified Date": "2026-04-27 15:28:55",
+   "generated_internal_id": "CONT_AWD_W91CRB26FA174_9700_W91CRB24D0001_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 358949619,
+   "Award ID": "W91CRB26FA114",
+   "Recipient Name": "ELBIT SYSTEMS OF AMERICA - NIGHT VISION LLC",
+   "Recipient UEI": "MYE5L662RU13",
+   "Award Amt": null,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "BINOD ESA",
+   "Base Obligation Date": "2026-03-04",
+   "Last Modified Date": "2026-04-21 15:42:20",
+   "generated_internal_id": "CONT_AWD_W91CRB26FA114_9700_W91CRB26DA002_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 359205074,
+   "Award ID": "W91CRB26FA033",
+   "Recipient Name": "ELBIT SYSTEMS OF AMERICA - NIGHT VISION LLC",
+   "Recipient UEI": "MYE5L662RU13",
+   "Award Amt": null,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "AVIATORS NIGHT VISION IMAGING SYSTEM - ANVIS 4 SYSTEMS FOR NEPAL NP-B-VBU",
+   "Base Obligation Date": "2026-03-16",
+   "Last Modified Date": "2026-04-17 13:56:00",
+   "generated_internal_id": "CONT_AWD_W91CRB26FA033_9700_W91CRB21D0017_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 358989020,
+   "Award ID": "W91CRB26C5029",
+   "Recipient Name": "ELBIT SYSTEMS OF AMERICA - NIGHT VISION LLC",
+   "Recipient UEI": "MYE5L662RU13",
+   "Award Amt": null,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "FOREIGN MILITARY SALES FIRM FIXED PRICE CONTRACT AE25014, BK-B-UAZ, BOSNIA AND HERZEGOVINA",
+   "Base Obligation Date": "2026-03-05",
+   "Last Modified Date": "2026-03-05 16:56:55",
+   "generated_internal_id": "CONT_AWD_W91CRB26C5029_9700_-NONE-_-NONE-",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 350358905,
+   "Award ID": "W91CRB25F0071",
+   "Recipient Name": "ELBIT SYSTEMS OF AMERICA - NIGHT VISION LLC",
+   "Recipient UEI": "MYE5L662RU13",
+   "Award Amt": null,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "ENHANCED NIGHT VISION GOGGLE - BINOCULAR PRODUCTION SYSTEMS DELIVERY ORDER 02",
+   "Base Obligation Date": "2024-12-19",
+   "Last Modified Date": "2026-04-02 14:04:28",
+   "generated_internal_id": "CONT_AWD_W91CRB25F0071_9700_W91CRB24D0001_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  }
+ ],
+ "page_metadata": {
+  "page": 1,
+  "hasNext": false
+ },
+ "messages": [
+  "For searches, time period start and end dates are currently limited to an earliest date of 2007-10-01.  For data going back to 2000-10-01, use either the Custom Award Download feature on the website or one of our download or bulk_download API endpoints as listed on https://api.usaspending.gov/docs/endpoints. "
+ ]
+}

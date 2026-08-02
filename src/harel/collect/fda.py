@@ -17,6 +17,7 @@ import re
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 
+from ..enrich.linker import AMBIGUOUS_NAMES, _word_re_with_context
 from ..http import HttpError
 from ..models import RawItem
 from .base import Collector, register
@@ -48,12 +49,26 @@ class OpenFdaCollector(Collector):
             "510k": "decision_date",
         }.get(dataset, "receivedate")
 
-        # openFDA lags; widen the window so nothing is lost to the lag.
-        start = (self.ctx.since - timedelta(days=4)).strftime("%Y%m%d")
+        # openFDA is a batch source and every dataset lands on its own delay, so
+        # the window has to be padded by more than that delay or the query asks
+        # for days the dataset does not have yet. Measured 2026-08-01 against a
+        # live API: drugsfda 3 days behind, both enforcement sets 10, 510k 15.
+        # The old flat 4-day pad meant enforcement and 510k could never match
+        # anything - they were returning zero on their own terms, not only
+        # because of the HTTP 500 below. Padding is cheap: the deduper drops
+        # records already stored, so a wide window costs one request, not rows.
+        lag_days = {"drugsfda": 10, "enforcement": 21, "510k": 30}.get(dataset, 14)
+        start = (self.ctx.since - timedelta(days=lag_days)).strftime("%Y%m%d")
         end = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d")
 
         params = {
-            "search": f"{date_field}:[{start}+TO+{end}]",
+            # openFDA's documented range syntax is `field:[start+TO+end]`, but
+            # that `+` is URL encoding for a space - it belongs to the wire, not
+            # to the value. Passing it through a params dict escapes it to %2B,
+            # so the server received a literal plus and Lucene answered HTTP 500
+            # (`Encountered "]" ... was expecting "TO"`) for every FDA endpoint.
+            # Write the space; requests does the encoding.
+            "search": f"{date_field}:[{start} TO {end}]",
             "limit": str(min(MAX_LIMIT, 500)),
         }
         key = self.source.api_key
@@ -199,6 +214,11 @@ class HtmlListingCollector(Collector):
     )
     DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})|(\d{2}/\d{2}/20\d{2})")
 
+    # How far either side of a link to look for its row's date. A warning-letter
+    # row is a few hundred characters of table markup; more than that and we
+    # start reading the neighbouring row's date.
+    DATE_WINDOW = 400
+
     def collect(self) -> Iterator[RawItem]:
         url = self.source.base_url
         if not url:
@@ -230,20 +250,60 @@ class HtmlListingCollector(Collector):
             seen.add(href)
             if href.startswith("/"):
                 href = "https://www.fda.gov" + href
+            external_id = f"html:{self.source.key}:{href}"
+
+            published = self._row_date(resp.text, match.start(), match.end(), now)
+            dated = published is not None
+            if not dated:
+                # Stamping "now" is not a neutral default here. external_id is
+                # the href, so the uid is stable, and upsert refreshes
+                # published_at on every pass: a warning letter issued 2026-03-15
+                # and first collected 2026-08-01 was re-stamped every pass
+                # forever, so its age stayed at zero, its recency decay stayed
+                # at 1.0, and it could never fall out of a recency-ordered feed
+                # or a since_hours window. Freeze the first stamp we invented
+                # and mark it undated - the convention the feed already renders
+                # as "date unknown, seen <when>" and the scorer already caps.
+                prior = self.db.stored_meta(self.source.key, external_id) or {}
+                published = _stored_dt(prior.get("first_seen")) or now
             yield self.make_item(
-                external_id=f"html:{self.source.key}:{href}",
+                external_id=external_id,
                 title=f"[{self.source.label}] {text[:180]}",
                 url=href,
                 summary=f"Matched on: {'; '.join(why for _, _, why in hits)}",
-                published_at=now,
+                published_at=published,
                 seed_tickers=[t for t, _, _ in hits],
                 seed_relation="SECTOR_REG",
                 meta={
                     "scraped": True,
                     "fragile_source": True,
+                    **({"listing_date": published.date().isoformat()} if dated
+                       else {"undated": True, "first_seen": published.isoformat()}),
                     "relations": {t: rel for t, rel, _ in hits},
                 },
             )
+
+    def _row_date(self, page: str, start: int, end: int,
+                  now: datetime) -> datetime | None:
+        """The date this listing row states, or None if it states none.
+
+        DATE_RE was compiled for exactly this and then referenced nowhere, so
+        every scraped letter was dated by the collection time instead. These
+        pages put the date in sibling cells of the same table row, so the
+        nearest date *before* the anchor is the row's own; a page that puts it
+        after the link is read the other way round. A future date is refused -
+        that is a response deadline, not a publication date.
+        """
+        before = page[max(0, start - self.DATE_WINDOW):start]
+        after = page[end:end + self.DATE_WINDOW]
+        candidates = list(self.DATE_RE.finditer(before))[::-1]
+        candidates += list(self.DATE_RE.finditer(after))
+
+        for found in candidates:
+            parsed = _listing_dt(found.group(0))
+            if parsed is not None and parsed <= now:
+                return parsed
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -260,12 +320,36 @@ class _EntityMatcher:
             for name in tc.match_names:
                 if len(name) < 4 or name == ticker:
                     continue
+                # A name that is also an ordinary word needs corporate context,
+                # exactly as `EntityLinker` requires it - this matcher is a
+                # second, simpler implementation of the same question and had
+                # never been told. openFDA's `recalling_firm` is a full legal
+                # name, so the trap is other companies rather than English:
+                # "Nova Biomedical Corporation" (24 device recalls) and "Nova
+                # Products, Inc." (8 drug recalls) both filed as Nova Ltd's own
+                # news at DIRECT. The guard reads the word after the name, which
+                # is what separates "Nova Ltd" from "Nova Biomedical".
+                pattern = (_word_re_with_context(name)
+                           if name.lower() in AMBIGUOUS_NAMES else _word_re(name))
                 self.rules.append(
-                    (_word_re(name), ticker, "DIRECT", f"names {name}")
+                    (pattern, ticker, "DIRECT", f"names {name}")
                 )
             for name in tc.peer_names:
+                # The only matcher loop here that had no length guard, against
+                # the 26 peer names in universe.yaml shorter than five
+                # characters. "Nova" means Nova Ltd to us; to openFDA it is also
+                # Nova Biomedical (24 device recalls) and Nova Products (8 drug
+                # recalls), so a blood-glucose-meter recall was emitted as
+                # competitor news for Camtek, a semiconductor inspection
+                # company. Its three siblings below and rss._cross_read_terms
+                # already draw the line at five over the same lists.
+                if len(name) < 5:
+                    continue
+                peer_pattern = (_word_re_with_context(name)
+                                if name.lower() in AMBIGUOUS_NAMES
+                                else _word_re(name))
                 self.rules.append(
-                    (_word_re(name), ticker, "PEER", f"competitor {name}")
+                    (peer_pattern, ticker, "PEER", f"competitor {name}")
                 )
             for term in tc.product_terms:
                 if len(term) >= 5:
@@ -303,6 +387,28 @@ def _dataset_of(url: str) -> str:
     if "510k" in url:
         return "510k"
     return "unknown"
+
+
+def _listing_dt(value: str) -> datetime | None:
+    """A date lifted off a scraped listing row. These are US regulator pages,
+    so a slashed date is month-first; day-first is only tried for the ones that
+    cannot be read that way (13/03/2026 and later in the month)."""
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _stored_dt(value: str | None) -> datetime | None:
+    """The stamp we invented for this item on an earlier pass, if we still hold
+    it. Re-inventing it every pass is what kept undated items permanently new."""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _fda_date(value: str | None) -> datetime:

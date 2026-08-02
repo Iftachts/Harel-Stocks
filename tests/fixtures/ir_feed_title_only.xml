@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shape of Q4's `pressrelease.aspx` issuer feed, as served by
+  investor.ormat.com / ir.tevapharm.com / investors.icl-group.com / ir.cgen.com.
+  The point of the fixture is what is NOT here: <description> is empty on every
+  entry, so the reporting date exists only in the page behind <link>.
+
+  {PUBLISHED} and {REPORT_DATE} are substituted by the test. A recorded feed
+  that hard-codes "August 5, 2026" stops testing anything the day the 120-day
+  horizon in `_earnings_date` moves past it.
+-->
+<rss version="2.0">
+  <channel>
+    <title>Ormat Technologies Inc. Press Releases</title>
+    <link>https://investor.ormat.com/</link>
+    <description>Ormat Technologies Inc. Press Releases</description>
+    <item>
+      <title>Ormat Technologies, Inc. to Host Conference Call Announcing Second Quarter 2026 Financial Results</title>
+      <link>https://investor.ormat.com/news-events/news/news-details/2026/Ormat-Conference-Call/default.aspx</link>
+      <description></description>
+      <pubDate>{PUBLISHED}</pubDate>
+      <guid isPermaLink="false">ormat-q2-2026-call</guid>
+    </item>
+    <item>
+      <title>Ormat Commences Commercial Operation of the 80MW/320MWh Shirk Energy Storage Facility in California</title>
+      <link>https://investor.ormat.com/news-events/news/news-details/2026/Ormat-Shirk-Storage/default.aspx</link>
+      <description></description>
+      <pubDate>{PUBLISHED}</pubDate>
+      <guid isPermaLink="false">ormat-shirk-storage</guid>
+    </item>
+  </channel>
+</rss>

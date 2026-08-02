@@ -42,6 +42,22 @@ Non-negotiable rules:
 6. An item with meta.kind == "unexplained_move" means the tape moved and the
    system found no cause. Report that as an open question, not as a cause.
 
+6a. `causal_eligible` is a SEPARATE question from `score`. It is false when the
+   only evidence is a sector keyword - a regulator document that named no
+   company. Such an item may appear in `possible_context` next to a move: report
+   it as low-confidence context, state that no company-specific exposure was
+   found, and leave the move unexplained. Never promote it to the cause because
+   nothing better is on offer. One entity-list notice sat behind one name up 4%
+   and another down 3.5% in the same session; it explained neither.
+
+6b. A timestamp is not always an age. `forthcoming` items have not published yet
+   - say "publishes on `publishes_on`". `first_published_at`, when present, is
+   when the event first became knowable and is the one to reason about.
+
+7. The user is a day trader who checks your work. Never ask them to take a
+   ranking on trust: when they question an item, call `explain` and give them
+   its provenance, its scoring trace and its `check_it_yourself` links.
+
 Start a session with `morning_brief`. Use `ticker_brief` before writing about
 one name. Use `search` to check whether something already came up.
 """
@@ -115,6 +131,29 @@ def build_server(db_path: str | None = None):
         """Full record for one item: body text, the complete scoring trace, all
         ticker links, and the same story as carried by other sources."""
         return _json(views.item(uid))
+
+    @mcp.tool()
+    def explain(uid: str) -> str:
+        """The audit trail behind one item, for when the user asks "why is this
+        here", "why is it tagged TEVA", "how did it get that score" or "can I
+        trust this". Returns the query that found it, the source's trust and what
+        that trust means, publication time in UTC/ET/Israel and whether it landed
+        before or after the closing bell, how long we took to see it, the rule
+        that linked each ticker, the full scoring arithmetic, who else carried
+        the story, the tape at the time, and outside links to verify it.
+
+        A uid prefix of 8+ characters is enough. Quote the `check_it_yourself`
+        links when the user wants to confirm something for themselves - never
+        tell them to take our ranking on trust."""
+        return _json(views.explain(uid))
+
+    @mcp.tool()
+    def sources() -> str:
+        """Every configured source with its trust, what that trust means, how
+        many items it returned on the last pass and when it last succeeded.
+        Use this to answer "did the system even look?" before saying a name is
+        quiet."""
+        return _json(views.sources_report())
 
     @mcp.tool()
     def calendar(tickers: str = "", days: int = 45) -> str:

@@ -54,6 +54,25 @@ sources:
     feeds_from: universe.ir_feeds
     notes: Issuer-controlled. Often beats the wire aggregators by 1-3 minutes.
 
+  company_ir_pages:
+    kind: ir_page
+    label: Company IR pages (issuers with no feed)
+    trust: 1.0
+    latency: minutes
+    poll_sec: 1800
+    pages_from: universe.ir_pages
+    fragile: true             # HTML scrape of a marketing site - see the module
+    notes: >
+      Same standing as company_ir_rss and for the same reason - it is the issuer
+      speaking - but read off HTML because AUDC and NICE declare no feed
+      anywhere. Their reporting dates (4 and 5 August 2026) were otherwise
+      reaching us only through google_news, which returns a volatile subset:
+      the date was in the feed one hour and gone the next, and it arrived
+      attributed to an aggregator at 0.8 rather than to the issuer at 0.95.
+      Configure a page per ticker under `ir_pages:` in universe.yaml. Fragile by
+      construction, so a layout change warns rather than reporting a quiet
+      quarter; watch for "no dated rows found" in `harel doctor`.
+
   maya_tase:
     kind: maya
     label: TASE MAYA - Israeli immediate reports
@@ -153,8 +172,14 @@ sources:
   ema_news:
     kind: rss
     label: EMA news & CHMP outcomes
+    # Verified live. The old /en/rss.xml 404s; EMA publishes one feed per topic
+    # and lists them at /en/news-events/rss-feeds. new-human-medicine is the
+    # valuable one for this basket: an EPAR for a rival molecule is read-across
+    # for TEVA/CGEN/ORMP/KMDA/OPK.
     feeds:
-      - https://www.ema.europa.eu/en/rss.xml
+      - https://www.ema.europa.eu/en/news.xml
+      - https://www.ema.europa.eu/en/new-human-medicine-new.xml
+      - https://www.ema.europa.eu/en/withdrawn-applications.xml
     trust: 1.0
     latency: daily
     poll_sec: 3600
@@ -199,17 +224,61 @@ sources:
     trust: 1.0
     latency: daily            # published ~17:00 ET
     poll_sec: 3600
-    notes: Elbit America / TAT contract awards appear here first.
+    notes: >
+      DoD press releases, not a contract database - 2 stored items, and no DHS
+      or CBP award can ever appear here. See usaspending_awards, which is the
+      structured channel; this one stays for the DoD daily narrative.
+
+  usaspending_awards:
+    kind: usaspending
+    label: USASpending.gov - federal contract awards
+    base_url: https://api.usaspending.gov/api/v2/search/spending_by_award/
+    recipients_from: universe.federal_recipients
+    # Definitive contract actions only. IDV_* is deliberately absent: every
+    # indefinite-delivery vehicle reports `Award Amount: 0.0`, so each one would
+    # render as a $0 "contract win". Verified 2026-08-02 - 8 of 8 came back 0.0.
+    award_type_codes: ["A", "B", "C", "D"]
+    lookback_days: 14
+    # First pass only, and the reason this source exists. The two CBP awards it
+    # was built for were last modified in May; a 14-day incremental window would
+    # never have reached them, so a fresh install would have started by missing
+    # exactly the $302.0M it was supposed to catch. Costs one wider request per
+    # recipient, once.
+    backfill_days: 365
+    min_award_usd: 1000000
+    trust: 1.0
+    latency: daily            # FPDS lands in USASpending ~1-3 days after signature
+    poll_sec: 21600
+    notes: >
+      Free, no key, and the only channel that carries civilian-agency awards.
+      $302.0M of 2026 CBP awards to ELBITAMERICA reached this system through
+      nothing at all before it existed - $215.9M on 2026-03-20 (persistent
+      surveillance) and $86.1M on 2026-06-01 (towers and surveillance
+      equipment); dod_contracts is a DoD press feed and cannot carry either.
+      Queried one request per ticker so attribution is the config's, not a name
+      match. Two silent failure modes are guarded in the collector: an unknown
+      FIELD returns null rather than erroring, and an unknown FILTER KEY is
+      dropped and the query becomes a firehose of unrelated federal awards.
 
   dsca_fms:
     kind: rss
     label: DSCA foreign military sale notifications
+    enabled: false
     feeds:
       - https://www.dsca.mil/major-arms-sales/rss.xml
     trust: 1.0
     latency: daily
     poll_sec: 7200
     fragile: true
+    notes: >
+      OFF: dsca.mil blocks this host. 403 on every path including the site root.
+      Retried with a full browser header set (Accept, Accept-Language,
+      Sec-Fetch-*): the feed path turns 404 but HTML pages still 403, so the
+      block is at the edge and no URL or header fixes it. Checked defense.gov's news RSS as a stand-in
+      and rejected it: it carries general DoD stories (chaplaincy, medicine),
+      which would inject noise into ESLT's sector-regulation lane rather than
+      arms-transfer signal. Re-enable if the block lifts; DoD contract awards
+      still arrive via dod_contracts.
 
   faa_ads:
     kind: federal_register
@@ -230,9 +299,12 @@ sources:
 
   ferc_filings:
     kind: rss
-    label: FERC news & orders
+    label: FERC accepted filings
+    # Verified live (~650 entries). The old news RSS 404s - FERC moved its feed
+    # to the eCollection API, which is the better source anyway: accepted
+    # filings rather than press releases, which is what moves KEN and ORA.
     feeds:
-      - https://www.ferc.gov/news-events/news/rss.xml
+      - https://ecollection.ferc.gov/api/rssfeed
     trust: 1.0
     latency: daily
     poll_sec: 7200
@@ -241,22 +313,38 @@ sources:
   echa_reach:
     kind: rss
     label: ECHA / EU REACH news
+    enabled: false
     feeds:
       - https://echa.europa.eu/-/asset_publisher/rss
     trust: 0.9
     latency: weekly
     poll_sec: 43200
     fragile: true
+    notes: >
+      OFF: echa.europa.eu blocks this host - 403 on every path including the
+      root, and unchanged by a full browser header set, so it is not the URL. ICL's bromine
+      and flame-retardant exposure is still covered through federal_register
+      (TSCA) and its themes.
 
   # --------------------------------------------------------------- markets ---
   prices_stooq:
     kind: prices
     label: Stooq daily + intraday OHLCV
+    enabled: false
     base_url: https://stooq.com/q/d/l/?s={symbol}&i=d
     trust: 0.8
     latency: eod
     poll_sec: 900
-    notes: Free, no key, daily bars. Used for ADV / gap / range context.
+    notes: >
+      OFF: stooq now answers the CSV endpoint with a JavaScript browser
+      challenge - HTTP 200 carrying an HTML page that says "This site requires
+      JavaScript to verify your browser", and 404 without a browser User-Agent.
+      Checked 2026-08-01 on stooq.com and stooq.pl, daily and quote endpoints:
+      there is no header combination that returns CSV, only a headless browser
+      would, and working around bot protection is not something this system
+      should do. It was costing 22 warnings a pass and returning nothing.
+      Nothing is lost: prices_yahoo writes the same daily bars through
+      _yahoo_backfill_bars, so ADV20 and relative volume still have their data.
 
   prices_yahoo:
     kind: prices
@@ -305,12 +393,19 @@ sources:
   calcalist:
     kind: rss
     label: Calcalist (Hebrew business daily)
+    enabled: false
     feeds:
       - https://www.calcalist.co.il/GeneralRSS/0,16335,L-8,00.xml
     trust: 0.7
     latency: minutes
     poll_sec: 600
     fragile: true
+    notes: >
+      OFF: calcalist.co.il blocks this host. 403 on every path including the
+      root; a full browser header set turns the feed path 404 but leaves pages
+      403. Tried the calcalistech.com feeds as an alternative - 404. Hebrew
+      business coverage still arrives via globes and google_news_he. Re-enable
+      if a working feed URL turns up.
 
   # ------------------------------------------------------- optional / paid ---
   courtlistener:
@@ -333,9 +428,15 @@ sources:
     poll_sec: 300
     enabled: false
     notes: >
-      Analyst upgrades/downgrades are a top-3 intraday mover and have NO free,
-      reliable, licence-clean source. See docs/LIMITATIONS.md - this is the
-      single largest quality gap vs Bloomberg.
+      OFF: needs a PAID key. Analyst upgrades/downgrades are a top-3 intraday
+      mover, and this feed is the only way to get them completely and within
+      seconds. But "no free source at all" overstates it: the wires do carry
+      them, and google_news now asks for them by name for every ticker
+      ("<company> upgrade OR downgrade OR price target"), which took coverage
+      from 13 items across 5 names to 16 across 8 - including a Morgan Stanley
+      target cut on NICE and a Barclays cut on ICL that nothing had surfaced
+      before. What the paid feed buys is latency and completeness, not
+      existence. See docs/LIMITATIONS.md.
 
   finnhub:
     kind: finnhub
@@ -346,4 +447,11 @@ sources:
     latency: realtime
     poll_sec: 300
     enabled: false
-    notes: Free tier covers earnings calendar + basic news; ratings need a paid plan.
+    notes: >
+      OFF: no collector is implemented for kind=finnhub yet, so this entry is a
+      placeholder - enabling it would silently do nothing (build_collectors skips
+      an unknown kind). Worth building: the FREE tier covers the earnings
+      calendar, which is docs/LIMITATIONS.md gap 4 and still unfilled, because
+      MAYA's own report-schedule endpoint is behind the pending TASE
+      subscription. A free key takes a minute at finnhub.io. Ratings need a paid
+      plan and are partly covered free already - see benzinga_ratings.

@@ -143,6 +143,10 @@ class ScoringConfig:
     events: list[EventRule]
     noise_form_types: dict[str, float]
     noise_title_patterns: list[NoisePattern]
+    # Articles written because the price already moved. Capped like noise, and
+    # separately used by `whats_moving` to keep an effect from being presented
+    # as a cause. One list, both uses.
+    reactive_patterns: list[NoisePattern]
     noise_hard_cap_default: float
     require_corroboration_below_trust: float
     corroboration_cap: float
@@ -169,6 +173,26 @@ class Config:
     sources: dict[str, SourceConfig]
     scoring: ScoringConfig
     defaults: dict[str, Any]
+    benchmarks: dict[str, Any] = field(default_factory=dict)
+
+    def benchmark_for(self, sector_key: str) -> str | None:
+        """Index proxy a name should be judged against.
+
+        A move only means something relative to its group: +12% on a day the
+        semis index rose 8% is a 4pp stock-specific move, not a 12% one.
+        """
+        by_sector = (self.benchmarks or {}).get("by_sector") or {}
+        return by_sector.get(sector_key) or (self.benchmarks or {}).get("default")
+
+    @property
+    def benchmark_symbols(self) -> list[str]:
+        out = []
+        for t in self.active_tickers:
+            tc = self.ticker(t)
+            sym = self.benchmark_for(tc.sector) if tc else None
+            if sym and sym not in out:
+                out.append(sym)
+        return out
 
     # -- convenience ------------------------------------------------------- #
     @property
@@ -310,18 +334,28 @@ def load_config(config_dir: Path | str | None = None) -> Config:
     events.sort(key=lambda e: e.base, reverse=True)
 
     noise = sco_raw.get("noise") or {}
-    noise_titles = [
-        NoisePattern(pattern=re.compile(np["pattern"], re.IGNORECASE | re.UNICODE),
-                     cap=float(np.get("cap", 12)))
-        for np in (noise.get("title_patterns") or [])
-    ]
+    hard_cap_default = float(noise.get("hard_cap_default", 12))
+
+    def _noise_patterns(key: str) -> list[NoisePattern]:
+        # `hard_cap_default` is what a noise pattern gets when it does not name
+        # its own cap. It was declared in scoring.yaml and then duplicated here
+        # as a literal 12, so editing the config moved nothing.
+        return [
+            NoisePattern(pattern=re.compile(np["pattern"], re.IGNORECASE | re.UNICODE),
+                         cap=float(np.get("cap", hard_cap_default)))
+            for np in (noise.get(key) or [])
+        ]
+
+    noise_titles = _noise_patterns("title_patterns")
+    reactive = _noise_patterns("reactive_patterns")
 
     scoring = ScoringConfig(
         tiers={k: float(v) for k, v in (sco_raw.get("tiers") or {}).items()},
         events=events,
         noise_form_types={k.upper(): float(v) for k, v in (noise.get("form_types") or {}).items()},
         noise_title_patterns=noise_titles,
-        noise_hard_cap_default=float(noise.get("hard_cap_default", 12)),
+        reactive_patterns=reactive,
+        noise_hard_cap_default=hard_cap_default,
         require_corroboration_below_trust=float(
             noise.get("require_corroboration_below_trust", 0.7)
         ),
@@ -332,7 +366,13 @@ def load_config(config_dir: Path | str | None = None) -> Config:
         },
         recency=dict(sco_raw.get("recency") or {}),
         price_confirmation=dict(sco_raw.get("price_confirmation") or {}),
-        overrides=dict(sco_raw.get("overrides") or {}),
+        # Keyed by ticker, and every ticker in this system is uppercase. A
+        # lowercase YAML key half-applied its own block: `_compile_overrides`
+        # normalised the key it built its keyword patterns under, the relation
+        # lookup in `_score_link` did not, so `cgen:` gave CGEN its +20 keyword
+        # boost while silently dropping the 0.95 PRODUCT_RIVAL it sits with.
+        # Normalise once, here, so there is one spelling downstream.
+        overrides={str(k).upper(): v for k, v in (sco_raw.get("overrides") or {}).items()},
     )
 
     return Config(
@@ -341,6 +381,7 @@ def load_config(config_dir: Path | str | None = None) -> Config:
         sources=sources,
         scoring=scoring,
         defaults=dict(src_raw.get("defaults") or {}),
+        benchmarks=dict(sec_raw.get("benchmarks") or {}),
     )
 
 

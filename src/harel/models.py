@@ -48,6 +48,20 @@ class Link:
         }
 
 
+# What separates title from summary from body in `RawItem.text`. It has to be a
+# character no matcher can step over: term regexes join the words of a phrase
+# with `\s+`, and `\s` matches a newline, so a two-word term used to be
+# satisfiable by one word at the end of one field and one at the start of the
+# next. "Analysts turn cautious on Nice" + "Results from the survey are due"
+# matched "Nice\nResults" and reached NICE at DIRECT 0.90 - the highest
+# confidence the linker can assign - on a sentence that does not exist. Google
+# News RSS produces that shape all day. The newlines around it keep `.` from
+# crossing too, for the scoring patterns that are compiled without DOTALL.
+# NUL and not one of the ASCII separator characters: Python counts \x1c-\x1f as
+# whitespace, so `\s+` steps straight over them.
+FIELD_SEP = "\n\x00\n"
+
+
 @dataclass(slots=True)
 class RawItem:
     """A single piece of collected information, before enrichment."""
@@ -84,8 +98,8 @@ class RawItem:
 
     @property
     def text(self) -> str:
-        """Everything the matchers should look at."""
-        return f"{self.title}\n{self.summary}\n{self.body}"
+        """Everything the matchers should look at, with the fields kept apart."""
+        return FIELD_SEP.join((self.title, self.summary, self.body))
 
 
 @dataclass(slots=True)
@@ -110,30 +124,60 @@ class PriceSnapshot:
     """Tape context used both for scoring and for the `whats_moving` view."""
 
     ticker: str
+    # When WE fetched it. Not when the price happened - on a Saturday these are
+    # two days apart, and reporting the fetch as the age of the print made a
+    # Friday close read as "2 minutes old".
     asof: datetime
+    # When the exchange last printed: the last trade, or the closing print of
+    # the last session. This is the observation time; `asof` is the fetch time.
+    # None for providers that do not say.
+    market_time: datetime | None = None
     last: float | None = None
     prev_close: float | None = None
+    # THE session return: regular close against the prior close, and nothing
+    # else. It was the last print against the prior close, which silently
+    # changed meaning at 16:00 - after the bell a post-market tick kept moving
+    # it, so the same finished session reported +0.1% and then -0.8% an hour
+    # later. A session that is over has one return, and comparing a name to its
+    # benchmark only means something when both are measured over the same hours.
     change_pct: float | None = None
+    # The move since that close, in pre- or post-market. Kept apart rather than
+    # blended in: it is real and a trader wants it, but it is thin, it is not
+    # what the sector index did, and it is not the session.
+    extended_last: float | None = None
+    extended_change_pct: float | None = None
+    extended_time: datetime | None = None
     volume: float | None = None
     adv20: float | None = None
     volume_multiple: float | None = None
     day_high: float | None = None
     day_low: float | None = None
     session: str = "unknown"          # premarket | regular | afterhours | closed
+    # Which feed this print came from. A trader reconciling our -4.2% against
+    # their broker needs to know whether they are looking at a delayed Yahoo
+    # intraday quote or a Stooq end-of-day bar; the two disagree by design.
+    provider: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ticker": self.ticker,
             "asof": self.asof.isoformat(),
+            "market_time": self.market_time.isoformat() if self.market_time else None,
             "last": self.last,
             "prev_close": self.prev_close,
             "change_pct": round(self.change_pct, 2) if self.change_pct is not None else None,
+            "extended_last": self.extended_last,
+            "extended_change_pct": (round(self.extended_change_pct, 2)
+                                    if self.extended_change_pct is not None else None),
+            "extended_time": (self.extended_time.isoformat()
+                              if self.extended_time else None),
             "volume": self.volume,
             "adv20": self.adv20,
             "volume_multiple": (
                 round(self.volume_multiple, 2) if self.volume_multiple is not None else None
             ),
             "session": self.session,
+            "provider": self.provider,
         }
 
 
@@ -148,6 +192,10 @@ class CalendarEntry:
     source: str
     confidence: float = 0.8
     url: str = ""
+    # How this date reaches this ticker. DIRECT is the company's own calendar;
+    # SECTOR_REG is a date in its industry, which is not the same thing and must
+    # not be offered as "the next known catalyst" for the company.
+    relation: str = "DIRECT"
 
 
 _WS = re.compile(r"\s+")

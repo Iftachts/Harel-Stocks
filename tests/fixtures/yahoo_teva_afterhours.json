@@ -1,0 +1,85 @@
+{
+  "chart": {
+    "result": [
+      {
+        "meta": {
+          "symbol": "TEVA",
+          "currency": "USD",
+          "exchangeName": "NMS",
+          "exchangeTimezoneName": "America/New_York",
+          "timezone": "EDT",
+          "hasPrePostMarketData": true,
+          "regularMarketPrice": 19.8,
+          "previousClose": 18.0,
+          "chartPreviousClose": 18.3,
+          "regularMarketTime": 1785441600,
+          "regularMarketVolume": 41000000,
+          "regularMarketDayHigh": 20.1,
+          "regularMarketDayLow": 17.95,
+          "dataGranularity": "5m",
+          "range": "5d"
+        },
+        "timestamp": [
+          1785440700,
+          1785441000,
+          1785441300,
+          1785441600,
+          1785441900,
+          1785442200,
+          1785444900
+        ],
+        "indicators": {
+          "quote": [
+            {
+              "open": [
+                19.55,
+                19.6,
+                19.7,
+                19.8,
+                19.95,
+                21.2,
+                21.9
+              ],
+              "high": [
+                19.62,
+                19.72,
+                19.85,
+                19.98,
+                21.4,
+                22.1,
+                22.6
+              ],
+              "low": [
+                19.5,
+                19.58,
+                19.68,
+                19.78,
+                19.9,
+                21.1,
+                21.85
+              ],
+              "close": [
+                19.6,
+                19.7,
+                19.8,
+                19.95,
+                21.2,
+                21.9,
+                22.5
+              ],
+              "volume": [
+                900000,
+                1100000,
+                2400000,
+                300000,
+                850000,
+                640000,
+                210000
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
