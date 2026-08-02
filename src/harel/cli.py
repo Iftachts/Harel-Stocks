@@ -14,6 +14,7 @@
     harel mcp                 MCP server over stdio for an LLM agent
     harel export out.html     static snapshot of the terminal
     harel probe-maya          verify the TASE/MAYA endpoint shape
+    harel verify-feeds        per feed: alive, and doing its job?
 """
 
 from __future__ import annotations
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         C.off()
         TIER_COLOR.update({k: "" for k in TIER_COLOR})
         REL_COLOR.update({k: "" for k in REL_COLOR})
+        _VERDICT_COLOR.update({k: "" for k in _VERDICT_COLOR})
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -184,10 +186,21 @@ def _views(args) -> Views:
 
 def _emit(args, payload: Any) -> bool:
     """Print JSON and return True when --json was requested."""
-    if getattr(args, "json", False):
-        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
-        return True
-    return False
+    if not getattr(args, "json", False):
+        return False
+    text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    # Written as bytes deliberately. Redirected stdout on Windows takes the ANSI
+    # codepage - cp1255 on the box this runs on - so `harel --json ... > out.json`
+    # produced a file `json.load` then refused to read, and the same command on a
+    # cp1252 box dies outright the first time a Hebrew headline reaches it. JSON
+    # is UTF-8 by definition; the console's opinion does not enter into it.
+    stream = getattr(sys.stdout, "buffer", None)
+    if stream is None:
+        print(text)
+    else:
+        stream.write(text.encode("utf-8") + b"\n")
+        stream.flush()
+    return True
 
 
 def cmd_doctor(args) -> int:
@@ -694,70 +707,515 @@ def cmd_probe_maya(args) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# verify-feeds
+#
+# The old version printed "OK, 10 entries" for ORA's feed. That line was true on
+# every pass for five weeks while the collector discarded all ten entries and
+# ORA had no reporting date in the calendar at all - the pipe was open and
+# nothing was coming out of the far end. "OK, 10 entries" checks that the pipe
+# is alive, not that it is doing its job.
+#
+# So this drives the REAL collector over every feed, entry by entry, and reports
+# the whole chain - fetched, parsed, release body read, date extracted, calendar
+# event emitted - with the reason every dropped record was dropped.
+# --------------------------------------------------------------------------- #
+class _NoState:
+    """`source_state` with the writes taken out, and the reads too.
+
+    A diagnostic must not stamp last_ok_at / items_last_run for a pass that
+    stored nothing. It must also not READ the table: `_read_feed` sends the
+    stored ETag, so a healthy feed that has not changed since the last `collect`
+    answers 304 and this report would say "0 entries" about a feed that is fine.
+    """
+
+    def get_source_state(self, source: str) -> dict[str, Any]:
+        return {}
+
+    def set_source_state(self, source: str, **fields: Any) -> None:
+        pass
+
+
+class _Tap:
+    """The HTTP client, with a note of what each request answered.
+
+    `_read_feed` handles 403/404/410 itself - it warns and returns - so without
+    this a feed that has MOVED and a feed that is merely quiet both arrive here
+    as "no entries", which is exactly the conflation this command exists to end.
+    """
+
+    def __init__(self, client: Any) -> None:
+        self.client = client
+        self.log: list[dict[str, Any]] = []
+
+    def get(self, url: str, **kwargs: Any):
+        started = time.monotonic()
+        try:
+            resp = self.client.get(url, **kwargs)
+        except Exception as exc:
+            self.log.append({"url": url, "status": getattr(exc, "status", None),
+                             "bytes": 0, "error": f"{type(exc).__name__}: {exc}",
+                             "sec": round(time.monotonic() - started, 2)})
+            raise
+        self.log.append({"url": url, "status": resp.status, "bytes": len(resp.content),
+                         "error": None, "sec": round(time.monotonic() - started, 2)})
+        return resp
+
+
+def _feed_probe_class():
+    """The real RssCollector, with a note kept of every entry it was handed.
+
+    Subclassed and not reimplemented: the discard rules ARE the subject of this
+    report, and a second copy of them would drift from the collector inside one
+    release and start describing a pipeline that does not exist. Defined in a
+    function so `harel feed` does not import feedparser to print a list.
+    """
+    from .collect.rss import MAX_BODY_LOOKUPS_PER_RUN, RssCollector, _announces_results
+
+    class _FeedProbe(RssCollector):
+        def __init__(self, source, ctx) -> None:
+            super().__init__(source, ctx)
+            # `collect()` normally zeroes these. We drive `_read_feed` one feed
+            # at a time instead, on one collector per source, so the fetch
+            # budgets stay shared across that source's feeds exactly as they are
+            # in a real pass: a name whose release body is never read because the
+            # ten feeds ahead of it spent the budget is a real failure mode, and
+            # it has to show up here as one.
+            self._title_lookups = 0
+            self._body_lookups = 0
+            self.seen: list[dict[str, Any]] = []
+
+        def _entry_to_item(self, entry, feed_url, seed_tickers, seed_relation, label):
+            row: dict[str, Any] = {
+                "title": (entry.get("title") or "").strip() or "(untitled)",
+                "item": None, "error": None, "body_fetched": False,
+                "body_ok": False, "body_starved": False,
+            }
+            # Appended BEFORE the call, so an entry that raises is still counted.
+            # `_read_feed` catches that exception and moves on; a record it never
+            # managed to read is a record this report still owes a reason for.
+            self.seen.append(row)
+            try:
+                row["item"] = super()._entry_to_item(
+                    entry, feed_url, seed_tickers, seed_relation, label)
+            except Exception as exc:
+                row["error"] = f"{type(exc).__name__}: {exc}"
+                raise
+            return row["item"]
+
+        def _add_release_body(self, item, label: str) -> None:
+            wanted = bool(item.url and not item.summary and not item.body
+                          and _announces_results(item.title))
+            before = self._body_lookups
+            super()._add_release_body(item, label)
+            row = next((r for r in self.seen if r["item"] is item), None)
+            if row is None:
+                return
+            row["body_fetched"] = self._body_lookups > before
+            row["body_ok"] = row["body_fetched"] and bool(item.body)
+            row["body_starved"] = wanted and not row["body_fetched"]
+
+    return _FeedProbe
+
+
+def _drop_reason(probe, item, *, issuer: bool, seeds: list[str], relation: str,
+                 hours: float, since: datetime, calendar_since: datetime) -> str:
+    """Why the collector did not emit this entry.
+
+    Returned without the entry's age in it, so that eight entries dropped for one
+    reason group into one line instead of eight that differ only in "137d" -
+    which is how a report meant to make a discard visible buries it. The age
+    travels beside the reason, not inside it.
+
+    The VERDICT always comes from the collector - an item is dropped if it was
+    not yielded. Only the reason is re-derived, and only from the collector's own
+    predicates, so the last branch here is a drift alarm rather than a guess.
+    """
+    from .collect.rss import (IR_CALENDAR_LOOKBACK_DAYS, _announces_results,
+                              _future_results_date)
+    from .enrich.linker import direct_evidence
+    from .models import FIELD_SEP
+
+    if item.published_at < since:
+        if not issuer:
+            return f"outside the {hours:.0f}h news window"
+        if item.published_at < calendar_since:
+            return f"past the {IR_CALENDAR_LOOKBACK_DAYS}d issuer back-read"
+        if not _announces_results(item.title):
+            return (f"outside the {hours:.0f}h news window and its headline "
+                    f"announces no results date")
+        if not _future_results_date(item):
+            return (f"outside the {hours:.0f}h window; announces results but names "
+                    f"no date inside the 120d horizon"
+                    + ("" if (item.summary or item.body)
+                       else " - the feed gave no body text to read"))
+        return f"outside the {hours:.0f}h window, and the back-read did not rescue it"
+
+    required = probe._required_terms(seeds, relation)
+    if required:
+        kind = "rival product" if relation == "PRODUCT_RIVAL" else "peer company"
+        return f"names no {kind} term: {', '.join(required[:4])}"
+
+    tc = probe.cfg.ticker(seeds[0]) if seeds else None
+    if (relation == "DIRECT" and len(seeds) == 1
+            and "{q}" in (probe.source.base_url or "") and tc
+            and not direct_evidence(tc, FIELD_SEP.join((item.title, item.summary)))):
+        return f"the text never names {tc.name} - a loose search-engine match"
+    return "dropped by a collector rule this report does not model (drift?)"
+
+
+def _probe_feed(probe, target, *, linker, hours: float, since: datetime,
+                calendar_since: datetime) -> dict[str, Any]:
+    """Run one feed through the real collector and account for every entry."""
+    from .pipeline import _FIRST_PARTY_SOURCES, _earnings_date
+
+    url, seeds, relation, label, issuer = target
+    rows_at, reqs_at, warns_at = len(probe.seen), len(probe.client.log), len(probe.warnings)
+    started = time.monotonic()
+    try:
+        emitted = list(probe._read_feed(url, seeds, relation, label, issuer))
+        error = None
+    except Exception as exc:
+        emitted, error = [], f"{type(exc).__name__}: {exc}"
+
+    rows = probe.seen[rows_at:]
+    requests = probe.client.log[reqs_at:]
+    warnings = probe.warnings[warns_at:]
+    fetch = requests[0] if requests else {"status": None, "error": error}
+    status = fetch.get("status")
+
+    records: list[dict[str, Any]] = []
+    dates = events = first_party_events = linked = 0
+    calendar: list[dict[str, Any]] = []
+    lost: list[dict[str, Any]] = []
+
+    for row in rows:
+        item = row["item"]
+        if item is None:
+            records.append({
+                "title": row["title"], "outcome": "dropped",
+                "reason": (f"unreadable entry ({row['error']})" if row["error"]
+                           else "no usable headline, and the page behind it gave none"),
+            })
+            continue
+
+        record: dict[str, Any] = {
+            "title": item.title, "url": item.url,
+            "published_at": item.published_at.isoformat(),
+            "age": _ago(item.published_at.isoformat()),
+            "body_fetched": row["body_fetched"], "outcome": "dropped", "reason": "",
+        }
+        # Asked of dropped entries too, and deliberately: an entry that names a
+        # future reporting date and is dropped anyway IS the ORA incident, and it
+        # is silent everywhere else in the system.
+        dated = _earnings_date(item)
+        record["earnings_date"] = dated[0] if dated else None
+
+        if not any(it is item for it in emitted):
+            record["reason"] = _drop_reason(
+                probe, item, issuer=issuer, seeds=seeds, relation=relation,
+                hours=hours, since=since, calendar_since=calendar_since)
+            if row["body_starved"]:
+                record["reason"] += (" (its release body was never fetched - the "
+                                     "shared body budget was already spent)")
+            if dated:
+                lost.append({"title": item.title, "date": dated[0],
+                             "reason": record["reason"]})
+            records.append(record)
+            continue
+
+        links = linker.link(item)
+        record["links"] = [f"{ln.ticker}:{ln.relation}" for ln in links]
+        if not links:
+            record["reason"] = ("collected, then dropped by the pipeline: names "
+                                "nothing in the universe")
+            records.append(record)
+            continue
+        linked += 1
+        record["outcome"] = "stored"
+
+        if dated:
+            dates += 1
+            # A calendar entry needs the date AND a link the date belongs to.
+            # A reporting date attached to a SECTOR_THEME link is not that
+            # company's catalyst, so the pipeline does not write one.
+            owners = [ln.ticker for ln in links
+                      if ln.relation in ("DIRECT", "SUBSIDIARY")]
+            first_party = probe.source.key in _FIRST_PARTY_SOURCES
+            if owners:
+                events += len(owners)
+                first_party_events += len(owners) if first_party else 0
+                record["outcome"] = "event"
+                calendar += [{"ticker": t, "date": dated[0], "label": dated[1],
+                              "first_party": first_party, "feed": label}
+                             for t in owners]
+            else:
+                record["reason"] = ("names a reporting date but has no DIRECT "
+                                    "link, so no calendar entry is written")
+                lost.append({"title": item.title, "date": dated[0],
+                             "reason": record["reason"]})
+        records.append(record)
+
+    fetch_ok = status is not None and status < 400
+    if not fetch_ok:
+        verdict = "DEAD"
+    elif not rows:
+        verdict = "EMPTY"
+    elif not emitted:
+        verdict = "MUTE"
+    else:
+        verdict = "OK"
+
+    return {
+        "source": probe.source.key, "label": label, "url": url, "issuer": issuer,
+        "verdict": verdict,
+        "fetch_ok": fetch_ok,
+        "http_status": status,
+        "fetch_error": fetch.get("error") or error,
+        "entries_seen": len(rows),
+        "items_built": sum(1 for r in rows if r["item"] is not None),
+        "bodies_fetched": sum(1 for r in rows if r["body_fetched"]),
+        "emitted": len(emitted),
+        "linked": linked,
+        "dates_parsed": dates,
+        "future_events_emitted": events,
+        "first_party_events_emitted": first_party_events,
+        "requests": len(requests),
+        "seconds": round(time.monotonic() - started, 2),
+        "warnings": warnings,
+        "calendar": calendar,
+        "dates_not_reaching_the_calendar": lost,
+        "records": records,
+    }
+
+
 def cmd_verify_feeds(args) -> int:
-    """Check every RSS URL in the config and say which ones actually work.
+    """Per feed: is it alive, and is it doing its job?
 
     The IR feed URLs in universe.yaml are educated guesses about each company's
-    site layout. Some will be wrong. This finds them in one pass instead of one
-    warning at a time.
+    site layout, so some are wrong - that is what this found before. But a URL
+    that answers is only the first of six things that have to happen before a
+    feed is worth having, and the other five were invisible: entries parsed,
+    release body read, date extracted, ticker linked, calendar entry written.
+    ORA passed the first and failed the fourth, quietly, for five weeks.
     """
-    import feedparser
-
+    from .collect.base import CollectorContext
+    from .collect.rss import IR_CALENDAR_LOOKBACK_DAYS
+    from .enrich.linker import EntityLinker
     from .http import HttpClient
 
     cfg = get_config()
-    # No retries here: this is a reachability check over ~40 URLs, and backing
-    # off three times per dead feed turns a 30-second check into ten minutes.
-    client = HttpClient(user_agent=cfg.user_agent(), timeout=10, max_retries=0)
+    # No retries: this is a check over ~23 feeds, and backing off three times per
+    # dead one turns a 40-second report into ten minutes.
+    tap = _Tap(HttpClient(user_agent=cfg.user_agent(), timeout=10, max_retries=0))
+    ctx = CollectorContext(config=cfg, client=tap, db=_NoState(),
+                           lookback_hours=args.hours)
+    linker = EntityLinker(cfg)
+    since = ctx.since
+    calendar_since = (datetime.now(timezone.utc)
+                      - timedelta(days=IR_CALENDAR_LOOKBACK_DAYS))
+    probe_class = _feed_probe_class()
+    started = time.monotonic()
 
-    targets: list[tuple[str, str]] = []
-    for ticker in cfg.active_tickers:
-        tc = cfg.ticker(ticker)
-        for url in (tc.ir_feeds if tc else []):
-            targets.append((f"{ticker} IR", url))
+    feeds: list[dict[str, Any]] = []
+    off: list[str] = []
     for source in cfg.sources.values():
-        for url in source.feeds:
-            targets.append((source.key, url))
-
-    ok = dead = empty = 0
-    results: list[tuple[str, str, str, str]] = []
-
-    for label, url in targets:
-        try:
-            resp = client.get(url, allow_status=(400, 401, 403, 404, 410, 429, 500, 503))
-        except Exception as exc:
-            results.append((label, url, "ERROR", f"{type(exc).__name__}: {exc}"))
-            dead += 1
+        if source.kind != "rss":
             continue
-        if resp.status >= 400:
-            results.append((label, url, "DEAD", f"HTTP {resp.status}"))
-            dead += 1
+        if not source.enabled:
+            # dsca_fms, echa_reach and calcalist are off BECAUSE the host blocks
+            # us, with the finding written up in sources.yaml. Re-checking them
+            # every run bought three permanent red lines, and a report that is
+            # always partly red is a report nobody reads to the bottom.
+            off.append(source.key)
             continue
-        parsed = feedparser.parse(resp.content)
-        entries = len(parsed.entries)
-        if entries == 0:
-            results.append((label, url, "EMPTY", "parsed, but zero entries"))
-            empty += 1
-        else:
-            newest = ""
-            if parsed.entries and parsed.entries[0].get("published"):
-                newest = str(parsed.entries[0]["published"])[:31]
-            results.append((label, url, "OK", f"{entries} entries, newest {newest}"))
-            ok += 1
+        probe = probe_class(source, ctx)
+        # One request per ticker per query is ~70 more fetches from one host that
+        # rate-limits us to 2/s. Worth asking for by name, not by default.
+        base = source.base_url or ""
+        query_prefix = base.split("{q}")[0] if "{q}" in base else None
+        for target in probe._feed_plan():
+            url, _seeds, _rel, label, _issuer = target
+            if query_prefix and url.startswith(query_prefix) and not args.queries:
+                continue
+            if args.only and args.only.lower() not in f"{label} {url}".lower():
+                continue
+            feeds.append(_probe_feed(probe, target, linker=linker, hours=args.hours,
+                                     since=since, calendar_since=calendar_since))
 
-    for label, url, status, detail in results:
-        color = {"OK": C.GREEN, "EMPTY": C.AMBER}.get(status, C.RED)
-        print(f"{color}{status:<6}{C.RESET} {label:<24} {detail}")
-        if status != "OK":
-            print(f"       {C.GREY}{url}{C.RESET}")
+    payload = {
+        "window_hours": args.hours,
+        "issuer_lookback_days": IR_CALENDAR_LOOKBACK_DAYS,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "requests": len(tap.log),
+        "duration_sec": round(time.monotonic() - started, 1),
+        "sources_off": off,
+        "totals": _verify_totals(feeds),
+        "calendar": [entry for f in feeds for entry in f["calendar"]],
+        "dates_not_reaching_the_calendar": [
+            {**lost, "feed": f["label"]}
+            for f in feeds for lost in f["dates_not_reaching_the_calendar"]
+        ],
+        "feeds": feeds,
+    }
+    # Computed before the JSON branch, not inside the human one: this is the
+    # command an hourly script runs to find out whether the terminal is being
+    # fed, and `--json` returning 0 over a dead feed makes that check a no-op.
+    code = 0 if feeds and not payload["totals"]["dead"] else 1
+    if _emit(args, payload):
+        return code
+    if not feeds:
+        print(f"{C.AMBER}no feed matches --only {args.only!r}{C.RESET}")
+        return code
+    _print_verify_feeds(payload, show_records=args.reasons)
+    return code
 
-    print(f"\n{C.GREEN}{ok} ok{C.RESET}, {C.AMBER}{empty} empty{C.RESET}, "
-          f"{C.RED}{dead} dead{C.RESET}, of {len(targets)} feeds")
-    if dead or empty:
-        print(f"{C.GREY}Fix the URLs in config/universe.yaml (ir_feeds) or "
-              f"config/sources.yaml (feeds). Google News still covers any name "
-              f"whose IR feed is dead, just with lower trust.{C.RESET}")
-    return 0
+
+def _verify_totals(feeds: list[dict[str, Any]]) -> dict[str, int]:
+    keys = ("entries_seen", "bodies_fetched", "emitted", "linked", "dates_parsed",
+            "future_events_emitted", "first_party_events_emitted")
+    totals = {k: sum(f[k] for f in feeds) for k in keys}
+    totals["feeds"] = len(feeds)
+    for verdict in ("OK", "MUTE", "EMPTY", "DEAD"):
+        totals[verdict.lower()] = sum(1 for f in feeds if f["verdict"] == verdict)
+    return totals
+
+
+_VERDICT_COLOR = {"OK": C.GREEN, "MUTE": C.AMBER, "EMPTY": C.AMBER, "DEAD": C.RED}
+
+
+def _print_verify_feeds(payload: dict[str, Any], show_records: bool = False) -> None:
+    totals = payload["totals"]
+    print(f"{C.BOLD}{C.AMBER}HAREL TERMINAL - verify-feeds{C.RESET}  "
+          f"{C.GREY}news window {payload['window_hours']:.0f}h | issuer back-read "
+          f"{payload['issuer_lookback_days']}d | "
+          f"{payload['checked_at'][:16]}Z{C.RESET}\n")
+
+    last_source = None
+    for feed in payload["feeds"]:
+        if feed["source"] != last_source:
+            last_source = feed["source"]
+            print(f"{C.GREY}{last_source}{C.RESET}")
+        colour = _VERDICT_COLOR.get(feed["verdict"], C.GREY)
+        print(f"  {colour}{feed['verdict']:<5}{C.RESET} "
+              f"{_feed_label(feed)[:20]:<21}{_verify_chain(feed)}")
+        if not feed["fetch_ok"] and feed["fetch_error"]:
+            print(f"        {C.RED}{feed['fetch_error'][:110]}{C.RESET}")
+        if feed["verdict"] != "OK":
+            print(f"        {C.GREY}{feed['url'][:120]}{C.RESET}")
+        for warning in feed["warnings"][:3]:
+            print(f"        {C.AMBER}warn{C.RESET} {C.GREY}{warning[:110]}{C.RESET}")
+        _print_discards(feed, show_records)
+
+    print(f"\n{C.GREEN}{totals['ok']} ok{C.RESET} · {C.AMBER}{totals['mute']} mute"
+          f"{C.RESET} · {C.AMBER}{totals['empty']} empty{C.RESET} · "
+          f"{C.RED}{totals['dead']} dead{C.RESET} of "
+          f"{_plural(totals['feeds'], 'feed')}   "
+          f"{C.GREY}{payload['requests']} requests in "
+          f"{payload['duration_sec']:.0f}s{C.RESET}")
+    print(f"{C.GREY}{totals['entries_seen']} entries · "
+          f"{totals['bodies_fetched']} bodies fetched · {totals['emitted']} emitted · "
+          f"{totals['linked']} link to the universe · "
+          f"{_plural(totals['dates_parsed'], 'date')} parsed · "
+          f"{_plural(totals['future_events_emitted'], 'calendar event')} "
+          f"({totals['first_party_events_emitted']} first-party){C.RESET}")
+
+    if payload["calendar"]:
+        print(f"\n{C.BOLD}CALENDAR THIS RUN WOULD WRITE{C.RESET}")
+        for entry in payload["calendar"]:
+            party = "company-announced" if entry["first_party"] else "reported"
+            print(f"  {C.AMBER}{entry['ticker']:<6}{C.RESET}{entry['date']}  "
+                  f"{entry['label']:<16}{C.GREY}{party} · {entry['feed']}{C.RESET}")
+
+    # The ORA line. A date the system read and then threw away is worse than one
+    # it never saw: nothing anywhere else in the terminal can show its absence.
+    lost = payload["dates_not_reaching_the_calendar"]
+    if lost:
+        print(f"\n{C.RED}{C.BOLD}DATES READ AND THEN DISCARDED{C.RESET}")
+        for entry in lost:
+            print(f"  {C.RED}{entry['date']}{C.RESET}  {entry['feed']:<14}"
+                  f"{entry['title'][:70]}")
+            print(f"              {C.GREY}{entry['reason'][:110]}{C.RESET}")
+
+    if totals["dead"] or totals["empty"]:
+        print(f"\n{C.GREY}DEAD/EMPTY: fix the URL in config/universe.yaml "
+              f"(ir_feeds) or config/sources.yaml (feeds). Google News still "
+              f"covers any name whose IR feed is dead, at lower trust.{C.RESET}")
+    if totals["mute"]:
+        print(f"{C.GREY}MUTE: the feed answered and every entry was discarded. "
+              f"Normal for a quiet issuer; not normal for a wire.{C.RESET}")
+    if payload["sources_off"]:
+        print(f"{C.GREY}not checked, disabled in sources.yaml: "
+              f"{', '.join(payload['sources_off'])}{C.RESET}")
+
+
+def _feed_label(feed: dict[str, Any]) -> str:
+    """A column-width name for a feed.
+
+    Per-ticker feeds already have one ("ORA IR"). A static feed's label IS its
+    URL, and two of them under one source can differ only in the last path
+    segment (fda_press: .../press-releases/rss.xml and .../medwatch/rss.xml), so
+    a truncated URL would print two identical rows.
+    """
+    if feed["label"] != feed["url"]:
+        return feed["label"]
+    tail = feed["url"].split("://")[-1].split("/")
+    return "/".join(tail[-2:])[-20:] if len(tail) > 1 else tail[0][-20:]
+
+
+def _verify_chain(feed: dict[str, Any]) -> str:
+    """The one line that answers "is this feed doing its job"."""
+    if not feed["fetch_ok"]:
+        return f"{C.RED}fetch failed{C.RESET}" + (
+            f" HTTP {feed['http_status']}" if feed["http_status"] else "")
+    parts = [f"{feed['entries_seen']} entries"]
+    unread = feed["entries_seen"] - feed["items_built"]
+    if unread:
+        parts.append(f"{C.AMBER}{unread} unreadable{C.RESET}")
+    if feed["bodies_fetched"]:
+        parts.append(_plural(feed["bodies_fetched"], "body", "bodies"))
+    parts.append(f"{feed['emitted']} emitted")
+    parts.append(f"{feed['linked']} linked")
+    # An issuer feed is where the reporting date comes from, so its zero is the
+    # informative one and is printed. A wire's zero is just Tuesday.
+    if feed["issuer"] or feed["dates_parsed"]:
+        parts.append(_plural(feed["dates_parsed"], "date"))
+        events = feed["future_events_emitted"]
+        suffix = (f" ({feed['first_party_events_emitted']} first-party)"
+                  if events else "")
+        parts.append(f"{C.AMBER if events else ''}{_plural(events, 'event')}"
+                     f"{C.RESET}{suffix}")
+    return " · ".join(parts)
+
+
+def _plural(count: int, noun: str, plural: str | None = None) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {plural or noun + 's'}"
+
+
+def _print_discards(feed: dict[str, Any], show_records: bool) -> None:
+    """Every dropped record has a reason; by default they are printed grouped.
+
+    One line per record is right for an eleven-entry issuer feed and wrong for a
+    fifty-entry wire, where "45 x names nothing in the universe" is the finding
+    and forty-five headlines are the noise burying it. --reasons and --json give
+    the per-record view.
+    """
+    dropped = [r for r in feed["records"] if r["outcome"] == "dropped"]
+    if not dropped:
+        return
+    if show_records:
+        for record in dropped:
+            print(f"        {C.GREY}- {record.get('age', '-'):>5}  "
+                  f"{record['title'][:54]:<54} {record['reason'][:90]}{C.RESET}")
+        return
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in dropped:
+        grouped.setdefault(record["reason"], []).append(record)
+    for reason, records in sorted(grouped.items(), key=lambda kv: -len(kv[1])):
+        lead = "e.g. " if len(records) > 1 else ""
+        print(f"        {C.GREY}{len(records)} x {reason[:88]}  {lead}"
+              f"\"{records[0]['title'][:40]}\" "
+              f"({records[0].get('age', '-')} old){C.RESET}")
 
 
 # --------------------------------------------------------------------------- #

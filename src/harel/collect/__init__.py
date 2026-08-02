@@ -10,6 +10,7 @@ from . import (  # noqa: F401  (side-effect imports)
     edgar,
     fda,
     federal_register,
+    ir_pages,
     maya,
     prices,
     rss,

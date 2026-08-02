@@ -196,6 +196,12 @@ tickers:
       # headline says only "NiCE". A bare "NICE" alias is not the answer; it is
       # an ordinary English word, which is why the ticker is already on
       # rss._ENGLISH_WORD_TICKERS.
+    # No feed, but no press release is needed either: the IR events page states
+    # the date outright - "Q2 2026 Earnings Release Conference Call / Date:
+    # Wednesday, August 5, 2026" - and it is server-rendered, so it can be read
+    # without a browser. Read by collect/ir_pages.py.
+    ir_pages:
+      - https://www.nice.com/company/investors/ir-events
     peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, LPSN, PEGA]
     # Amazon Connect is AWS's contact-centre PRODUCT, so it belongs in
     # competitor_products; the company here is Amazon.
@@ -542,6 +548,12 @@ tickers:
       # same wall as dsca.mil and echa.europa.eu. The 4 August date reaches us
       # through google_news instead; see the `_EARNINGS_SUBJECT` note in
       # pipeline.py for why it was being dropped on arrival.
+    # No feed, but the date is on the site: this page lists every financial
+    # release, the 6 July row announces the reporting date, and the release
+    # behind it says "on August 4, 2026, before the market open". Read by
+    # collect/ir_pages.py, which follows the row for exactly that sentence.
+    ir_pages:
+      - https://www.audiocodes.com/news/press-releases/financial
     peers: [RBBN, CSCO, MSFT, ZM, FIVN, AVYA, NICE]
     peer_names: ["Ribbon Communications", "Cisco", "Microsoft Teams", "Zoom",
                  "Avaya", "Mitel", "Oracle Communications", "Five9", "Genesys"]

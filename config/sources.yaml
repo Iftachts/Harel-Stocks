@@ -54,6 +54,25 @@ sources:
     feeds_from: universe.ir_feeds
     notes: Issuer-controlled. Often beats the wire aggregators by 1-3 minutes.
 
+  company_ir_pages:
+    kind: ir_page
+    label: Company IR pages (issuers with no feed)
+    trust: 1.0
+    latency: minutes
+    poll_sec: 1800
+    pages_from: universe.ir_pages
+    fragile: true             # HTML scrape of a marketing site - see the module
+    notes: >
+      Same standing as company_ir_rss and for the same reason - it is the issuer
+      speaking - but read off HTML because AUDC and NICE declare no feed
+      anywhere. Their reporting dates (4 and 5 August 2026) were otherwise
+      reaching us only through google_news, which returns a volatile subset:
+      the date was in the feed one hour and gone the next, and it arrived
+      attributed to an aggregator at 0.8 rather than to the issuer at 0.95.
+      Configure a page per ticker under `ir_pages:` in universe.yaml. Fragile by
+      construction, so a layout change warns rather than reporting a quiet
+      quarter; watch for "no dated rows found" in `harel doctor`.
+
   maya_tase:
     kind: maya
     label: TASE MAYA - Israeli immediate reports

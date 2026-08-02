@@ -510,7 +510,14 @@ _QUARTER_LABEL = re.compile(
     r"\b(first|second|third|fourth)[- ]quarter\b|\bq([1-4])\b", re.IGNORECASE)
 # Sources where the issuer is speaking for itself.
 _FIRST_PARTY_SOURCES = frozenset({
-    "company_ir_rss", "maya_tase", "maya_schedule", "sec_edgar_submissions",
+    # `company_ir_pages` is the issuer speaking as much as its feed is - it is
+    # only read off HTML because AudioCodes and NICE publish no feed at all. It
+    # needs its own key rather than borrowing `company_ir_rss`: rescore purges
+    # any item whose `meta.feed` is absent from that key's finite feed list,
+    # which is the rule that once deleted 978 rows, and an IR page URL would
+    # never be in it.
+    "company_ir_rss", "company_ir_pages",
+    "maya_tase", "maya_schedule", "sec_edgar_submissions",
 })
 
 # Collectors that fetch regulator documents by *sector query* and so cannot know

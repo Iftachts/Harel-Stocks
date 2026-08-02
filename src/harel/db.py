@@ -99,7 +99,14 @@ CREATE TABLE IF NOT EXISTS calendar (
     confidence REAL,
     url        TEXT,
     relation   TEXT,
-    PRIMARY KEY (ticker, kind, date, label)
+    -- One source asserting one date for one name is ONE fact. `label` used to
+    -- be part of this key, and the label carries the provenance - "(company-
+    -- announced date)" against "(reported by google_news)" - so when that
+    -- wording was corrected the fixed row inserted BESIDE the stale one instead
+    -- of replacing it. PERI then held the same 10 August date twice, and the
+    -- reader keeps the higher confidence, so the stale row claiming the issuer
+    -- had announced it beat the correct one saying an aggregator had.
+    PRIMARY KEY (ticker, kind, date, source)
 );
 
 -- Per-source bookkeeping: conditional GETs, cursors, and honest health state.
@@ -188,6 +195,39 @@ class Database:
                     self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+        self._migrate_calendar_key()
+
+    def _migrate_calendar_key(self) -> None:
+        """Re-key `calendar` on the source rather than on the label.
+
+        SQLite cannot alter a primary key, and `CREATE TABLE IF NOT EXISTS`
+        leaves an existing table alone, so a database created before this keeps
+        the old key for ever unless it is rebuilt. Duplicates are collapsed to
+        the most recently written row per key; whichever survives is corrected
+        by the next harvest, which now REPLACES rather than accumulating.
+        """
+        sql = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='calendar'"
+        ).fetchone()
+        if not sql or "PRIMARY KEY (ticker, kind, date, label)" not in (sql[0] or ""):
+            return
+        self.conn.executescript("""
+            CREATE TABLE calendar_rekeyed (
+                ticker TEXT NOT NULL, kind TEXT NOT NULL, date TEXT NOT NULL,
+                label TEXT NOT NULL, source TEXT, confidence REAL, url TEXT,
+                relation TEXT,
+                PRIMARY KEY (ticker, kind, date, source)
+            );
+            INSERT OR REPLACE INTO calendar_rekeyed
+                SELECT ticker, kind, date, label, source, confidence, url, relation
+                FROM calendar WHERE rowid IN (
+                    SELECT MAX(rowid) FROM calendar
+                    GROUP BY ticker, kind, date, COALESCE(source, '')
+                );
+            DROP TABLE calendar;
+            ALTER TABLE calendar_rekeyed RENAME TO calendar;
+        """)
 
     # -- plumbing ---------------------------------------------------------- #
     @contextmanager

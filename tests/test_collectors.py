@@ -1297,3 +1297,292 @@ def test_the_honest_lag_is_measured_from_public_availability():
     # but if the clocks disagree it must not read as a negative age.
     assert "זמן קדימה" in _public_lag_he(-90)
     assert "-90" not in _public_lag_he(-90)
+
+
+# ------------------------------------------------------------- IR PAGES -- #
+# Two names publish no feed anywhere and put their reporting date on their own
+# site as plain HTML. The fixtures below are those two pages, recorded live on
+# 2026-08-02 and abridged only by cutting rows and menu - see the comment at the
+# top of each. `today` is passed in rather than read from the clock, so these
+# stay honest in 2027.
+IR_TODAY = datetime(2026, 8, 2, tzinfo=timezone.utc).date()
+
+
+def ir_ctx(config, db, routes):
+    """A fixed 72-hour news window.
+
+    The module-level `ctx` widens as the calendar moves away from the fixtures,
+    which is right for a feed test and wrong here: these tests turn on the
+    difference between "recent enough to be news" and "old, but it announces a
+    date still ahead of us", and a window that grows would quietly stop
+    exercising the second one.
+    """
+    return CollectorContext(config=config, client=FakeHttpClient(routes), db=db,
+                            lookback_hours=72)
+
+
+def ir_routes(listing="ir_page_audiocodes_financial.html",
+              release="ir_page_audiocodes_release.html",
+              events="ir_page_nice_events.html", shift=True):
+    """The two pages, with their dates moved to sit around today.
+
+    The recorded pages announce 4 and 5 August 2026. Asserting on those literal
+    dates would test the calendar for one week and then test nothing - the
+    extractor only looks 120 days ahead, and the collector only reads 75 days
+    back - so the two date strings are moved and everything else is the site's
+    own markup. `_shift` fails loudly if a string it expects has gone.
+    """
+    announced, reports = _ir_dates()
+    listing_html = fixture_text(listing)
+    release_html = fixture_text(release)
+    events_html = fixture_text(events)
+    if shift:
+        listing_html = _shift(listing_html, {"Jul 06, 2026": f"{announced:%b %d, %Y}"})
+        release_html = _shift(release_html, {
+            "July 6, 2026": f"{announced:%B} {announced.day}, {announced.year}",
+            "August 4, 2026": f"{reports:%B} {reports.day}, {reports.year}",
+        })
+        events_html = _shift(events_html, {
+            "August 5, 2026": f"{reports:%B} {reports.day}, {reports.year}"})
+    # Order matters: the release URL contains the listing URL, and
+    # FakeHttpClient returns the first route whose key is a substring.
+    return {
+        "press-releases/financial/audiocodes-announces": release_html,
+        "audiocodes.com/news/press-releases/financial": listing_html,
+        "nice.com/company/investors/ir-events": events_html,
+    }
+
+
+def _ir_dates():
+    """(when the announcement went out, when the company will report)."""
+    now = datetime.now(timezone.utc)
+    return (now - timedelta(days=20)).date(), (now + timedelta(days=20)).date()
+
+
+def _shift(page: str, replacements: dict[str, str]) -> str:
+    for old, new in replacements.items():
+        assert old in page, f"the recorded page no longer contains {old!r}"
+        page = page.replace(old, new)
+    return page
+
+
+def test_an_ir_page_with_no_feed_still_parses_into_rows():
+    """The parse itself, against the recorded markup of both sites.
+
+    Two shapes, one parser. AudioCodes writes date-then-headline in a list item;
+    NICE writes headline-then-date in a card and puts the date behind a "Date:"
+    label. Neither is matched on a CSS class - a parser keyed on
+    `li.item-news` works until the site is re-themed and then reports a quiet
+    quarter, which is the failure this whole collector exists to avoid.
+    """
+    from harel.collect.ir_pages import _page_rows
+
+    audc = _page_rows(fixture_text("ir_page_audiocodes_financial.html"), IR_TODAY)
+    # Five rows in the fixture and five rows out. The live page has 227 rows and
+    # ~160KB of mega-menu above them, and yields exactly 227 - the navigation
+    # contributes nothing, because a row has to carry a full date.
+    assert len(audc) == 5, [r.title for r in audc]
+    first = audc[0]
+    assert first.date.isoformat() == "2026-07-06"
+    assert first.title == "AudioCodes Announces Second Quarter 2026 Reporting Date"
+    assert first.href.endswith("audiocodes-announces-second-quarter-2026-reporting-date")
+    assert not first.event_dated, "a press release states when it was published"
+
+    nice = _page_rows(fixture_text("ir_page_nice_events.html"), IR_TODAY)
+    assert len(nice) == 5, [r.title for r in nice]
+    upcoming = nice[0]
+    assert upcoming.title == "Q2 2026 Earnings Release Conference Call"
+    assert upcoming.date.isoformat() == "2026-08-05"
+    assert upcoming.event_dated, "a date still ahead of us is the event's, not a byline"
+    # The date is not in the headline, so it has to survive into the text we
+    # emit or `_earnings_date` has nothing to read.
+    assert "August 5, 2026" in upcoming.summary
+    # The card's only links are a webcast signup and a dial-in registration, both
+    # off-site. A reader following this item wants the issuer's page, not a form.
+    assert upcoming.href == ""
+
+
+def test_a_row_takes_the_headline_beside_its_own_date():
+    """Both layouts put other text closer to the date than the headline is:
+    NICE's card follows its date with "Time: 8:30 ET, 15:30 IL" and a pair of
+    registration links, AudioCodes' row is preceded by the previous row's "Read
+    More". Taking the first block, or the longest, picks one of those."""
+    from harel.collect.ir_pages import _page_rows
+
+    nice = {r.date.isoformat(): r
+            for r in _page_rows(fixture_text("ir_page_nice_events.html"), IR_TODAY)}
+    assert nice["2026-06-09"].title == "NiCE World 2026 Investor and Analyst Day"
+    assert nice["2026-05-06"].title == "Q1 2026 Earnings Conference Call"
+    # No row quotes its neighbour's date: the row text is bounded by the dates
+    # on either side of it, so "Q1 2026 Earnings Conference Call" cannot inherit
+    # the 5 August the card above it announces.
+    assert "August" not in nice["2026-06-09"].summary
+
+    audc = {r.date.isoformat(): r
+            for r in _page_rows(fixture_text("ir_page_audiocodes_financial.html"),
+                                IR_TODAY)}
+    assert audc["2026-05-05"].title == "AudioCodes Reports First Quarter 2026 Results"
+
+
+def test_the_issuers_own_page_answers_the_calendar_first_party(config, db):
+    """The whole point. AUDC's and NICE's reporting dates were reaching us only
+    through google_news, which returns a volatile subset - the date was in the
+    feed one hour and gone the next - and arrived attributed to an aggregator."""
+    from harel.collect.ir_pages import IrPageCollector
+    from harel.pipeline import _FIRST_PARTY_SOURCES, _earnings_date
+
+    _, reports = _ir_dates()
+    collector = IrPageCollector(config.sources["company_ir_pages"],
+                                ir_ctx(config, db, ir_routes()))
+    items = {i.seed_tickers[0]: i for i in collector.collect()}
+
+    assert set(items) == {"AUDC", "NICE"}, "one page, one live announcement each"
+    for ticker, item in items.items():
+        assert item.seed_relation == "DIRECT"
+        # What buys the date 0.95 and "(company-announced date)" instead of 0.8
+        # and "reported by <aggregator>". It is keyed on the source name, so it
+        # is asserted rather than assumed - see the warning test below.
+        assert item.source in _FIRST_PARTY_SOURCES
+        got = _earnings_date(item)
+        assert got, f"{ticker}: no date came out of the issuer's own page"
+        assert got[0] == reports.isoformat(), f"{ticker}: {got}"
+        assert got[1] == "Q2 results", f"{ticker}: {got}"
+
+
+def test_the_reporting_date_is_read_from_the_release_the_row_links_to(config, db):
+    """AudioCodes' listing row says a reporting date exists and never says what
+    it is: "Jul 06, 2026 | Financial - AudioCodes Announces Second Quarter 2026
+    Reporting Date". The date is in the release. So the row is followed - once,
+    and only for a headline that reads like a reporting-date announcement, or a
+    page of forty releases becomes forty fetches a pass."""
+    from harel.collect.ir_pages import IrPageCollector
+
+    ctx_ = ir_ctx(config, db, ir_routes())
+    collector = IrPageCollector(config.sources["company_ir_pages"], ctx_)
+    audc = next(i for i in collector.collect() if "AUDC" in i.seed_tickers)
+
+    assert "will release financial results" in audc.body
+    followed = [c for c in ctx_.client.calls if "audiocodes-announces" in c]
+    assert len(followed) == 1, ctx_.client.calls
+    # A results release states no future date, so following one buys nothing.
+    assert not [c for c in ctx_.client.calls if "reports-first-quarter" in c]
+
+    # Older than the news window and kept anyway, for the one thing an old
+    # issuer announcement is still worth: a date that has not happened yet.
+    assert audc.published_at < ctx_.since
+    assert audc.meta["calendar_backfill"] is True
+    assert audc.meta["listing_date"] == audc.published_at.date().isoformat()
+    assert not audc.meta.get("undated"), "the row states its publication date"
+
+
+def test_an_event_date_is_never_stamped_as_a_publication_date(config, db):
+    """NICE's events page states when the call WILL be, not when the page said
+    so. Stamping that as published_at would make the item permanently the newest
+    thing we hold and permanently inside every since_hours window - the same
+    refusal fda's scraped listing makes about a response deadline."""
+    from harel.collect.ir_pages import IrPageCollector
+    from harel.models import ScoredItem
+
+    _, reports = _ir_dates()
+    source = config.sources["company_ir_pages"]
+    first = next(i for i in IrPageCollector(source, ir_ctx(config, db, ir_routes()))
+                 .collect() if "NICE" in i.seed_tickers)
+
+    assert first.meta["undated"] is True
+    assert first.meta["event_date"] == reports.isoformat()
+    assert first.published_at <= datetime.now(timezone.utc), \
+        "an item published in the future outranks every real story forever"
+    assert first.meta["first_seen"] == first.published_at.isoformat()
+
+    # And the invented stamp is frozen, not re-invented every pass, or the item
+    # never ages and never falls out of a recency-ordered feed.
+    db.upsert_item(
+        ScoredItem(raw=first, links=[], events=[], score=5.0, per_ticker_score={},
+                   tier="NOISE", reasons=[]),
+        dedupe_key="d", cluster_id="c",
+    )
+    second = next(i for i in IrPageCollector(source, ir_ctx(config, db, ir_routes()))
+                  .collect() if "NICE" in i.seed_tickers)
+    assert second.published_at == first.published_at
+
+
+def test_a_relayout_is_reported_and_not_read_as_a_quiet_quarter(config, db):
+    """The single strongest theme in this repo's history. These are marketing
+    sites; they will be re-themed without notice, and a scraper that answers
+    "no rows" looks exactly like a company that announced nothing."""
+    from harel.collect.ir_pages import IrPageCollector
+
+    blank = "<html><body><h1>Investor Relations</h1><p>Nothing dated here.</p></body></html>"
+    routes = dict(ir_routes())
+    routes["nice.com/company/investors/ir-events"] = blank
+    collector = IrPageCollector(config.sources["company_ir_pages"],
+                                ir_ctx(config, db, routes))
+    items = list(collector.collect())
+
+    assert [i.seed_tickers[0] for i in items] == ["AUDC"], "the other page still ran"
+    assert any("no dated rows" in w for w in collector.warnings), collector.warnings
+
+
+def test_a_page_that_loses_most_of_its_rows_is_reported_too(config, db):
+    """A re-theme rarely takes a page to zero. It takes it from forty rows to
+    the two that happen to still match, and those two read as a quiet quarter."""
+    from harel.collect.ir_pages import IrPageCollector
+
+    source = config.sources["company_ir_pages"]
+    page = "https://www.nice.com/company/investors/ir-events"
+    db.set_source_state(f"{source.key}:{page}", items_last_run=43)
+
+    collector = IrPageCollector(source, ir_ctx(config, db, ir_routes()))
+    list(collector.collect())
+    assert any("down from 43" in w for w in collector.warnings), collector.warnings
+
+
+def test_one_unreachable_page_does_not_cost_the_other(config, db):
+    """A marketing site can move a URL any day of the week. That is a warning
+    about one name, not a lost pass for the basket."""
+    from harel.collect.ir_pages import IrPageCollector
+
+    routes = dict(ir_routes())
+    del routes["nice.com/company/investors/ir-events"]
+    collector = IrPageCollector(config.sources["company_ir_pages"],
+                                ir_ctx(config, db, routes))
+    items = list(collector.collect())
+
+    assert [i.seed_tickers[0] for i in items] == ["AUDC"]
+    assert any("HTTP 404" in w for w in collector.warnings), collector.warnings
+
+
+def test_an_ir_page_says_so_when_its_dates_would_be_filed_second_hand(config, db,
+                                                                      monkeypatch):
+    """The reason for scraping an issuer's own site is that the ISSUER said it.
+    `pipeline._FIRST_PARTY_SOURCES` is a set of source keys, so renaming this
+    source in sources.yaml downgrades every date it finds to aggregator standing
+    - a wrong label on a right date, which is the kind of fault nobody looks
+    for."""
+    import harel.pipeline as pipeline
+    from harel.collect.ir_pages import IrPageCollector
+
+    monkeypatch.setattr(pipeline, "_FIRST_PARTY_SOURCES", frozenset())
+    collector = IrPageCollector(config.sources["company_ir_pages"],
+                                ir_ctx(config, db, ir_routes()))
+    list(collector.collect())
+    assert any("_FIRST_PARTY_SOURCES" in w for w in collector.warnings), \
+        collector.warnings
+
+
+def test_a_headline_that_never_names_the_company_still_reaches_it(config, db):
+    """"Q2 2026 Earnings Release Conference Call" contains no company name at
+    all. It is on NICE's own investor site, which is the evidence - the same
+    standing an issuer's own feed already has, and the reason this is seeded
+    rather than left to the text matcher."""
+    from harel.collect.ir_pages import IrPageCollector
+    from harel.enrich.linker import EntityLinker
+
+    collector = IrPageCollector(config.sources["company_ir_pages"],
+                                ir_ctx(config, db, ir_routes()))
+    nice = next(i for i in collector.collect() if "NICE" in i.seed_tickers)
+    assert "NICE" not in nice.title and "NiCE" not in nice.title
+
+    links = {link.ticker: link for link in EntityLinker(config).link(nice)}
+    assert links["NICE"].relation == "DIRECT"
+    assert "own IR page" in links["NICE"].why
