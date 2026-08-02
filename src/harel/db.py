@@ -520,6 +520,37 @@ class Database:
         ).fetchone()
         return row["cluster_id"] if row else None
 
+    def cluster_seed(self, since_hours: float = 36.0) -> list[dict[str, Any]]:
+        """Recent items with what a `Clusterer` needs to recognise them again.
+
+        The near-duplicate matcher is rebuilt empty on every pass, so a second
+        source carrying the same story an hour later opened its own cluster.
+        This is the window it should have been reading. Tickers ride along
+        because the matcher will not merge two similar headlines that name no
+        company in common.
+        """
+        since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+        rows = self.conn.execute(
+            """SELECT i.uid, i.dedupe_key, i.cluster_id, i.title, i.published_at,
+                      GROUP_CONCAT(t.ticker) AS tickers
+                 FROM items i
+                 LEFT JOIN item_tickers t ON t.uid = i.uid
+                WHERE i.published_at >= ? AND i.dedupe_key IS NOT NULL
+                GROUP BY i.uid""",
+            (since,),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            published = _parse_utc(r["published_at"])
+            if published is None:
+                continue
+            out.append({
+                "dedupe_key": r["dedupe_key"], "cluster_id": r["cluster_id"],
+                "title": r["title"], "published_at": published,
+                "tickers": set((r["tickers"] or "").split(",")) - {""},
+            })
+        return out
+
     def feed(
         self,
         tickers: Sequence[str] | None = None,
@@ -766,6 +797,15 @@ class Database:
         d["events"] = json.loads(d.pop("events_json", None) or "[]")
         d["reasons"] = json.loads(d.pop("reasons_json", None) or "[]")
         return d
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    """Stored timestamps are ISO; a naive one is UTC by convention here."""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _cap_per_ticker(rows: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:

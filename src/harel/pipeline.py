@@ -108,6 +108,12 @@ class Pipeline:
             return report
 
         clusterer = Clusterer()
+        # A story that arrived last pass is still the same story. Without this
+        # the near-duplicate matcher starts blind every run, so a second source
+        # carrying the same headline an hour later was counted as a fresh item
+        # rather than as corroboration - which feeds the score.
+        seeded = clusterer.seed(self.db.cluster_seed(since_hours=36.0))
+        log.info("clusterer seeded with %d recent items", seeded)
         prices = self._price_context()
 
         for collector in collectors:
@@ -351,7 +357,9 @@ class Pipeline:
             report.dropped_unlinked += 1
             return False
 
-        dedupe_key, cluster_id = clusterer.assign(item)
+        # The linked tickers are what stop two similar headlines that share no
+        # company from being merged into one story.
+        dedupe_key, cluster_id = clusterer.assign(item, {ln.ticker for ln in links})
         cluster_trust = self._cluster_trust(cluster_id, item.source)
 
         scored: ScoredItem = self.scorer.score(
