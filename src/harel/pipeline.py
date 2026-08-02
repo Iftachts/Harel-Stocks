@@ -22,6 +22,14 @@ from .models import FIELD_SEP, CalendarEntry, RawItem, ScoredItem
 
 log = logging.getLogger("harel.pipeline")
 
+# How far back `rescore` re-judges by default. It was 168h, and a week is not the
+# corpus: a tightened rule reached only what had been collected since Tuesday, so
+# the false links it was written to withdraw sat on the terminal until somebody
+# remembered a flag - which is the exact opposite of "without it tuning is
+# unfalsifiable". Twelve weeks covers what the database actually holds and costs
+# about twice the runtime, still well under a minute.
+RESCORE_DEFAULT_HOURS = 2000.0
+
 
 @dataclass(slots=True)
 class RunReport:
@@ -168,7 +176,7 @@ class Pipeline:
         return report
 
     # ------------------------------------------------------------- rescore --
-    def rescore(self, since_hours: float = 168.0) -> dict[str, Any]:
+    def rescore(self, since_hours: float = RESCORE_DEFAULT_HOURS) -> dict[str, Any]:
         """Re-run linking and scoring over what is already stored.
 
         Scores are computed at collection time, so a change to scoring.yaml or
@@ -251,9 +259,15 @@ class Pipeline:
             # happens to be collected next.
             self._extract_calendar(scored)
 
+        # After the loop, and over the WHOLE table rather than the rows just
+        # re-judged: a link withdrawn above leaves its calendar date standing,
+        # and the dates most likely to be stale are the oldest - the ones any
+        # window stops examining first.
+        calendar_purged = self.db.purge_orphan_calendar()
+
         self.db.conn.commit()
         return {"examined": len(rows), "rescored": changed, "dropped": dropped,
-                "purged": purged}
+                "purged": purged, "calendar_purged": calendar_purged}
 
     def _trusted_seeds(self, row, meta: dict[str, Any]) -> list[str]:
         """The collector's seeds, minus any a search engine merely guessed at.

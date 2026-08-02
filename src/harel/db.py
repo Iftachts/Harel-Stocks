@@ -354,6 +354,32 @@ class Database:
         )
         return len(rows)
 
+    def purge_orphan_calendar(self) -> int:
+        """Drop calendar rows whose justifying link no longer exists.
+
+        A date is only on the calendar because some item linked to some ticker.
+        When re-linking withdraws that claim - a tightened rule, a corrected
+        agency gate - `rescore` deletes the `item_tickers` row and moves on, and
+        the date it produced is left standing with nothing behind it. Nothing
+        ever removed one: 63 of 116 rows were orphans, 28 of them inside the
+        45-day window the terminal actually shows, and `_next_catalyst` will
+        happily print one as a name's "next known date".
+
+        The join is on `url` because `CalendarEntry` carries no uid - lossy, but
+        lossy the safe way: a row survives if ANY item at that URL still carries
+        the link. Deliberately a whole-table sweep rather than per-rescored-item,
+        because the rows most likely to be stale are the oldest ones, which are
+        exactly the ones an `--hours` window stops examining.
+        """
+        cur = self.conn.execute("""
+            DELETE FROM calendar WHERE NOT EXISTS (
+                SELECT 1 FROM items i
+                JOIN item_tickers t ON t.uid = i.uid
+                WHERE i.url = calendar.url AND t.ticker = calendar.ticker
+            )
+        """)
+        return cur.rowcount or 0
+
     # -- source state ------------------------------------------------------ #
     def get_source_state(self, source: str) -> dict[str, Any]:
         row = self.conn.execute(

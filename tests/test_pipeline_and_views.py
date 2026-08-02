@@ -1570,3 +1570,100 @@ def test_the_closing_print_is_labelled_as_the_close_not_as_the_last_trade(config
     assert "16:00 ET" in label
     # The real last print, on its own line, not blended into the reference price.
     assert "מסחר מאוחר" in label and "19:49 ET" in label
+
+
+# --------------------------------------------------------------------------- #
+# The calendar is only as good as the links behind it.
+# --------------------------------------------------------------------------- #
+def _calendar_rows(db):
+    return [dict(r) for r in db.conn.execute("SELECT * FROM calendar")]
+
+
+def _seed_calendar(db, *, ticker, url, kind="rule_effective", date="2027-06-01",
+                   label="Rule effective: [FR] Something", source="federal_register",
+                   relation="SECTOR_REG"):
+    from harel.models import CalendarEntry
+
+    db.save_calendar([CalendarEntry(
+        ticker=ticker, kind=kind, date=date, label=label, source=source,
+        confidence=0.9, url=url, relation=relation)])
+    db.conn.commit()
+
+
+def test_a_calendar_date_whose_link_was_withdrawn_is_removed(config, db):
+    """A date is on the calendar only because some item linked some ticker. When
+    a tightened rule withdraws that claim, `rescore` deletes the item_tickers row
+    and moves on - and nothing ever removed the date it had produced. 63 of 116
+    rows were orphans, and `_next_catalyst` will print one as a name's "next
+    known date"."""
+    _seed_calendar(db, ticker="NICE", url="https://example.gov/immigration-rule")
+    assert len(_calendar_rows(db)) == 1
+
+    # No item, therefore no link, therefore nothing justifies the date.
+    assert db.purge_orphan_calendar() == 1
+    assert _calendar_rows(db) == []
+
+
+def test_a_calendar_date_whose_link_survives_is_kept(config, db):
+    """The regression that matters. A purge that cannot tell a live date from a
+    dead one is worse than no purge."""
+    from datetime import datetime, timezone
+
+    from harel.models import Link, RawItem, ScoredItem
+
+    url = "https://example.gov/airworthiness-directive"
+    raw = RawItem(source="federal_register", source_kind="federal_register",
+                  external_id="fr:1", title="[FR] Airworthiness Directives", url=url,
+                  published_at=datetime.now(timezone.utc))
+    scored = ScoredItem(raw=raw, links=[Link(ticker="TATT", relation="SECTOR_REG",
+                                             confidence=0.62, why="sector")],
+                        events=[], score=30.0, per_ticker_score={"TATT": 30.0},
+                        tier="NOISE", reasons=[])
+    db.upsert_item(scored, "k1", "c1")
+    _seed_calendar(db, ticker="TATT", url=url)
+    db.conn.commit()
+
+    assert db.purge_orphan_calendar() == 0
+    assert len(_calendar_rows(db)) == 1
+
+
+def test_an_issuer_announced_earnings_date_is_never_collateral(config, db):
+    """There are zero earnings orphans today and that has to stay true - these
+    are the dates the whole calendar exists for. The purge must key on whether
+    the LINK survives, never on the kind, so this passes for the same reason a
+    live regulatory date passes and not as a special case."""
+    from datetime import datetime, timezone
+
+    from harel.models import Link, RawItem, ScoredItem
+
+    url = "https://ir.example.com/q2-results-date"
+    raw = RawItem(source="company_ir_rss", source_kind="rss", external_id="ir:1",
+                  title="Example to Report Second Quarter 2026 Results on August 4",
+                  url=url, published_at=datetime.now(timezone.utc))
+    scored = ScoredItem(raw=raw, links=[Link(ticker="TEVA", relation="DIRECT",
+                                             confidence=0.95, why="names Teva")],
+                        events=[], score=60.0, per_ticker_score={"TEVA": 60.0},
+                        tier="HIGH", reasons=[])
+    db.upsert_item(scored, "k2", "c2")
+    _seed_calendar(db, ticker="TEVA", url=url, kind="earnings", date="2027-08-04",
+                   label="Q2 results (company-announced date)",
+                   source="company_ir_rss", relation="DIRECT")
+
+    assert db.purge_orphan_calendar() == 0
+    assert [r["kind"] for r in _calendar_rows(db)] == ["earnings"]
+
+
+def test_the_sweep_reaches_dates_older_than_the_rescore_window(config, db):
+    """Deliberately a whole-table sweep. The rows most likely to be stale are the
+    oldest, which are exactly the ones an --hours window stops examining - so a
+    per-rescored-item purge would miss them for ever."""
+    from harel.pipeline import Pipeline
+
+    # An orphan whose (nonexistent) item would be far outside any window.
+    _seed_calendar(db, ticker="NICE", url="https://example.gov/ancient",
+                   date="2031-01-01")
+    result = Pipeline(config=config, db=db,
+                      client=FakeHttpClient({})).rescore(since_hours=1.0)
+
+    assert result["calendar_purged"] == 1
+    assert _calendar_rows(db) == []

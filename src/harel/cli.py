@@ -29,7 +29,7 @@ from typing import Any
 
 from .config import get_config
 from .db import Database
-from .pipeline import Pipeline
+from .pipeline import RESCORE_DEFAULT_HOURS, Pipeline
 from .views import Views
 
 # ANSI. Disabled automatically when stdout is not a tty.
@@ -145,7 +145,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     rs = sub.add_parser("rescore",
                         help="re-apply the current config to what is already stored")
-    rs.add_argument("--hours", type=float, default=168.0)
+    rs.add_argument("--hours", type=float, default=RESCORE_DEFAULT_HOURS)
     rs.set_defaults(handler=cmd_rescore)
 
     sv = sub.add_parser("serve", help="REST API + HTML terminal")
@@ -428,7 +428,9 @@ def cmd_rescore(args) -> int:
           f"{C.AMBER}{result['rescored']}{C.RESET} changed score, "
           f"{result['dropped']} no longer re-link (kept), "
           f"{C.AMBER}{result['purged']}{C.RESET} purged "
-          f"(retired feed or empty headline)")
+          f"(retired feed or empty headline), "
+          f"{C.AMBER}{result['calendar_purged']}{C.RESET} calendar dates dropped "
+          f"(the link behind them is gone)")
     return 0
 
 
