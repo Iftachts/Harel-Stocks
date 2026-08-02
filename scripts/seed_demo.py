@@ -39,7 +39,9 @@ ROUTES = {
     "api.fda.gov/drug/enforcement.json": json.loads(
         (FIXTURES / "openfda_enforcement.json").read_text()
     ),
-    "mayaapi.tase.co.il": json.loads((FIXTURES / "maya_reports.json").read_text()),
+    "maya.tase.co.il/api/v1/reports": json.loads(
+        (FIXTURES / "maya_v1_reports.json").read_text(encoding="utf-8")
+    ),
     # Only TEVA gets a price series, so the demo does not imply that every
     # name gapped 10% on the same day.
     "s=teva.us": (FIXTURES / "stooq_teva.csv").read_text(),

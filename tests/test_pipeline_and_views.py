@@ -24,7 +24,7 @@ ROUTES = {
     "federalregister.gov/api/v1/documents.json": fixture_json("federal_register.json"),
     "clinicaltrials.gov/api/v2/studies": fixture_json("clinicaltrials.json"),
     "api.fda.gov/drug/enforcement.json": fixture_json("openfda_enforcement.json"),
-    "mayaapi.tase.co.il": fixture_json("maya_reports.json"),
+    "maya.tase.co.il/api/v1/reports": fixture_json("maya_v1_reports.json"),
     # Same bars and the same +10% close as stooq_teva.csv, in Yahoo's shape.
     # The end-to-end test has to run the price path that production runs, and
     # prices_stooq is switched off: stooq answers the CSV endpoint with a
@@ -316,7 +316,10 @@ def test_health_reports_missing_keys_and_content(ran):
     _, views = ran
     health = views.health()
     assert health["db"]["items"] > 0
-    assert any(k["env_var"] == "TASE_API_KEY" for k in health["missing_api_keys"])
+    # Since the public v1 fallback, both MAYA sources are key_optional: the
+    # TASE key upgrades them rather than switching them on, so it belongs in
+    # running_degraded and must NOT read as "off".
+    assert not any(k["env_var"] == "TASE_API_KEY" for k in health["missing_api_keys"])
     assert any(k["env_var"] == "TASE_API_KEY" for k in health["running_degraded"])
     # courtlistener requires a token AND has no collector. It belongs in the
     # second list only: an API key cannot switch on code that does not exist.

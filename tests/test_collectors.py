@@ -531,10 +531,14 @@ def test_an_announcement_that_never_names_the_quarter_still_carries_its_date():
 
 
 # ----------------------------------------------------------------- MAYA -- #
-def test_maya_parses_hebrew_reports_and_converts_to_utc(config, db):
-    routes = {"mayaapi.tase.co.il": fixture_json("maya_reports.json")}
+# The keyless routes key on the POST body ('"companyId": 629,' is TEVA), which
+# FakeHttpClient matches because every v1 query goes to the same URL and
+# differs only in the body.
+def test_maya_parses_hebrew_reports_and_converts_to_utc(config, db, monkeypatch):
+    monkeypatch.delenv("TASE_API_KEY", raising=False)
+    routes = {'"companyId": 629,': fixture_json("maya_v1_reports.json")}
     collector = MayaCollector(config.sources["maya_tase"], ctx(config, db, routes))
-    items = list(collector.collect())
+    items = [i for i in collector.collect() if "TEVA" in i.seed_tickers]
     assert items
     item = items[0]
     assert item.lang == "he"
@@ -542,6 +546,62 @@ def test_maya_parses_hebrew_reports_and_converts_to_utc(config, db):
     assert item.title.startswith("[MAYA]")
     # 09:05 Israel time in July (UTC+3) is 06:05 UTC.
     assert item.published_at.hour == 6 and item.published_at.minute == 5
+
+
+def test_maya_public_posts_issuer_keyed_bodies_for_every_name(config, db, monkeypatch):
+    """The keyless channel is the new site's own backend: one URL, a JSON body
+    per name, keyed on the issuer number - the same registry the official API
+    calls IssuerId. PANW and LPSN carry no tase_id and must still be queried,
+    and none of the old mayaapi spoofing headers belong on the request."""
+    monkeypatch.delenv("TASE_API_KEY", raising=False)
+    client = FakeHttpClient({'"companyId": 629,': fixture_json("maya_v1_reports.json")})
+    collector = MayaCollector(
+        config.sources["maya_tase"],
+        CollectorContext(config=config, client=client, db=db,
+                         lookback_hours=LOOKBACK_HOURS),
+    )
+    list(collector.collect())
+
+    urls = {u for u, _ in client.posts}
+    assert urls == {"https://maya.tase.co.il/api/v1/reports/companies"}
+
+    teva = next(b for _, b in client.posts if b.get("companyId") == 629)
+    assert teva["by"] == "company"
+    assert teva["limit"] <= 30, "the server validates limit to 1..30"
+    assert teva["toDate"].endswith("T00:00:00.000Z"), \
+        "a toDate past the server's own today is a 400"
+
+    queried = {b["companyId"] for _, b in client.posts}
+    assert int(config.ticker("PANW").raw["tase_issuer_id"]) in queried
+    assert int(config.ticker("LPSN").raw["tase_issuer_id"]) in queried
+
+    assert not any("X-Maya-With" in h for h in client.headers_seen), \
+        "the v1 channel needs no browser spoofing - a clean request only"
+
+
+def test_maya_public_pages_on_offset_until_a_short_page(config, db, monkeypatch):
+    """The server caps limit at 30, so a busy week pages on offset. A full page
+    means ask again; a short one is the end of the window."""
+    monkeypatch.delenv("TASE_API_KEY", raising=False)
+    template = fixture_json("maya_v1_reports.json")[0]
+    limit = int(config.sources["maya_tase"].raw.get("page_limit", 30))
+
+    def pages(body):
+        if body["offset"] == 0:
+            return [dict(template, id=1552000 + n) for n in range(limit)]
+        return [dict(template, id=1552000 + limit)]
+
+    client = FakeHttpClient({'"companyId": 629,': pages})
+    collector = MayaCollector(
+        config.sources["maya_tase"],
+        CollectorContext(config=config, client=client, db=db,
+                         lookback_hours=LOOKBACK_HOURS),
+    )
+    items = [i for i in collector.collect() if "TEVA" in i.seed_tickers]
+
+    assert len(items) == limit + 1, "the second page's tail must not be dropped"
+    offsets = [b["offset"] for _, b in client.posts if b.get("companyId") == 629]
+    assert offsets == [0, limit]
 
 
 def _maya_v2(config, db, monkeypatch, issuer_id=629, routes=None):
@@ -578,15 +638,35 @@ def test_maya_v2_publication_date_is_utc_and_not_shifted(config, db, monkeypatch
 
 
 def test_maya_public_endpoint_still_reads_naive_time_as_israel_local(config, db, monkeypatch):
-    """The v2 fix must not regress the undocumented public channel."""
+    """The v2 fix must not regress the public channel: v1's publishDate is a
+    naive Israel-local stamp, exactly like the old mayaapi one was."""
     monkeypatch.delenv("TASE_API_KEY", raising=False)
     collector = MayaCollector(
         config.sources["maya_tase"],
-        ctx(config, db, {"mayaapi.tase.co.il": fixture_json("maya_reports.json")}),
+        ctx(config, db, {'"companyId": 629,': fixture_json("maya_v1_reports.json")}),
     )
     item = next(i for i in collector.collect() if i.meta.get("maya_report_id") == 1552211)
     # 09:05 Israel local in July (UTC+3) -> 06:05 UTC
     assert item.published_at.hour == 6 and item.published_at.minute == 5
+
+
+def test_maya_v1_record_maps_form_page_and_documents(config, db, monkeypatch):
+    """The v1 record has no URL of its own and hides the form number in formId,
+    so the mapping has to build the site's report page and resolve attachment
+    paths against the mayafiles CDN - which serves them with no auth."""
+    monkeypatch.delenv("TASE_API_KEY", raising=False)
+    collector = MayaCollector(
+        config.sources["maya_tase"],
+        ctx(config, db, {'"companyId": 629,': fixture_json("maya_v1_reports.json")}),
+    )
+    item = next(i for i in collector.collect() if i.meta.get("maya_report_id") == 1552211)
+
+    assert item.url == "https://maya.tase.co.il/he/reports/1552211"
+    assert item.meta["form_type"] == "ת076"
+    assert item.meta["is_priority"] is True
+    assert item.meta["attachment_urls"][0] == (
+        "https://mayafiles.tase.co.il/rpdf/1552001-1553000/P1552211-00.pdf"
+    )
 
 
 def test_maya_v2_sends_issuer_id_and_api_key_header(config, db, monkeypatch):
@@ -701,14 +781,34 @@ def test_maya_schedule_becomes_a_calendar_row_not_a_headline(config, db, monkeyp
     )
 
 
-def test_maya_schedule_needs_no_public_fallback_but_says_so(config, db, monkeypatch):
+def test_maya_schedule_falls_back_to_public_events_without_a_key(config, db, monkeypatch):
+    """The calendar no longer waits for the TASE subscription: without a key
+    the collector reads the corporate-events channel the Maya site itself
+    shows as "אירועים קרובים". The publication row is the calendar item; the
+    same-day conference call contributes its clock instead of becoming a
+    second entry for the same date."""
     monkeypatch.delenv("TASE_API_KEY", raising=False)
+    client = FakeHttpClient(
+        {"corporate-actions/events": fixture_json("maya_ca_events.json")}
+    )
     collector = MayaScheduleCollector(
         config.sources["maya_schedule"],
-        ctx(config, db, {}),
+        CollectorContext(config=config, client=client, db=db,
+                         lookback_hours=LOOKBACK_HOURS),
     )
-    assert list(collector.collect()) == []
-    assert any("TASE_API_KEY" in w for w in collector.warnings)
+    items = [i for i in collector.collect() if "TEVA" in i.seed_tickers]
+
+    assert len(items) == 1, "the conference call must not become a second row"
+    item = items[0]
+    assert item.meta["scheduled_report_on"] == "2026-11-12"
+    assert item.meta["scheduled_time"] == "15:30", \
+        "the clock rides in the conference-call row"
+    assert item.meta["form_type"] == "MAYA-SCHEDULE"
+    assert "דוח רבעון 3" in item.title
+
+    body = next(b for _, b in client.posts if b.get("companyId") == 629)
+    assert body["by"] == "company"
+    assert body["limit"] <= 30
 
 
 def test_maya_schedule_skips_names_without_an_issuer_number(config, db, monkeypatch):
@@ -737,7 +837,7 @@ def test_a_maya_schema_break_reaches_the_run_report(config, db, monkeypatch):
     renamed = {"Data": [{"reportSubject": "דוח מיידי",
                          "whenPublished": "2026-07-30T09:05:00"}]}
     collector = MayaCollector(
-        config.sources["maya_tase"], ctx(config, db, {"mayaapi.tase.co.il": renamed})
+        config.sources["maya_tase"], ctx(config, db, {"maya.tase.co.il": renamed})
     )
 
     assert list(collector.collect()) == []
@@ -749,10 +849,11 @@ def test_a_maya_schema_break_reaches_the_run_report(config, db, monkeypatch):
         "source_state must carry every affected name, not just the last one"
 
 
-def test_maya_finds_records_in_an_unexpected_envelope(config, db):
+def test_maya_finds_records_in_an_unexpected_envelope(config, db, monkeypatch):
     """Field renames must degrade, not crash."""
-    wrapped = {"Result": {"Data": {"Reports": fixture_json("maya_reports.json")}}}
-    routes = {"mayaapi.tase.co.il": wrapped}
+    monkeypatch.delenv("TASE_API_KEY", raising=False)
+    wrapped = {"Result": {"Data": {"Reports": fixture_json("maya_v1_reports.json")}}}
+    routes = {"maya.tase.co.il": wrapped}
     collector = MayaCollector(config.sources["maya_tase"], ctx(config, db, routes))
     assert list(collector.collect())
 
@@ -1066,7 +1167,13 @@ def test_maya_refusing_every_name_is_not_a_quiet_day(config, db):
     from harel.http import Response
 
     class RefusingClient(FakeHttpClient):
+        # Both verbs: the official channel GETs, the public v1 channel POSTs,
+        # and a wall of 403s must surface in source_state either way.
         def get(self, url, **kwargs):
+            self.calls.append(url)
+            return Response(403, "", b"", {}, url)
+
+        def post(self, url, **kwargs):
             self.calls.append(url)
             return Response(403, "", b"", {}, url)
 

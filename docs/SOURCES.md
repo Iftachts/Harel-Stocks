@@ -29,8 +29,12 @@ are locked at `PEER` — the collector synthesises a headline containing our own
 company name, and without the lock the linker would read that back and call it
 DIRECT.
 
-**`maya_tase`** is the structural edge for this basket (20 of 22 dual-listed). See
-[LIMITATIONS §3](LIMITATIONS.md#3-tase--maya--עובד-אבל-על-endpoint-לא-מתועד).
+**`maya_tase`** is the structural edge for this basket (20 of 22 dual-listed).
+Keyless it rides the new Maya site's own v1 backend (`maya.tase.co.il/api/v1`);
+with `TASE_API_KEY` it upgrades to the official datawise API. The old
+`mayaapi.tase.co.il` endpoints are dead behind bot protection — do not point
+config back at them. See
+[LIMITATIONS §3](LIMITATIONS.md#3-tase--maya--עובד-על-הapi-הפנימי-של-האתר-החדש).
 
 ---
 
