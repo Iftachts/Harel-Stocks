@@ -1,0 +1,57 @@
+{
+ "limit": 100,
+ "results": [
+  {
+   "internal_id": 272131787,
+   "Award ID": "0001",
+   "Recipient Name": "TAT TECHNOLOGIES LTD",
+   "Recipient UEI": "TZMTECJ51C87",
+   "Award Amount": 4027427.16,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "OVERHAUL OF THE UH-60 VALVE, ASSEMBLY",
+   "Base Obligation Date": "2011-05-11",
+   "Last Modified Date": "2016-04-12 16:09:50",
+   "generated_internal_id": "CONT_AWD_0001_9700_W58RGZ11D0190_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 310181564,
+   "Award ID": "N0038307CD030",
+   "Recipient Name": "LIMCO AIREPAIR INC.",
+   "Recipient UEI": "LLNNTHPDWYV1",
+   "Award Amount": 2769150.0,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Defense Contract Management Agency",
+   "Description": "NAVY AVIATION",
+   "Base Obligation Date": "2007-05-09",
+   "Last Modified Date": "2015-05-19 00:00:00",
+   "generated_internal_id": "CONT_AWD_N0038307CD030_9700_-NONE-_-NONE-",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 272395872,
+   "Award ID": "0003",
+   "Recipient Name": "PIEDMONT AVIATION COMPONENT SERVICES, LLC",
+   "Recipient UEI": "Y8RDAEXDFGK1",
+   "Award Amount": 636915.0,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Department of the Army",
+   "Description": "OVERHAUL OF PIN, HOLLOW - CH-47 (US)",
+   "Base Obligation Date": "2015-05-04",
+   "Last Modified Date": "2020-01-23 17:35:49",
+   "generated_internal_id": "CONT_AWD_0003_9700_W58RGZ13D0215_9700",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  }
+ ],
+ "page_metadata": {
+  "page": 1,
+  "hasNext": false
+ },
+ "messages": [
+  "For searches, time period start and end dates are currently limited to an earliest date of 2007-10-01.  For data going back to 2000-10-01, use either the Custom Award Download feature on the website or one of our download or bulk_download API endpoints as listed on https://api.usaspending.gov/docs/endpoints. "
+ ]
+}

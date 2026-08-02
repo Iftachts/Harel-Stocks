@@ -1,0 +1,90 @@
+{
+ "limit": 100,
+ "results": [
+  {
+   "internal_id": 307885715,
+   "Award ID": "HT940216C0001",
+   "Recipient Name": "HUMANA GOVERNMENT BUSINESS INC",
+   "Recipient UEI": "ZE6ZM6NKSV43",
+   "Award Amount": 51269205263.03,
+   "Awarding Agency": "Department of Defense",
+   "Awarding Sub Agency": "Defense Health Agency",
+   "Description": "IGF::OT::IGF",
+   "Base Obligation Date": "2016-07-29",
+   "Last Modified Date": "2026-02-10 17:52:09",
+   "generated_internal_id": "CONT_AWD_HT940216C0001_9700_-NONE-_-NONE-",
+   "awarding_agency_id": 1173,
+   "agency_slug": "department-of-defense"
+  },
+  {
+   "internal_id": 295476065,
+   "Award ID": "DEAC0494AL85000",
+   "Recipient Name": "LOCKHEED MARTIN CORP",
+   "Recipient UEI": "FYHNA5WC8XD7",
+   "Award Amount": 48063737196.35,
+   "Awarding Agency": "Department of Energy",
+   "Awarding Sub Agency": "Department of Energy",
+   "Description": null,
+   "Base Obligation Date": "1993-10-15",
+   "Last Modified Date": "2026-07-07 17:57:06",
+   "generated_internal_id": "CONT_AWD_DEAC0494AL85000_8900_-NONE-_-NONE-",
+   "awarding_agency_id": 930,
+   "agency_slug": "department-of-energy"
+  },
+  {
+   "internal_id": 295527116,
+   "Award ID": "DENA0003525",
+   "Recipient Name": "NATIONAL TECHNOLOGY & ENGINEERING SOLUTIONS OF SANDIA, LLC",
+   "Recipient UEI": "LUJEPCRRT377",
+   "Award Amount": 42774168231.25,
+   "Awarding Agency": "Department of Energy",
+   "Awarding Sub Agency": "Department of Energy",
+   "Description": "IGF::CL,CT::IGF CONTRACT AWARD DE-NA0003525 TO THE NATIONAL TECHNOLOGY&ENGINEERING SOLUTIONS OF SANDIA, LLC (NTESS) FOR THE MANAGEMENT AND OPERATION OF THE DEPARTMENT OF ENERGY, NATIONAL NUCLEAR SECURITY ADMINISTRATION'S SANDIA NATIONAL LABORATORIES (SNL)",
+   "Base Obligation Date": "2016-12-16",
+   "Last Modified Date": "2026-07-30 12:17:47",
+   "generated_internal_id": "CONT_AWD_DENA0003525_8900_-NONE-_-NONE-",
+   "awarding_agency_id": 930,
+   "agency_slug": "department-of-energy"
+  },
+  {
+   "internal_id": 295476106,
+   "Award ID": "DEAC0500OR22725",
+   "Recipient Name": "UT-BATTELLE LLC",
+   "Recipient UEI": "ZLHJJ57QA2H8",
+   "Award Amount": 42257183758.79,
+   "Awarding Agency": "Department of Energy",
+   "Awarding Sub Agency": "Department of Energy",
+   "Description": "MANAGEMENT AND OPERATION OF THE OAK RIDGE NATIONAL LABORATORY",
+   "Base Obligation Date": "1999-10-15",
+   "Last Modified Date": "2026-07-31 08:29:19",
+   "generated_internal_id": "CONT_AWD_DEAC0500OR22725_8900_-NONE-_-NONE-",
+   "awarding_agency_id": 930,
+   "agency_slug": "department-of-energy"
+  },
+  {
+   "internal_id": 295477233,
+   "Award ID": "DEAC5207NA27344",
+   "Recipient Name": "LAWRENCE LIVERMORE NATIONAL SECURITY, LLC",
+   "Recipient UEI": "PM52LCJH72T9",
+   "Award Amount": 41316801717.75,
+   "Awarding Agency": "Department of Energy",
+   "Awarding Sub Agency": "Department of Energy",
+   "Description": "TAS::89 0240::TAS THIS PERFORMANCE-BASED MANAGEMENT CONTRACT (PBMC) IS FOR THE MANAGEMENT AND OPERATION OF THE LAWRENCE LIVERMORE NATIONAL LABORATORY (LLNL). THE CONTRACTOR SHALL, IN ACCORDANCE WITH THE PROVISIONS OF THIS CONTRACT, ACCOMPLISH THE MISSIONS AND PROGRAMS ASSIGNED BY THE U.S. DEPARTMENT OF ENERGY (DOE) AND MANAGE AND OPERATE THE LABORATORY.  THE LABORATORY IS ONE OF DOES OFFICE OF DEFENSE PROGRAM MULTI-PROGRAM LABORATORIES.  THE LABORATORY IS A FEDERALLY FUNDED RESEARCH AND DEVELOPMENT INSTITUTION (ESTABLISHED IN ACCORDANCE WITH THE FEDERAL ACQUISITION REGULATION (FAR) PART 35 AND OPERATED UNDER THIS MANAGEMENT AND OPERATING (M&O) CONTRACT, AS DEFINED IN FAR 17.6 AND DEAR 917.6.",
+   "Base Obligation Date": "2007-05-08",
+   "Last Modified Date": "2026-07-31 13:31:17",
+   "generated_internal_id": "CONT_AWD_DEAC5207NA27344_8900_-NONE-_-NONE-",
+   "awarding_agency_id": 930,
+   "agency_slug": "department-of-energy"
+  }
+ ],
+ "page_metadata": {
+  "page": 1,
+  "hasNext": true,
+  "last_record_unique_id": 309504152,
+  "last_record_sort_value": "451758016383"
+ },
+ "messages": [
+  "For searches, time period start and end dates are currently limited to an earliest date of 2007-10-01.  For data going back to 2000-10-01, use either the Custom Award Download feature on the website or one of our download or bulk_download API endpoints as listed on https://api.usaspending.gov/docs/endpoints. ",
+  "The following filters from the request were not used: {'recipient_search_texts'}. See https://api.usaspending.gov/docs/endpoints for a list of appropriate filters"
+ ]
+}

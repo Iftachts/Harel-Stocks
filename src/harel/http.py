@@ -173,6 +173,57 @@ class HttpClient:
 
         raise last_exc or HttpError(0, url, "exhausted retries")
 
+    def post(
+        self,
+        url: str,
+        *,
+        json: Any,
+        headers: dict[str, str] | None = None,
+        allow_status: tuple[int, ...] = (),
+    ) -> Response:
+        """Same politeness as `get`, for the one source that refuses a GET.
+
+        USASpending's award search answers **405 to GET** - the filter set is a
+        nested document that will not fit in a query string - so a POST is the
+        only way to reach it. Everything that makes `get` safe applies equally
+        and is repeated here rather than shared, because the two differ in one
+        respect worth keeping visible: there is no ETag or If-Modified-Since. A
+        POST is not conditionally cacheable, so this method has no 304 branch
+        and callers must not expect `not_modified`.
+        """
+        host = urlsplit(url).netloc
+        req_headers = dict(headers or {})
+        req_headers.setdefault("User-Agent", self._ua_for(host))
+        req_headers.setdefault("Content-Type", "application/json")
+
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            _limiter.wait(host)
+            try:
+                resp = self.session.post(
+                    url, json=json, headers=req_headers, timeout=self.timeout
+                )
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    raise
+                self._backoff(attempt, f"{type(exc).__name__}: {exc}", url)
+                continue
+
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < self.max_retries:
+                retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+                self._backoff(attempt, f"HTTP {resp.status_code}", url, retry_after)
+                continue
+
+            if resp.status_code >= 400 and resp.status_code not in allow_status:
+                raise HttpError(resp.status_code, url, resp.text[:400])
+
+            return Response(
+                resp.status_code, resp.text, resp.content, dict(resp.headers), resp.url
+            )
+
+        raise last_exc or HttpError(0, url, "exhausted retries")
+
     def _backoff(self, attempt: int, why: str, url: str, retry_after: float | None = None) -> None:
         delay = retry_after if retry_after is not None else self.backoff_base * (2**attempt)
         delay += random.uniform(0, 0.5)          # jitter: don't sync with other pollers

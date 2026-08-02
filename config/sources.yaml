@@ -224,7 +224,41 @@ sources:
     trust: 1.0
     latency: daily            # published ~17:00 ET
     poll_sec: 3600
-    notes: Elbit America / TAT contract awards appear here first.
+    notes: >
+      DoD press releases, not a contract database - 2 stored items, and no DHS
+      or CBP award can ever appear here. See usaspending_awards, which is the
+      structured channel; this one stays for the DoD daily narrative.
+
+  usaspending_awards:
+    kind: usaspending
+    label: USASpending.gov - federal contract awards
+    base_url: https://api.usaspending.gov/api/v2/search/spending_by_award/
+    recipients_from: universe.federal_recipients
+    # Definitive contract actions only. IDV_* is deliberately absent: every
+    # indefinite-delivery vehicle reports `Award Amount: 0.0`, so each one would
+    # render as a $0 "contract win". Verified 2026-08-02 - 8 of 8 came back 0.0.
+    award_type_codes: ["A", "B", "C", "D"]
+    lookback_days: 14
+    # First pass only, and the reason this source exists. The two CBP awards it
+    # was built for were last modified in May; a 14-day incremental window would
+    # never have reached them, so a fresh install would have started by missing
+    # exactly the $302.0M it was supposed to catch. Costs one wider request per
+    # recipient, once.
+    backfill_days: 365
+    min_award_usd: 1000000
+    trust: 1.0
+    latency: daily            # FPDS lands in USASpending ~1-3 days after signature
+    poll_sec: 21600
+    notes: >
+      Free, no key, and the only channel that carries civilian-agency awards.
+      $302.0M of 2026 CBP awards to ELBITAMERICA reached this system through
+      nothing at all before it existed - $215.9M on 2026-03-20 (persistent
+      surveillance) and $86.1M on 2026-06-01 (towers and surveillance
+      equipment); dod_contracts is a DoD press feed and cannot carry either.
+      Queried one request per ticker so attribution is the config's, not a name
+      match. Two silent failure modes are guarded in the collector: an unknown
+      FIELD returns null rather than erroring, and an unknown FILTER KEY is
+      dropped and the query becomes a firehose of unrelated federal awards.
 
   dsca_fms:
     kind: rss

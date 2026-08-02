@@ -395,6 +395,19 @@ tickers:
     exchange: NASDAQ
     sector: defense
     float_class: mid
+    # `query` is what USASpending is asked; `accept` is what we will believe.
+    # recipient_search_text is fuzzy and walks the parent/child hierarchy, which
+    # is exactly why it is used - it reaches the operating subsidiaries that do
+    # the contracting, and no press feed names them. The same fuzziness returned
+    # REAL-TIME LABORATORIES, LLC to an Elbit query (verified 2026-08-02), so a
+    # row is kept only when its recipient name or UEI is one we listed here.
+    # Failing `accept` DROPS the row; it is never downgraded to a weaker link,
+    # because the whole claim this collector makes is "the config named this
+    # recipient". UEIs verified against live award rows on 2026-08-02.
+    federal_recipients:
+      query:  ["ELBIT SYSTEMS OF AMERICA"]
+      accept: ["ELBIT"]
+      uei:    ["TBLKC12FCDH8", "MYE5L662RU13", "QP32A82TA5G8"]
     ir_feeds:
       # No press-release feed exists on this domain: /feed/ is the
       # site-wide WordPress feed (marketing, case studies, blog) or is
@@ -434,6 +447,16 @@ tickers:
     exchange: NASDAQ
     sector: aerospace_mro
     float_class: micro
+    # See ESLT for what query/accept are for. TAT contracts almost entirely
+    # through subsidiaries that do not carry its name: of 100 awards on
+    # 2026-08-02, 79 were LIMCO AIREPAIR INC., 4 PIEDMONT AVIATION COMPONENT
+    # SERVICES, LLC and only 17 TAT TECHNOLOGIES LTD itself. Both subsidiaries
+    # are already in this entry's `aliases`; an accept list of just the parent
+    # name would have thrown away 83% of this name's federal business.
+    federal_recipients:
+      query:  ["TAT TECHNOLOGIES"]
+      accept: ["TAT TECHNOLOGIES", "LIMCO AIREPAIR", "PIEDMONT AVIATION"]
+      uei:    ["TZMTECJ51C87", "LLNNTHPDWYV1", "Y8RDAEXDFGK1"]
     ir_feeds:
       - https://www.tat-technologies.com/category/press-releases/feed/
     peers: [HEI, TDG, AIR, DCO, RTX, HON, GE, SPR]

@@ -1590,3 +1590,238 @@ def test_a_headline_that_never_names_the_company_still_reaches_it(config, db):
     links = {link.ticker: link for link in EntityLinker(config).link(nice)}
     assert links["NICE"].relation == "DIRECT"
     assert "own IR page" in links["NICE"].why
+
+
+# ------------------------------------------------------------ USASpending -- #
+# Fixtures are real responses recorded from api.usaspending.gov on 2026-08-02.
+# Two disclosed edits, both to the REAL-TIME LABORATORIES row: its award amount
+# was raised from $0.00 and its id re-prefixed CONT_AWD_. It is a genuine
+# recipient that a live Elbit query returned, and the edits are what make the
+# "not ours" test prove the accept filter dropped it rather than the $1M floor.
+USASPENDING_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
+
+
+def usaspending_ctx(config, db, routes):
+    """A 14-day lookback, matching the source's own configured window."""
+    return CollectorContext(config=config, client=FakeHttpClient(routes), db=db,
+                            lookback_hours=24 * 14)
+
+
+def usaspending_routes(elbit="usaspending_elbit_awards.json"):
+    """One route per recipient, keyed on the body - see FakeHttpClient.post."""
+    return {"ELBIT SYSTEMS OF AMERICA": fixture_json(elbit),
+            "TAT TECHNOLOGIES": fixture_json("usaspending_tat_awards.json")}
+
+
+def usaspending_collector(config, db, routes=None):
+    from harel.collect.usaspending import UsaSpendingCollector
+
+    return UsaSpendingCollector(
+        config.sources["usaspending_awards"],
+        usaspending_ctx(config, db,
+                        usaspending_routes() if routes is None else routes))
+
+
+def test_an_award_is_titled_so_the_taxonomy_can_see_it(config, db):
+    """An $86M contract that does not match `major_contract` scores as
+    unclassified text. The rule is compiled from the live scoring.yaml rather
+    than retyped here, so tightening the regex breaks this test instead of
+    silently demoting every federal award."""
+    rule = next(r for r in config.scoring.events if r.key == "major_contract")
+
+    items = list(usaspending_collector(config, db).collect())
+    big = next(i for i in items if "215.9" in i.title)
+
+    assert big.title == (
+        "[USASpending] ELBITAMERICA, INC. awarded $215.9 million contract from "
+        "U.S. Customs and Border Protection - PERSISTENT SURVEILLANCE AND "
+        "DETECTION EXTENSION")
+    assert any(p.search(big.title) for p in rule.patterns), \
+        f"major_contract does not match {big.title!r}"
+
+
+def test_a_refetch_of_the_same_award_is_not_a_second_item(config, db):
+    """The uid carries the obligation, so polling every six hours must not
+    manufacture a new $215.9M contract win each time."""
+    first = {i.external_id: i.uid
+             for i in usaspending_collector(config, db).collect()}
+    second = {i.external_id: i.uid
+              for i in usaspending_collector(config, db).collect()}
+
+    assert first and first == second
+
+
+def test_a_modification_that_raises_the_obligation_is_a_new_item(config, db):
+    """More money on an existing award is news, and the delta is the story -
+    "+$5.0 million" is what a reader needs, not a restatement of the total."""
+    before = list(usaspending_collector(config, db).collect())
+    was = next(i for i in before if "86.1 million" in i.title)
+
+    routes = usaspending_routes("usaspending_elbit_awards_modified.json")
+    after = list(usaspending_collector(config, db, routes).collect())
+    now = next(i for i in after if "CONSOLIDATE TOWERS" in i.title)
+
+    assert now.uid != was.uid
+    assert now.meta["revision_delta_usd"] == pytest.approx(5_000_000.0)
+    assert "$5.0 million contract increase" in now.title
+    assert "now $91.1 million" in now.title
+    # A modification's own date, flagged coarse. The signature date is kept.
+    assert now.published_at.date().isoformat() == "2026-07-30"
+    assert now.meta["date_is_load_stamp"] is True
+    assert now.meta["base_obligation_date"] == "2026-06-01"
+
+
+def test_a_modification_that_changes_no_money_is_not_a_new_item(config, db):
+    """Verified real: a 2022 F-16 display-unit repair was re-stamped
+    2026-07-28 with its obligation untouched. An administrative bump is not a
+    contract award and must not enter the feed as one."""
+    before = list(usaspending_collector(config, db).collect())
+    was = next(i for i in before if i.meta["award_id"] == "M6785422F1018")
+
+    routes = usaspending_routes("usaspending_elbit_awards_modified.json")
+    after = list(usaspending_collector(config, db, routes).collect())
+    now = next(i for i in after if i.meta["award_id"] == "M6785422F1018")
+
+    assert now.uid == was.uid
+    assert "date_is_load_stamp" not in now.meta
+    assert now.published_at.date().isoformat() == "2022-01-28"
+
+
+def test_an_ignored_filter_is_loud_and_costs_the_batch(config, db):
+    """The non-negotiable guard. Misspelling the recipient key returns HTTP 200
+    and 100 unrelated awards - HUMANA at $51.3bn, three DOE labs - which this
+    collector would otherwise stamp seed_tickers=["ESLT"] at DIRECT. A query
+    that was not the query we asked cannot be filtered back into one."""
+    routes = {"ELBIT SYSTEMS OF AMERICA":
+              fixture_json("usaspending_ignored_filter.json"),
+              "TAT TECHNOLOGIES": fixture_json("usaspending_tat_awards.json")}
+    collector = usaspending_collector(config, db, routes)
+    items = list(collector.collect())
+
+    assert not [i for i in items if "ESLT" in i.seed_tickers]
+    assert any("discarded a filter" in w for w in collector.warnings), \
+        collector.warnings
+    assert "filter ignored" in (db.get_source_state("usaspending_awards")
+                               .get("last_error") or "")
+
+
+def test_a_recipient_the_config_did_not_name_is_dropped(config, db):
+    """recipient_search_text is fuzzy and hierarchy-aware. That is the feature
+    that reaches LIMCO AIREPAIR, and the hazard that returned REAL-TIME
+    LABORATORIES, LLC to an Elbit query - a real company with no connection to
+    this basket. A row failing `accept` is dropped, never downgraded."""
+    items = list(usaspending_collector(config, db).collect())
+
+    assert items, "the batch must survive the drop"
+    assert not [i for i in items if "REAL-TIME" in i.title]
+    assert not [i for i in items if "REAL-TIME" in i.meta.get("recipient", "")]
+    assert all(i.seed_tickers in (["ESLT"], ["TATT"]) for i in items)
+
+
+def test_a_subsidiary_that_never_carries_the_parent_name_still_reaches_it(config, db):
+    """TAT contracts almost entirely as LIMCO AIREPAIR and PIEDMONT AVIATION;
+    only 17 of 100 awards carry "TAT" at all. Accepting on the parent name
+    alone would have thrown away 83% of this name's federal business."""
+    from harel.collect.usaspending import UsaSpendingCollector
+
+    source = config.sources["usaspending_awards"]
+    routes = usaspending_routes()
+    collector = UsaSpendingCollector(source, usaspending_ctx(config, db, routes))
+    # $1M is the right floor for the feed and above every TAT award on record,
+    # so the accept path is exercised at the floor this fixture can reach.
+    collector.source.raw["min_award_usd"] = 1000
+    try:
+        tat = [i for i in collector.collect() if i.seed_tickers == ["TATT"]]
+    finally:
+        collector.source.raw["min_award_usd"] = 1000000
+
+    assert {i.meta["recipient"] for i in tat} >= {"LIMCO AIREPAIR INC.",
+                                                 "PIEDMONT AVIATION COMPONENT SERVICES, LLC"}
+    assert all(i.seed_relation == "DIRECT" for i in tat)
+
+
+def test_a_renamed_field_is_loud_instead_of_a_null_amount(config, db):
+    """An unknown field is HTTP 200 with the value null on every row - verified
+    against 'Award Amt' and 'Total Obligated Amount'. Left unchecked, a rename
+    upstream gives null amounts forever and nothing looks wrong."""
+    routes = {"ELBIT SYSTEMS OF AMERICA":
+              fixture_json("usaspending_renamed_field.json"),
+              "TAT TECHNOLOGIES": fixture_json("usaspending_tat_awards.json")}
+    collector = usaspending_collector(config, db, routes)
+    list(collector.collect())
+
+    assert any("'Award Amount' is null" in w for w in collector.warnings), \
+        collector.warnings
+    assert "Award Amount" in (db.get_source_state("usaspending_awards")
+                              .get("last_error") or "")
+
+
+def test_one_malformed_award_does_not_lose_the_batch(config, db):
+    payload = fixture_json("usaspending_elbit_awards.json")
+    payload["results"][0]["Base Obligation Date"] = {"unexpected": "shape"}
+    routes = {"ELBIT SYSTEMS OF AMERICA": payload,
+              "TAT TECHNOLOGIES": fixture_json("usaspending_tat_awards.json")}
+    items = list(usaspending_collector(config, db, routes).collect())
+
+    assert not [i for i in items if "215.9" in i.title]
+    assert [i for i in items if "CONSOLIDATE TOWERS" in i.title]
+
+
+def test_an_award_is_never_stamped_now(config, db):
+    """Every award here has an exact signature date, so `undated` must never be
+    set: UNDATED_CAP would make an $86M contract unrankable. Base Obligation
+    Date and not Start Date - the $215.9M award was signed 2026-03-20 against a
+    2026-03-03 performance start."""
+    items = list(usaspending_collector(config, db).collect())
+    big = next(i for i in items if "215.9" in i.title)
+
+    assert big.published_at.date().isoformat() == "2026-03-20"
+    assert "undated" not in big.meta
+    assert all("undated" not in i.meta for i in items)
+
+
+def test_the_query_is_a_post_for_the_configured_recipient(config, db):
+    """A GET on this path is 405, and dropping date_type silently changes the
+    window from "awards touched" to "awards actioned" - which is how a
+    modification to a months-old award stops arriving. Catches a later tidy-up
+    of the request body."""
+    collector = usaspending_collector(config, db)
+    list(collector.collect())
+
+    assert {url for url, _ in collector.client.posts} == {USASPENDING_URL}
+    assert not collector.client.calls[len(collector.client.posts):], \
+        "every request must be a POST"
+
+    bodies = [body for _, body in collector.client.posts]
+    queries = [b["filters"]["recipient_search_text"][0] for b in bodies]
+    assert "ELBIT SYSTEMS OF AMERICA" in queries
+    assert "TAT TECHNOLOGIES" in queries
+
+    for body in bodies:
+        period = body["filters"]["time_period"][0]
+        assert period["date_type"] == "last_modified_date"
+        assert body["subawards"] is False
+        assert body["limit"] <= 100
+        assert not [c for c in body["filters"]["award_type_codes"]
+                    if c.startswith("IDV")], "IDV_* awards all report $0.00"
+
+
+def test_a_fresh_database_asks_for_history_not_just_the_last_fortnight(config, db):
+    """`last_modified_date` makes the ordinary pass incremental, which also
+    makes history invisible to it: the $215.9M CBP award was last modified in
+    May, so a 14-day window on a new install would have started by missing the
+    $302.0M this source was built to catch. One wide pass, then incremental."""
+    first = usaspending_collector(config, db)
+    list(first.collect())
+    second = usaspending_collector(config, db)
+    list(second.collect())
+
+    def window_days(collector):
+        period = collector.client.posts[0][1]["filters"]["time_period"][0]
+        start = datetime.fromisoformat(period["start_date"]).replace(
+            tzinfo=timezone.utc)
+        end = datetime.fromisoformat(period["end_date"]).replace(tzinfo=timezone.utc)
+        return (end - start).days
+
+    assert window_days(first) == 365
+    assert window_days(second) == 14
