@@ -204,6 +204,18 @@ def test_sector_regulators_reference_real_sources(config):
             assert regulator in known, f"sector {key} references unknown source {regulator}"
 
 
+def test_pharma_watches_the_trade_agencies_that_file_tariff_actions(config):
+    """A pharmaceutical tariff is filed by BIS or proclaimed via USTR, never by
+    FDA/CMS/HHS, and the linker refuses a sector match from an unwatched
+    agency - a health-only agency list makes tariff actions invisible to the
+    pharma names by construction."""
+    pharma = config.sectors["pharma_generics_branded"]
+    assert "industry-and-security-bureau" in pharma.fr_agencies
+    assert "trade-representative-office-of-united-states" in pharma.fr_agencies
+    assert "patented pharmaceuticals" in pharma.fr_terms
+    assert "pharmaceutical tariff" in pharma.fr_terms
+
+
 def test_no_event_rule_claims_a_generic_form_as_standalone_evidence(config):
     """Regression guard: listing 8-K/6-K under an event's form_types once made
     every routine filing score as a listing-compliance event."""

@@ -324,6 +324,38 @@ def test_a_ticker_override_still_beats_its_sectors_read_across(parts):
                for r in result.reasons), result.reasons
 
 
+def test_a_tariffs_headline_is_the_same_policy_event_as_a_tariff_one(parts):
+    """Proclamations and news headlines write the plural - "Reduction of
+    Tariffs on..." - and a singular-only \\btariff\\b classified them as no
+    event at all, which scores as noise. Singular and plural are one story."""
+    singular = score(
+        parts, "[FR] Adjusting Imports: a tariff on semiconductors and derivatives",
+        source="federal_register",
+    )
+    plural = score(
+        parts, "[FR] Reduction of Tariffs on Certain Pharmaceutical Articles",
+        source="federal_register",
+    )
+    assert "macro_sector_policy" in singular.events, singular.events
+    assert "macro_sector_policy" in plural.events, plural.events
+
+
+def test_a_countervailing_duty_order_is_a_policy_event(parts):
+    """The alternation wrote "countervailing dut" with a word boundary right
+    after it - and dut->y is not a boundary, so the truncated stem matched
+    neither "duty" nor "duties", ever. The spelled-out forms do."""
+    duty = score(
+        parts, "[FR] Countervailing Duty Order on Imports of Certain Chemicals",
+        source="federal_register",
+    )
+    duties = score(
+        parts, "[FR] Countervailing Duties: Preliminary Determination",
+        source="federal_register",
+    )
+    assert "macro_sector_policy" in duty.events, duty.events
+    assert "macro_sector_policy" in duties.events, duties.events
+
+
 def test_microsoft_bundling_is_classified_as_a_competitive_threat(parts):
     """A platform owner bundling away your product is a first-order event for
     PANW, AUDC and PERI, and nothing else in the taxonomy catches it."""
