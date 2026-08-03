@@ -1747,6 +1747,77 @@ def test_the_run_report_counts_what_was_new(config, db):
     assert second.new == 0, "but nothing about them is new the second time"
 
 
+def test_every_item_from_every_collector_survives_a_concurrent_fetch(
+        config, db, monkeypatch):
+    """Fetching overlaps in worker threads; storing stays serial on the main
+    thread, in submission order. Whatever the interleaving of the fetches,
+    every yielded item must be stored and each by_source entry must count its
+    own collector's items and nobody else's."""
+    from harel.collect.fda import OpenFdaCollector
+    from harel.collect.federal_register import FederalRegisterCollector
+
+    now = datetime.now(timezone.utc)
+
+    def fda_batch(self):
+        for i in range(2):
+            yield self.make_item(
+                external_id=f"fda:{i}", title=f"Teva recall notice {i}",
+                url=f"https://example.invalid/fda/{i}", published_at=now,
+                seed_tickers=["TEVA"], seed_relation="DIRECT")
+
+    def fr_batch(self):
+        for i in range(3):
+            yield self.make_item(
+                external_id=f"fr:{i}",
+                title=f"[FR] Rule naming Tower Semiconductor {i}",
+                url=f"https://example.invalid/fr/{i}", published_at=now,
+                seed_tickers=["TSEM"], seed_relation="DIRECT")
+
+    monkeypatch.setattr(OpenFdaCollector, "collect", fda_batch)
+    monkeypatch.setattr(FederalRegisterCollector, "collect", fr_batch)
+    report = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient({})).run(
+        only=["fda_enforcement", "federal_register"])
+
+    assert report.errors == [], report.errors
+    assert report.by_source == {"fda_enforcement": 2, "federal_register": 3}
+    assert report.collected == 5 and report.stored == 5
+    stored = {r["external_id"] for r in
+              db.conn.execute("SELECT external_id FROM items").fetchall()}
+    assert stored == {"fda:0", "fda:1", "fr:0", "fr:1", "fr:2"}
+
+
+def test_a_collector_that_dies_mid_pass_keeps_what_it_already_yielded(
+        config, db, monkeypatch):
+    """One malformed page must not lose the batch fetched before it: items
+    yielded before the crash are stored, the abort is reported, and the
+    source's own state records the failure for `harel doctor`."""
+    from harel.collect.fda import OpenFdaCollector
+
+    now = datetime.now(timezone.utc)
+
+    def dies_after_two(self):
+        for i in range(2):
+            yield self.make_item(
+                external_id=f"ok:{i}", title=f"Teva recall notice {i}",
+                url=f"https://example.invalid/fda/{i}", published_at=now,
+                seed_tickers=["TEVA"], seed_relation="DIRECT")
+        raise RuntimeError("the schema changed mid-page")
+
+    monkeypatch.setattr(OpenFdaCollector, "collect", dies_after_two)
+    report = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient({})).run(only=["fda_enforcement"])
+
+    assert report.by_source == {"fda_enforcement": 2}
+    assert report.stored == 2
+    assert db.counts()["items"] == 2, "the partial batch must survive the abort"
+    assert any("collector aborted" in e and "RuntimeError" in e
+               for e in report.errors)
+    state = db.get_source_state("fda_enforcement")
+    assert "RuntimeError" in (state.get("last_error") or "")
+    assert state.get("consecutive_failures") == 1
+
+
 def test_the_drop_counter_does_not_claim_to_be_deduplication(config, db):
     """It counts items that touched nothing in the universe. The CLI printed the
     honest wording all along while the field, the dict key and the run_log

@@ -100,14 +100,28 @@ class HttpClient:
         self.max_retries = max_retries
         self.backoff_base = backoff_base
         self.user_agent = user_agent
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": user_agent,
-                "Accept-Encoding": "gzip, deflate",
-                "Connection": "keep-alive",
-            }
-        )
+        # One client is shared by every collector, and collectors fetch from
+        # worker threads. requests.Session is not thread-safe where it matters
+        # here: the cookie jar and redirect handling mutate shared state, and
+        # Google News and MAYA both set cookies. So the Session is per-thread,
+        # built lazily and carrying the same default headers - a single-threaded
+        # caller still sees exactly one session for the life of the client.
+        self._local = threading.local()
+
+    @property
+    def session(self) -> requests.Session:
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = requests.Session()
+            session.headers.update(
+                {
+                    "User-Agent": self.user_agent,
+                    "Accept-Encoding": "gzip, deflate",
+                    "Connection": "keep-alive",
+                }
+            )
+            self._local.session = session
+        return session
 
     def _ua_for(self, host: str) -> str:
         """The SEC *mandates* a contact-bearing User-Agent and will ban clients

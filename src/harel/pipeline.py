@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -73,6 +75,81 @@ class RunReport:
         }
 
 
+# --------------------------------------------------------------------------- #
+# One database, many threads. Fetch-concurrent collection means collectors
+# touch the database from worker threads - etag state, price snapshots,
+# backfilled bars - while the main thread stores items. CPython's sqlite3
+# nominally permits a shared connection when the library is serialized, but
+# under real contention its statement handling is not race-free: overlapping
+# passes here produced SQLITE_MISUSE ("bad parameter or other API misuse"),
+# "no more rows available" and bare SystemErrors. So every entry into the
+# shared connection - Database method, raw execute, commit, and the row fetch
+# that steps a statement - goes through one lock. The lock is held per call and
+# never across network I/O, so single-threaded cost is unmeasurable.
+# --------------------------------------------------------------------------- #
+class _SerialCursor:
+    def __init__(self, cursor: Any, lock: threading.RLock) -> None:
+        self._cursor = cursor
+        self._lock = lock
+
+    def fetchall(self) -> Any:
+        with self._lock:
+            return self._cursor.fetchall()
+
+    def fetchone(self) -> Any:
+        with self._lock:
+            return self._cursor.fetchone()
+
+    def __iter__(self) -> Any:
+        # Materialised under the lock: iterating a live cursor steps the
+        # statement, which is as much a use of the connection as executing it.
+        with self._lock:
+            return iter(self._cursor.fetchall())
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
+class _SerialConnection:
+    def __init__(self, conn: Any, lock: threading.RLock) -> None:
+        self._conn = conn
+        self._lock = lock
+
+    def execute(self, *args: Any, **kwargs: Any) -> _SerialCursor:
+        with self._lock:
+            return _SerialCursor(self._conn.execute(*args, **kwargs), self._lock)
+
+    def executemany(self, *args: Any, **kwargs: Any) -> _SerialCursor:
+        with self._lock:
+            return _SerialCursor(self._conn.executemany(*args, **kwargs), self._lock)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._conn.commit()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
+class _SerialDatabase:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+        self._lock = threading.RLock()
+        self.conn = _SerialConnection(db.conn, self._lock)
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._db, name)
+        if not callable(attr):
+            return attr
+        lock = self._lock
+
+        def locked(*args: Any, **kwargs: Any) -> Any:
+            with lock:
+                return attr(*args, **kwargs)
+
+        return locked
+
+
 class Pipeline:
     def __init__(
         self,
@@ -82,7 +159,7 @@ class Pipeline:
         client: HttpClient | None = None,
     ) -> None:
         self.config = config or get_config()
-        self.db = db or Database()
+        self.db = _SerialDatabase(db or Database())
         self.lookback_hours = lookback_hours
         self.client = client
         self.linker = EntityLinker(self.config)
@@ -116,64 +193,101 @@ class Pipeline:
         log.info("clusterer seeded with %d recent items", seeded)
         prices = self._price_context()
 
+        # `last_error` describes the pass that is running now, so it starts
+        # empty. Otherwise "the collector recorded a fault this time" cannot
+        # be told from "the same string has been sitting there since
+        # Tuesday", and a fault that repeats verbatim would flap on and off
+        # every other run. Cleared for every collector before any drain starts,
+        # so a collector that writes its own last_error mid-fetch can never
+        # have it wiped by this pre-clear.
+        priors: list[dict[str, Any]] = []
         for collector in collectors:
-            key = collector.source.key
-            # `last_error` describes the pass that is running now, so it starts
-            # empty. Otherwise "the collector recorded a fault this time" cannot
-            # be told from "the same string has been sitting there since
-            # Tuesday", and a fault that repeats verbatim would flap on and off
-            # every other run.
-            prior = self.db.get_source_state(key)
+            prior = self.db.get_source_state(collector.source.key)
             if prior.get("last_error"):
-                self.db.set_source_state(key, last_error=None)
+                self.db.set_source_state(collector.source.key, last_error=None)
+            priors.append(prior)
 
-            started = time.monotonic()
-            count = 0
+        def drain(collector) -> tuple[list[Any], str | None, float]:
+            """Fetch one collector to completion in a worker thread.
+
+            Fetching is the slow, network-bound half of a pass and safe to
+            overlap; storing is not, so items are only gathered here and handed
+            back to the main thread. Appended one by one rather than built with
+            list(): a collector that dies mid-iteration has still produced
+            everything it yielded, and those items must survive. Elapsed time is
+            measured in here so the per-collector log line keeps meaning fetch
+            time rather than time spent queued behind other drains - hourly.log
+            is read on exactly that assumption.
+            """
+            items: list[Any] = []
             failure: str | None = None
+            start = time.monotonic()
             try:
                 for item in collector.collect():
+                    items.append(item)
+            except Exception as exc:
+                failure = f"{type(exc).__name__}: {exc}"
+                log.exception("collector %s aborted", collector.source.key)
+            return items, failure, time.monotonic() - start
+
+        # Fetch concurrently, store serially: the futures are consumed in
+        # submission order on this thread, so processing order, by_source order
+        # and the report read exactly as a serial pass would have written them.
+        with ThreadPoolExecutor(max_workers=min(len(collectors), 24)) as pool:
+            futures = [pool.submit(drain, collector) for collector in collectors]
+            for collector, prior, future in zip(collectors, priors, futures):
+                key = collector.source.key
+                items, failure, elapsed = future.result()
+                count = 0
+                for item in items:
                     count += 1
                     report.collected += 1
                     try:
                         if self._process(item, clusterer, prices, report):
                             report.stored += 1
+                            # The connection runs deferred transactions, so an
+                            # uncommitted store pins SQLite's one write lock
+                            # until whatever commits next. Committing per item
+                            # keeps the hold to microseconds against the live
+                            # serve reader and its button-triggered passes. If
+                            # the commit itself raises, the except below counts
+                            # it as a failed store and the run continues.
+                            self.db.conn.commit()
                     except Exception as exc:
                         report.errors.append(f"{key}: failed to store an item: {exc}")
                         log.exception("store failed for %s", key)
-            except Exception as exc:
-                failure = f"{type(exc).__name__}: {exc}"
-                report.errors.append(f"{key}: collector aborted: {failure}")
-                log.exception("collector %s aborted", key)
+                if failure:
+                    report.errors.append(f"{key}: collector aborted: {failure}")
 
-            report.by_source[key] = count
-            report.warnings.extend(f"{key}: {w}" for w in collector.warnings)
+                report.by_source[key] = count
+                report.warnings.extend(f"{key}: {w}" for w in collector.warnings)
 
-            # A pass that finds nothing is a SUCCESSFUL pass. Recording "ok" only
-            # when items came back - and writing last_ok_at=None otherwise, which
-            # `set_source_state` merges in and so *erases* the previous success -
-            # made a quiet source indistinguishable from a dead one. openFDA and
-            # ClinicalTrials are quiet for days at a time and were reading as
-            # "never worked", which is the precise confusion this bookkeeping
-            # exists to prevent.
-            #
-            # But quiet is not the same as clean. A collector can record its own
-            # failure and still return without raising - maya writes
-            # save_state(last_error="TEVA: 0 parseable records") and stops - and
-            # the success branch below then overwrote it with a fresh last_ok_at
-            # and a null error, so a MAYA schema break read as healthy-and-quiet
-            # in `harel doctor`. We do not erase an error the collector recorded
-            # during the pass we just ran.
-            recorded = self.db.get_source_state(key).get("last_error")
-            now = datetime.now(timezone.utc).isoformat()
-            state: dict[str, Any] = {"last_run_at": now, "items_last_run": count}
-            if failure or recorded:
-                state["last_error"] = str(failure or recorded)[:400]
-                state["consecutive_failures"] = int(
-                    prior.get("consecutive_failures") or 0) + 1
-            else:
-                state.update(last_ok_at=now, last_error=None, consecutive_failures=0)
-            self.db.set_source_state(key, **state)
-            log.info("%s: %d items in %.1fs", key, count, time.monotonic() - started)
+                # A pass that finds nothing is a SUCCESSFUL pass. Recording "ok" only
+                # when items came back - and writing last_ok_at=None otherwise, which
+                # `set_source_state` merges in and so *erases* the previous success -
+                # made a quiet source indistinguishable from a dead one. openFDA and
+                # ClinicalTrials are quiet for days at a time and were reading as
+                # "never worked", which is the precise confusion this bookkeeping
+                # exists to prevent.
+                #
+                # But quiet is not the same as clean. A collector can record its own
+                # failure and still return without raising - maya writes
+                # save_state(last_error="TEVA: 0 parseable records") and stops - and
+                # the success branch below then overwrote it with a fresh last_ok_at
+                # and a null error, so a MAYA schema break read as healthy-and-quiet
+                # in `harel doctor`. We do not erase an error the collector recorded
+                # during the pass we just ran.
+                recorded = self.db.get_source_state(key).get("last_error")
+                now = datetime.now(timezone.utc).isoformat()
+                state: dict[str, Any] = {"last_run_at": now, "items_last_run": count}
+                if failure or recorded:
+                    state["last_error"] = str(failure or recorded)[:400]
+                    state["consecutive_failures"] = int(
+                        prior.get("consecutive_failures") or 0) + 1
+                else:
+                    state.update(last_ok_at=now, last_error=None, consecutive_failures=0)
+                self.db.set_source_state(key, **state)
+                log.info("%s: %d items in %.1fs", key, count, elapsed)
 
         self.db.conn.commit()
         report.finished_at = datetime.now(timezone.utc)
