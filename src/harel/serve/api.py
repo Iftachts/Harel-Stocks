@@ -9,11 +9,14 @@ edge; there is no auth layer because there is no reason to expose it.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ..config import get_config
 from ..db import Database
 from ..views import RELATION_MEANING, Views
+
+log = logging.getLogger("harel.serve")
 
 
 def create_app(db_path: str | None = None):
@@ -254,6 +257,10 @@ class CollectRunner:
                 "errors": report.errors[:10],
             }
         except Exception as exc:                       # pragma: no cover - defensive
+            # The state dict dies with the process; the traceback has to reach
+            # serve.log.err too, and carrying the start timestamp ties the
+            # stderr record to the run_log row this pass never wrote.
+            log.exception("collection pass started %s failed", started)
             result = {"status": "error",
                       "error": f"{type(exc).__name__}: {exc}"}
         finally:

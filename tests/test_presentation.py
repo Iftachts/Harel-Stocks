@@ -212,6 +212,25 @@ def test_a_pass_that_raises_is_reported_not_swallowed(monkeypatch):
     assert state["finished_at"], "a failed pass still has to stop being 'running'"
 
 
+def test_a_failed_pass_leaves_a_trace_beyond_the_process(monkeypatch, caplog):
+    """The state dict lives and dies with the server process, so a pass that
+    takes the process down with it would vanish without a trace. The traceback
+    has to reach serve.log.err, carrying the start timestamp that names the
+    run_log row the pass never got to write."""
+    import logging
+
+    runner = _runner(monkeypatch, boom="the network went away")
+    with caplog.at_level(logging.ERROR, logger="harel.serve"):
+        runner.start()
+        runner._thread.join(timeout=10)
+
+    records = [r for r in caplog.records if r.name == "harel.serve"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.ERROR
+    assert runner.status()["started_at"] in records[0].getMessage()
+    assert "RuntimeError: the network went away" in caplog.text
+
+
 def test_the_page_refreshes_itself_only_while_a_pass_is_running():
     """The terminal is script-free, so a meta refresh is how it watches. A page
     that reloads for ever is worse than one that never does, so the tag has to
