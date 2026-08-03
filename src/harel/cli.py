@@ -242,6 +242,18 @@ def cmd_doctor(args) -> int:
             print(f"  {state['source']:<40} fails={state.get('consecutive_failures')} "
                   f"{C.GREY}{(state.get('last_error') or '')[:90]}{C.RESET}")
 
+    if health["flatlined"]:
+        print(f"\n{C.RED}Flatlined sources - nothing stored for longer than "
+              f"their cadence explains:{C.RESET}")
+        for entry in health["flatlined"]:
+            print(f"  {entry['source']:<40} silent {entry['silent_hours']:.0f}h "
+                  f"{C.GREY}threshold {entry['threshold_hours']}h, last item "
+                  f"{entry['last_item_at'][:16]}{C.RESET}")
+
+    if health["never_produced"]:
+        print(f"\n{C.GREY}{len(health['never_produced'])} source(s) have never "
+              f"stored an item: {', '.join(health['never_produced'])}{C.RESET}")
+
     by_source = health["db"]["by_source"]
     if by_source:
         print(f"\n{C.GREY}Items by source:{C.RESET}")
