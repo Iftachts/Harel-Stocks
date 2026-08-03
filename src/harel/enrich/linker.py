@@ -74,6 +74,30 @@ AMBIGUOUS_NAMES = {
     "one",
 }
 
+# Hebrew company names that are also ordinary Hebrew words. טבע is the word
+# "nature" - and the verb "drowned", which headlines every pool accident in
+# the Hebrew wires - so matched bare it files drownings as Teva's own news.
+# Same failure as AMBIGUOUS_NAMES, in a language with no capital letters and
+# no "Ltd" for a suffix test to lean on: what separates the company from the
+# word is financial grammar, see `_word_re_with_context_he`. כיל needs no
+# entry - הכיל/מכיל/יכיל fuse their prefix onto the word, Hebrew letters count
+# as \w, and so the ordinary word boundary already refuses them.
+AMBIGUOUS_NAMES_HE = {"טבע"}
+
+
+def _min_name_len(name: str) -> int:
+    """The shortest name worth compiling a rule for.
+
+    Four characters is right for English, where anything shorter is an acronym
+    or an ordinary word. It is wrong for Hebrew: the root system packs a
+    company name into three letters routinely, and the basket's two flagship
+    Hebrew aliases - טבע and כיל - are exactly three, so a flat floor of four
+    left the whole Hebrew channel (globes, google_news_he) unable to link Teva
+    or ICL. The ambiguity the English floor was guarding against is handled by
+    AMBIGUOUS_NAMES_HE, not by refusing to look.
+    """
+    return 3 if any("\u0590" <= c <= "\u05FF" for c in name) else 4
+
 _TICKER_CONTEXT = r"(?:NASDAQ|NYSE|NYSE American|TASE|TLV|Nasdaq|Nyse)\s*[:\-]?\s*"
 
 
@@ -115,14 +139,18 @@ class EntityLinker:
         for name in tc.match_names:
             if name == t:
                 continue
-            if len(name) < 4:
+            if len(name) < _min_name_len(name):
                 continue
             # A company name that is also an ordinary word needs corporate
             # context. "PH, US allot P42b for anti-TB, HIV drive" was linked
             # DIRECT to Allot Communications at confidence 0.97, because "allot"
             # is a verb. Same failure mode as the ambiguous symbols below, one
-            # level up: the string is right and the entity is not.
-            if name.lower() in AMBIGUOUS_NAMES:
+            # level up: the string is right and the entity is not. Hebrew has
+            # its own version of the trap and its own grammar to catch it with.
+            if name in AMBIGUOUS_NAMES_HE:
+                pattern = _word_re_with_context_he(name)
+                confidence = 0.9
+            elif name.lower() in AMBIGUOUS_NAMES:
                 pattern = _word_re_with_context(name)
                 confidence = 0.9
             else:
@@ -619,10 +647,14 @@ def direct_evidence(tc, text: str) -> bool:
     if pattern is None:
         parts = []
         for name in tc.match_names:
-            if name == tc.ticker or len(name) < 4:
+            if name == tc.ticker or len(name) < _min_name_len(name):
                 continue
-            builder = (_word_re_with_context if name.lower() in AMBIGUOUS_NAMES
-                       else _word_re)
+            if name in AMBIGUOUS_NAMES_HE:
+                builder = _word_re_with_context_he
+            elif name.lower() in AMBIGUOUS_NAMES:
+                builder = _word_re_with_context
+            else:
+                builder = _word_re
             parts.append(builder(name).pattern)
         parts.append(_word_re_with_context(tc.ticker).pattern
                      if tc.ticker in AMBIGUOUS_TICKERS
@@ -680,6 +712,39 @@ def _word_re_with_context(term: str) -> re.Pattern[str]:
         # Allot to Release… / Nova slides… / Allot's results
         rf"|(?:{_NOT_A_COMPANY_BEFORE}(?<!\w){escaped}(?:'s|’s)?\s+"
         rf"(?:{_CORP_VERB}|{_FIN_NOUN})(?!\w))",
+        re.IGNORECASE,
+    )
+
+
+# What טבע has to be doing in a sentence to read as Teva. The English contexts
+# above have nothing to hold on to here - Hebrew has no capitals, and a
+# headline drops the בע"מ the way an English one drops the "Ltd" - so the test
+# is financial grammar instead: a construct-state financial noun in front
+# (מניית טבע, דוחות טבע) or a corporate verb straight after (טבע מדווחת,
+# טבע זינקה). Only a company reports, signs and jumps; a drowning victim and a
+# nature reserve do neither. The verb list was checked against every stored
+# טבע headline: it accepts the corporate ones - including each 2026-07-29
+# earnings mover - and none of the drowning or nature titles. Prefixed forms
+# like לטבע (attached preposition) are deliberately left unmatched: reading
+# inside a fused form would reopen the ambiguity this gate exists to close.
+_FIN_NOUN_HE = (r'מניית|מניות|דוחות|דוח|תוצאות|הכנסות|רווחי|תחזית|מנכ"ל|'
+                r"אנליסטים")
+_CORP_VERB_HE = (
+    r"מזנקת|מזנק|זינקה|זינק|קפצה|צנחה|נופלת|יורדת|ירדה|עולה|עלתה|היכתה|הכתה|"
+    r"החמיצה|החמיצו|פספסה|העלתה|הורידה|עדכנה|מדווחת|דיווחה|פרסמה|תפרסם|חתמה|"
+    r"זכתה|רוכשת|רכשה|מכרה|גייסה|השיקה|קיבלה|צפויה|הודיעה|נסחרת|מציגה|הציגה|"
+    r"רשמה|מאבדת|מתרסקת"
+)
+
+
+def _word_re_with_context_he(term: str) -> re.Pattern[str]:
+    """Match an ordinary-word Hebrew company name only inside financial grammar."""
+    escaped = re.escape(term)
+    return re.compile(
+        # מניית טבע / דוחות טבע - a construct-state noun owns what follows it.
+        rf"(?:(?:{_FIN_NOUN_HE})\s+{escaped}(?!\w))"
+        # טבע מדווחת / טבע זינקה - the word is the subject of a corporate verb.
+        rf"|(?:(?<!\w){escaped}\s+(?:{_CORP_VERB_HE})(?!\w))",
         re.IGNORECASE,
     )
 

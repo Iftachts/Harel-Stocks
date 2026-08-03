@@ -546,6 +546,62 @@ def test_an_ordinary_word_is_only_a_company_when_it_reads_as_one(
     assert direct_evidence(config.ticker(ticker), headline) is expected, headline
 
 
+# --------------------------------------------------------------------------- #
+# The Hebrew channel: three letters is a whole company name, and טבע is also
+# "nature" (and the verb "drowned")
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("headline,expected", [
+    # Financial grammar reads as the company: a corporate verb after the name,
+    # or a construct-state financial noun in front of it.
+    ("טבע מדווחת על תוצאות הרבעון", "DIRECT"),
+    ("מניית טבע זינקה לאחר פרסום הדוחות", "DIRECT"),
+    # The same three letters headline every pool accident and nature-reserve
+    # story in the Hebrew wires; the DB holds 19 of these against 13 corporate
+    # titles, so a bare match would be worse than the blindness it cures.
+    ("ילד בן 11 טבע בבריכה במושב", None),
+    ("שמורת טבע חדשה הוכרזה בגליל", None),
+])
+def test_hebrew_teva_is_only_the_company_inside_financial_grammar(
+        linker, headline, expected):
+    assert rel(linker.link(item(headline)), "TEVA") == expected, headline
+
+
+def test_hebrew_icl_alias_links_direct_without_a_context_gate(linker):
+    """כיל is unambiguous standalone: the fused forms הכיל/מכיל/יכיל glue their
+    prefix straight onto the word, Hebrew letters count as \\w, and so the
+    ordinary word boundary already refuses them. A four-character floor was the
+    only thing keeping the alias out."""
+    links = linker.link(item("כיל חתמה על הסכם אספקת אשלג לסין"))
+    assert rel(links, "ICL") == "DIRECT"
+
+
+def test_a_fused_hebrew_prefix_is_not_the_company(linker):
+    """הכיל is the verb "contained". The word boundary, not a context gate, is
+    what keeps it out - which is why כיל needs no AMBIGUOUS_NAMES_HE entry."""
+    links = linker.link(item("המחקר הכיל נתונים על 200 חולים"))
+    assert rel(links, "ICL") is None
+
+
+@pytest.mark.parametrize("ticker,headline,expected", [
+    # The stories the four-character floor silently dropped: both call sites
+    # DISCARD the item when direct_evidence is False, so the whole Hebrew
+    # channel (globes, google_news_he) never linked the basket's largest name.
+    ("TEVA", "טבע מדווחת על תוצאות הרבעון", True),
+    ("TEVA", "מניית טבע זינקה לאחר פרסום הדוחות", True),
+    ("TEVA", "דוחות טבע: ההכנסות עלו ברבעון השני", True),
+    ("ICL", "כיל חתמה על הסכם אספקת אשלג לסין", True),
+    # Ordinary-word uses, same trap as "allot" one alphabet over.
+    ("TEVA", "ילד בן 11 טבע בבריכה במושב", False),
+    ("TEVA", "טיול בחיק הטבע בסוף השבוע", False),
+    ("ICL", "המחקר הכיל נתונים על 200 חולים", False),
+])
+def test_direct_evidence_reads_the_hebrew_channel(config, ticker, headline, expected):
+    from harel.enrich.linker import direct_evidence
+
+    assert direct_evidence(config.ticker(ticker), headline) is expected, headline
+
+
 def test_a_sector_term_from_the_wrong_regulator_is_not_a_sector_link(config):
     """A term of art in one domain is boilerplate in another.
 
