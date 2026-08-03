@@ -1137,6 +1137,47 @@ def test_edgar_filing_date_keeps_its_eastern_calendar_day():
     assert dt.isoformat() == "2026-07-30T04:00:00+00:00", "ET midnight, not UTC midnight"
 
 
+def test_edgar_future_eastern_reading_means_the_stamp_was_true_utc():
+    """EDGAR mixes conventions under the same trailing Z: an ORA 13G's
+    '15:20:56Z' matched the index's 'Accepted 11:20:56 ET' (true UTC), while a
+    TEVA 8-K's '07:00:20Z' matched '07:00:20 ET' (Eastern mislabeled). The
+    Eastern reading of a genuine Eastern stamp can never be in the future, so a
+    future Eastern reading proves the stamp was UTC - the blanket Eastern
+    reinterpretation was future-dating those filings by +4h, holding max
+    recency score for four phantom hours."""
+    from harel.collect.edgar import _parse_edgar_dt
+
+    # The clock reads two hours ahead of real now, so its Eastern reading sits
+    # 6-7 hours in the future - far past the 10-minute allowance.
+    clock = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=2)
+    dt = _parse_edgar_dt(clock.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+    assert dt == clock, "a future Eastern reading must fall back to the UTC reading"
+
+    # A past stamp keeps the Eastern default - that is the TEVA shape.
+    past = _parse_edgar_dt("2026-07-30T16:13:33.000Z")
+    assert past.isoformat() == "2026-07-30T20:13:33+00:00"
+
+
+def test_edgar_dead_clock_window_is_utc_even_in_the_past():
+    """A raw clock strictly inside (22:00, 02:00) cannot be an Eastern
+    acceptance at all - EDGAR's window is 06:00-22:00 ET - so those stamps are
+    true UTC no matter how long after acceptance we first parse them."""
+    from harel.collect.edgar import _parse_edgar_dt
+
+    for stamp, expected in [
+        ("2026-07-29T23:45:12.000Z", "2026-07-29T23:45:12+00:00"),
+        ("2026-07-29T22:00:01.000Z", "2026-07-29T22:00:01+00:00"),
+        ("2026-07-30T00:00:00.000Z", "2026-07-30T00:00:00+00:00"),
+        ("2026-07-30T01:59:59.000Z", "2026-07-30T01:59:59+00:00"),
+    ]:
+        assert _parse_edgar_dt(stamp).isoformat() == expected, stamp
+
+    # 22:00:00 exactly is a valid last-second Eastern acceptance and must keep
+    # the Eastern reading.
+    on_the_bell = _parse_edgar_dt("2026-07-29T22:00:00.000Z")
+    assert on_the_bell.isoformat() == "2026-07-30T02:00:00+00:00"
+
+
 def test_edgar_full_text_link_cannot_be_upgraded_to_direct(config, db):
     """The synthesised headline contains our own name; the linker must not read
     it back out and call a competitor's filing our news."""

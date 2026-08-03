@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -28,7 +28,8 @@ from ..http import HttpError
 from ..models import RawItem
 from .base import Collector, register
 
-# EDGAR reports acceptance times on the Eastern clock. See _parse_edgar_dt.
+# EDGAR mostly reports acceptance times on the Eastern clock, but some records
+# are true UTC despite the identical formatting. See _parse_edgar_dt.
 EDGAR_TZ = ZoneInfo("America/New_York")
 
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
@@ -522,13 +523,28 @@ def _fulltext_name(name: str) -> str:
 def _parse_edgar_dt(value: str) -> datetime | None:
     """Parse an EDGAR timestamp to UTC.
 
-    ``acceptanceDateTime`` ends in "Z" but the clock is **Eastern**, not UTC -
-    the filing window is 06:00-22:00 ET and the raw values sit squarely inside
-    it. Reading them as UTC moved every filing 4-5 hours earlier, which pushed
-    after-close filings back into the trading session: a Form 4 accepted at
-    16:13 ET was stored as 12:13 ET and could then be read as the cause of that
-    day's move. It also made every filing look hours fresher than it was, which
-    inflates the recency decay and the intraday timing boosts.
+    ``acceptanceDateTime`` ends in "Z" but the clock convention is **mixed**:
+    some values are genuinely Eastern despite the Z, others are true UTC.
+    Probing the filing index against the API made both kinds concrete - a TEVA
+    8-K's ``07:00:20Z`` matched the index's "Accepted 07:00:20 ET" (Eastern
+    mislabeled as UTC; 03:00 ET would be outside EDGAR's 06:00-22:00 acceptance
+    window), while an ORA 13G's ``15:20:56Z`` matched "Accepted 11:20:56 ET"
+    (true UTC). Reading a mislabeled stamp as UTC moves the filing 4-5 hours
+    earlier - a Form 4 accepted at 16:13 ET lands at 12:13 ET and reads as the
+    cause of that day's move. Reading a true-UTC stamp as Eastern moves it 4-5
+    hours *later*, into the future: it holds the maximum recency-decay score
+    until the clock catches up and earns intraday timing boosts for the wrong
+    window (one stored filing entered the DB 86 minutes before its own
+    collection time).
+
+    Eastern stays the default, disambiguated by a one-directional invariant:
+    the Eastern reading of a genuine Eastern stamp is the true acceptance time
+    and can never be in the future, so an Eastern reading ahead of the wall
+    clock proves the stamp was true UTC. A raw clock strictly inside
+    (22:00, 02:00) is likewise impossible as an Eastern acceptance regardless
+    of how late we parse it, so it is UTC too. The residual - a true-UTC stamp
+    first parsed hours after acceptance with a clock outside that window - is
+    undetectable and stays 4-5 hours late; recency decay has flattened those.
 
     A date-only ``filingDate`` is anchored to Eastern midnight so the calendar
     date stays the one EDGAR means.
@@ -541,7 +557,21 @@ def _parse_edgar_dt(value: str) -> datetime | None:
             naive = datetime.strptime(value, fmt)
         except ValueError:
             continue
-        return naive.replace(tzinfo=EDGAR_TZ).astimezone(timezone.utc)
+        dt_et = naive.replace(tzinfo=EDGAR_TZ).astimezone(timezone.utc)
+        if fmt == "%Y-%m-%d":
+            return dt_et
+        # 22:00:00 exactly is a valid last-second Eastern acceptance, and a
+        # true-UTC 02:00:00 is 22:00 ET, so both endpoints stay out of the
+        # forced-UTC window.
+        in_dead_window = (
+            naive.hour in (23, 0, 1)
+            or (naive.hour == 22 and (naive.minute, naive.second, naive.microsecond) != (0, 0, 0))
+        )
+        if in_dead_window:
+            return naive.replace(tzinfo=timezone.utc)
+        if dt_et > datetime.now(timezone.utc) + timedelta(minutes=10):
+            return naive.replace(tzinfo=timezone.utc)
+        return dt_et
     return None
 
 
