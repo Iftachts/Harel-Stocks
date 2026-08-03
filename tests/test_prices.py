@@ -186,6 +186,27 @@ def test_todays_bar_keeps_up_with_the_session_it_is_recording(config, db):
     assert [c for c in later.client.calls if "interval=1d" in c] == []
 
 
+# ------------------------------------------------------------ going blind -- #
+def test_a_basket_that_saved_nothing_is_an_outage_not_a_quiet_day(config, db):
+    """Yahoo degrades politely: HTTP 200, an empty chart result, and the reason
+    tucked into chart.error. Every name failing that way used to leave no trace
+    at all - no snapshot, no warning, nothing in source_state - so the whole
+    tape went dark and `harel doctor` read the source as healthy."""
+    empty = {"chart": {"result": [], "error": {"code": "Not Found"}}}
+    coll = collector(config, db, {"query1.finance.yahoo.com": empty})
+    items = list(coll.collect())
+
+    assert items == [], "no snapshots means no tape alerts to emit"
+    assert any("empty chart result" in w for w in coll.warnings), \
+        "a 200 that carries nothing must still be named per ticker"
+
+    expected = (f"no price snapshots saved for any of "
+                f"{len(config.active_tickers)} tickers")
+    assert expected in coll.warnings
+    assert db.get_source_state("prices_yahoo").get("last_error") == expected, \
+        "the outage must reach source_state, which is what `harel doctor` reads"
+
+
 def test_a_finished_session_stops_moving(config, db):
     """The bug the user caught: SOXX reported +0.1% at the bell and -0.8% an
     hour later, on a session that had been over the whole time.
