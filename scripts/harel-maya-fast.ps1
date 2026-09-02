@@ -76,6 +76,21 @@ if ($Uninstall) {
 }
 
 if ($Install) {
+    # The task name is fixed, so a second checkout installing over the first is
+    # silent by default (-Force). On one machine that is a checkout quietly
+    # taking over the other's schedule; after a move it is the reason the old
+    # path kept firing. Name it rather than let it happen invisibly.
+    $existing = $null
+    try { $existing = Get-ScheduledTask -TaskName $Task -TaskPath $Folder -ErrorAction Stop } catch {}
+    if ($existing) {
+        $prior = ($existing.Actions | Select-Object -First 1).Arguments
+        if ($prior -and $prior -notlike "*$PSCommandPath*") {
+            Write-Warning "'$Folder$Task' is already registered against a DIFFERENT checkout:"
+            Write-Warning "    $prior"
+            Write-Warning "Re-pointing it at this one: $PSCommandPath"
+        }
+    }
+
     $ps = (Get-Command powershell.exe).Source
     $action = New-ScheduledTaskAction -Execute $ps `
         -Argument ("-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" " +
@@ -101,6 +116,7 @@ if ($Install) {
         -Force -ErrorAction Stop | Out-Null
 
     Write-Host "Registered '$Folder$Task' - maya_tase every $IntervalMinutes min, ${FromHour}:00-${ToHour}:00 Israel time, ${Hours}h lookback."
+    Write-Host "  bound to    : $Root"
     Write-Host "  run now     : Start-ScheduledTask -TaskName $Task -TaskPath $Folder"
     Write-Host "  last result : Get-ScheduledTaskInfo -TaskName $Task -TaskPath $Folder"
     Write-Host "  log         : logs\maya-fast.log"
@@ -108,8 +124,24 @@ if ($Install) {
     return
 }
 
+# The log comes before the first thing that can fail. A registered task carries
+# an absolute path to this file, resolved on the machine where -Install ran; move
+# or re-clone the repo and the task still fires, against a $Root that no longer
+# has a venv. That used to `throw` here - two lines above the log existed - so the
+# only trace was a non-zero LastTaskResult in a dialog nobody opens, 500 times a
+# day. A path that has gone stale must say so somewhere a person will look.
+$LogDir = Join-Path $Root "logs"
+New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+$Log = Join-Path $LogDir "maya-fast.log"
+
 if (-not (Test-Path $Harel)) {
-    throw "harel.exe not found at $Harel - create the venv first: py -3 -m venv .venv; .\.venv\Scripts\python -m pip install -e `".[serve,mcp]`""
+    $msg = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  FATAL harel.exe not found at $Harel " +
+           "- this task points at a checkout that has moved or has no venv. " +
+           "Re-run `"$PSCommandPath`" -Install from the checkout you want, or create the venv: " +
+           "py -3 -m venv .venv; .\.venv\Scripts\python -m pip install -e `".[serve,mcp]`""
+    $msg | Out-File -FilePath $Log -Append -Encoding utf8
+    Write-Error $msg
+    exit 1
 }
 
 # The window is Israel's, not the machine's - this box happens to run Israel
@@ -133,10 +165,6 @@ if (Test-Path $EnvFile) {
         }
     }
 }
-
-$LogDir = Join-Path $Root "logs"
-New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
-$Log = Join-Path $LogDir "maya-fast.log"
 
 # PowerShell 5.1 wraps a native program's stderr in ErrorRecords, and under
 # ErrorActionPreference=Stop the first one aborts the script - harel writes its
