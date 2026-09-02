@@ -279,17 +279,13 @@ def render_terminal(views: Views, collect: dict[str, Any] | None = None) -> str:
     )
     parts: list[str] = []
 
-    entries = views.coverage_warning_entries()
-    if entries:
-        parts.append(f"<section><h2>{he.UI['coverage_warnings']}</h2>")
-        for entry in entries:
-            parts.append(f"<div class='warn'>{_coverage_warning_he(entry)}</div>")
-        parts.append("</section>")
-
-    # The feed leads. The panels under it are all narrower readings of the same
-    # tape, and a trader opening the page wants the tape before the arguments
-    # about it. Coverage warnings stay above even this: a dead source changes
-    # what an empty feed means, so it has to be read first.
+    # The feed leads, with nothing above it. The panels under it are all
+    # narrower readings of the same tape, and a trader opening the page wants
+    # the tape before the arguments about it. Coverage warnings used to sit
+    # above the feed and now close the page: they are a standing statement
+    # about the plumbing, not about today, and a block that says the same
+    # thing every morning above the tape teaches the eye to skip the top of
+    # the page - which is the one place the tape is.
     if feed["items"]:
         parts.append(_section(he.UI["feed"], feed["items"]))
     else:
@@ -315,6 +311,13 @@ def render_terminal(views: Views, collect: dict[str, Any] | None = None) -> str:
     if brief.get("tase_overnight"):
         parts.append(_section(he.UI["tase_overnight"], brief["tase_overnight"]))
     parts.append(_calendar_section(brief.get("calendar_next_7d") or []))
+
+    entries = views.coverage_warning_entries()
+    if entries:
+        parts.append(f"<section><h2>{he.UI['coverage_warnings']}</h2>")
+        for entry in entries:
+            parts.append(f"<div class='warn'>{_coverage_warning_he(entry)}</div>")
+        parts.append("</section>")
 
     return _document(he.UI["brand"], header, "".join(parts), collect,
                      views.last_update())
