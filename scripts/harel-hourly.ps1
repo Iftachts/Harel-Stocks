@@ -53,6 +53,21 @@ if ($Uninstall) {
 }
 
 if ($Install) {
+    # The task name is fixed and the registration passes -Force, so a second
+    # checkout installing over the first is silent by construction - one checkout
+    # quietly taking over the other's schedule, and after a move it is why the
+    # old path went on firing. Name it rather than let it happen invisibly.
+    $existing = $null
+    try { $existing = Get-ScheduledTask -TaskName $Task -TaskPath $Folder -ErrorAction Stop } catch {}
+    if ($existing) {
+        $prior = ($existing.Actions | Select-Object -First 1).Arguments
+        if ($prior -and $prior -notlike "*$PSCommandPath*") {
+            Write-Warning "'$Folder$Task' is already registered against a DIFFERENT checkout:"
+            Write-Warning "    $prior"
+            Write-Warning "Re-pointing it at this one: $PSCommandPath"
+        }
+    }
+
     $ps = (Get-Command powershell.exe).Source
     $action = New-ScheduledTaskAction -Execute $ps `
         -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Hours $Hours" `
@@ -78,14 +93,31 @@ if ($Install) {
         -Force -ErrorAction Stop | Out-Null
 
     Write-Host "Registered '$Folder$Task' - one pass every hour, ${Hours}h lookback."
+    Write-Host "  bound to    : $Root"
     Write-Host "  run now     : Start-ScheduledTask -TaskName $Task -TaskPath $Folder"
     Write-Host "  last result : Get-ScheduledTaskInfo -TaskName $Task -TaskPath $Folder"
     Write-Host "  remove      : .\scripts\harel-hourly.ps1 -Uninstall"
     return
 }
 
+# The log is opened before the first thing that can fail, for the same reason
+# this script exists at all. The registered task carries an absolute -File path
+# resolved when -Install ran; move or re-clone the repo and it still fires, at a
+# $Root that may have no venv. That used to `throw` here, above the log, so the
+# only trace was a non-zero LastTaskResult - a silent failure that still reports
+# "task ran", which is exactly the shape this file was written to stop.
+$LogDir = Join-Path $Root "logs"
+New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+$Log = Join-Path $LogDir "hourly.log"
+
 if (-not (Test-Path $Harel)) {
-    throw "harel.exe not found at $Harel - create the venv first: py -3 -m venv .venv; .\.venv\Scripts\python -m pip install -e `".[serve,mcp]`""
+    $msg = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  FATAL harel.exe not found at $Harel " +
+           "- this task points at a checkout that has moved or has no venv. " +
+           "Re-run `"$PSCommandPath`" -Install from the checkout you want, or create the venv: " +
+           "py -3 -m venv .venv; .\.venv\Scripts\python -m pip install -e `".[serve,mcp]`""
+    $msg | Out-File -FilePath $Log -Append -Encoding utf8
+    Write-Error $msg
+    exit 1
 }
 
 $EnvFile = Join-Path $Root ".env"
@@ -101,10 +133,6 @@ if (Test-Path $EnvFile) {
 if (-not $env:SEC_CONTACT_EMAIL) {
     Write-Warning "SEC_CONTACT_EMAIL is not set - the SEC will return 403 and EDGAR will collect nothing."
 }
-
-$LogDir = Join-Path $Root "logs"
-New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
-$Log = Join-Path $LogDir "hourly.log"
 
 # Keep the log readable across months of hourly runs: one header line per pass,
 # and hand the tail back to the operator rather than growing without bound.
