@@ -21,6 +21,7 @@ from .enrich.linker import EntityLinker, direct_evidence
 from .enrich.materiality import MaterialityScorer, PriceContext
 from .http import HttpClient
 from .models import FIELD_SEP, CalendarEntry, RawItem, ScoredItem
+from .views import _compact
 
 log = logging.getLogger("harel.pipeline")
 
@@ -291,8 +292,18 @@ class Pipeline:
 
         self.db.conn.commit()
         report.finished_at = datetime.now(timezone.utc)
-        report.alerts = self.db.feed(min_score=self.config.scoring.tiers.get("alert", 75),
-                                     since_hours=self.lookback_hours, limit=25)
+        # Compacted here, not at the caller. `db.feed` returns storage rows
+        # keyed `published_at`; every consumer of an item list in this program
+        # - the CLI printer, the morning brief, the terminal - speaks the
+        # `_compact` shape keyed `t`. Handing back the raw row made a pass that
+        # found an ALERT crash on `KeyError: 't'` *after* committing, so the
+        # run exited 1 and the one section that had to be read never printed.
+        report.alerts = [
+            _compact(row, include_reasons=True)
+            for row in self.db.feed(
+                min_score=self.config.scoring.tiers.get("alert", 75),
+                since_hours=self.lookback_hours, limit=25)
+        ]
         self.db.log_run(
             started_at=report.started_at.isoformat(),
             finished_at=report.finished_at.isoformat(),

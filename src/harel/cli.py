@@ -307,7 +307,7 @@ def cmd_watch(args) -> int:
                   f"{len(report.alerts)} alerts, {len(report.errors)} errors",
                   flush=True)
             for alert in report.alerts[:5]:
-                print(f"  {C.RED}ALERT{C.RESET} {alert['ticker']:<6} "
+                print(f"  {C.RED}ALERT{C.RESET} {alert.get('ticker', ''):<6} "
                       f"{alert['title'][:110]}", flush=True)
         except KeyboardInterrupt:
             print("\nstopped", flush=True)
