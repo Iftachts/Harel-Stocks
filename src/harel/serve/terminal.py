@@ -174,12 +174,16 @@ pre.raw {{
    width line beneath them. Keyed off that shape rather than a column count,
    because the tables disagree about the count and agree about the shape. */
 @media (max-width: 720px) {{
-  body {{ font-size: 14px; }}
+  /* 13px is a desk font. On a phone held at arm's length the secondary text
+     was the problem rather than the headline: the why-line, the pills and the
+     source key sat at 10-11px under a 14px title, so the row read as one
+     legible line over three unreadable ones. They come up together. */
+  body {{ font-size: 15px; }}
   /* Three wrapped lines of chrome are not worth pinning above the tape. */
   header {{ position: static; padding: 8px 10px; gap: 4px 12px; }}
   main {{ padding: 10px 10px 48px; }}
   section {{ margin-bottom: 20px; }}
-  h2 {{ font-size: 13px; }}
+  h2 {{ font-size: 15px; }}
 
   table, tbody {{ display: block; }}
   /* The header row labels columns that no longer exist once cells stack. */
@@ -200,8 +204,12 @@ pre.raw {{
     overflow-wrap: anywhere;
   }}
   .kv td.k {{ width: auto; }}
+  .why, .rel, .tm, .src, .note {{ font-size: 13px; }}
+  .warn, .tape, .empty {{ font-size: 14px; }}
+  .pill {{ font-size: 12px; padding: 1px 7px; }}
+  .collect {{ font-size: 13px; }}
   /* 10px pills are a miss with a thumb. */
-  .dig {{ font-size: 11px; padding: 2px 7px; }}
+  .dig {{ font-size: 12px; padding: 2px 8px; }}
   nav a {{ display: inline-block; padding-block: 4px; margin-inline-end: 14px; }}
   #collect {{ padding: 4px 12px; }}
   pre.raw {{ max-height: 220px; }}
