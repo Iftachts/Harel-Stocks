@@ -16,7 +16,9 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections.abc import Iterable
 from datetime import timedelta
+from typing import Any
 
 from .models import RawItem
 
@@ -100,41 +102,84 @@ def hamming(a: int, b: int) -> int:
 
 
 class Clusterer:
-    """In-memory clusterer for one pipeline run, seeded from the DB.
+    """Clusters one story across sources, and across runs.
 
     Two items cluster together when they share a dedupe_key, or when their
     SimHashes are within `threshold` bits AND they were published within
-    `window_hours` of each other.
+    `window_hours` of each other AND they name a company in common.
+
+    That last condition is not decoration. Loosening the near-duplicate match to
+    span runs widens the window in which two unrelated documents can collide on
+    a generic headline, and on the live corpus exactly two pairs did: an Evogene
+    exhibit mentioning Kamada against the same exhibit mentioning Compugen, and
+    two different FERC dockets both titled "Combined Notice of Filings #1". Both
+    would have merged on the title alone. All twenty-five genuine merges in the
+    same corpus - one Teleflex approval carried by three publishers, one OPKO
+    result carried twice - share a ticker, so the guard costs nothing real.
     """
 
     def __init__(self, threshold: int = 6, window_hours: float = 36.0) -> None:
         self.threshold = threshold
         self.window = timedelta(hours=window_hours)
         self._by_key: dict[str, str] = {}
-        self._hashes: list[tuple[int, str, object]] = []   # (simhash, cluster_id, published_at)
+        # (simhash, cluster_id, published_at, tickers)
+        self._hashes: list[tuple[int, str, Any, frozenset[str]]] = []
 
-    def seed(self, dedupe_keys: dict[str, str]) -> None:
-        """Prime with existing (dedupe_key -> cluster_id) pairs from the DB."""
-        self._by_key.update(dedupe_keys)
+    def seed(self, rows: Iterable[dict[str, Any]]) -> int:
+        """Prime from what is already stored, so a story survives a run boundary.
 
-    def assign(self, item: RawItem) -> tuple[str, str]:
+        The near-duplicate half of this clusterer used to live and die inside one
+        pass: `_by_key` was rebuilt empty every time, so a wire copy that arrived
+        in the NEXT poll opened its own cluster instead of joining the story. The
+        exact-title half always persisted by accident, because `cluster_id` is
+        derived from the key - which is why this went unnoticed. Corroboration
+        counts feed the score, so a second source landing an hour later was being
+        scored as though it had never arrived.
+
+        SimHash is recomputed from the stored title rather than read from a
+        column. It is a pure function of the title, and recomputing means a
+        change to `normalize_title` or `simhash` takes effect everywhere at once
+        instead of silently mixing two algorithms in one comparison.
+        """
+        seeded = 0
+        for row in rows:
+            key, cluster_id = row.get("dedupe_key"), row.get("cluster_id")
+            if not key or not cluster_id:
+                continue
+            self._by_key.setdefault(key, cluster_id)
+            sh = simhash(row.get("title") or "")
+            published = row.get("published_at")
+            if sh and published is not None:
+                self._hashes.append(
+                    (sh, cluster_id, published, frozenset(row.get("tickers") or ())))
+            seeded += 1
+        return seeded
+
+    def assign(self, item: RawItem,
+               tickers: Iterable[str] = ()) -> tuple[str, str]:
         """Return (dedupe_key, cluster_id) for an item."""
         key = dedupe_key(item)
         if key in self._by_key:
             return key, self._by_key[key]
 
+        mine = frozenset(tickers)
         sh = simhash(item.title)
         if sh:
-            for other_hash, cluster_id, published in self._hashes:
+            for other_hash, cluster_id, published, theirs in self._hashes:
                 if abs(item.published_at - published) > self.window:
                     continue
-                if hamming(sh, other_hash) <= self.threshold:
-                    self._by_key[key] = cluster_id
-                    self._hashes.append((sh, cluster_id, item.published_at))
-                    return key, cluster_id
+                if hamming(sh, other_hash) > self.threshold:
+                    continue
+                # A shared name is what makes two similar headlines the same
+                # event rather than the same template.
+                if not (mine & theirs):
+                    continue
+                self._by_key[key] = cluster_id
+                self._hashes.append((sh, cluster_id, item.published_at, mine))
+                return key, cluster_id
 
         cluster_id = key[:16]
         self._by_key[key] = cluster_id
         if sh:
-            self._hashes.append((sh, cluster_id, item.published_at))
+            self._hashes.append((sh, cluster_id, item.published_at, mine))
         return key, cluster_id

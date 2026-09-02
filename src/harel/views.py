@@ -1096,6 +1096,14 @@ class Views:
     STALE_AFTER_MIN = 120
     VERY_STALE_AFTER_MIN = 360
 
+    # How long a source may store nothing before its silence stops reading as
+    # quiet. Keyed on the declared latency because cadence is the whole
+    # question: a realtime wire that has said nothing for three days is flat,
+    # while openFDA is routinely quiet for a week and means nothing by it.
+    FLATLINE_FAST_LATENCIES = frozenset({"realtime", "near_realtime", "minutes"})
+    FLATLINE_FAST_HOURS = 72
+    FLATLINE_SLOW_HOURS = 14 * 24
+
     def last_update(self) -> dict[str, Any]:
         """When the system last collected - for the whole pipeline, not a name.
 
@@ -1139,6 +1147,49 @@ class Views:
             s for s in states
             if (s.get("consecutive_failures") or 0) >= 2 or s.get("last_error")
         ]
+        # The counters above only see passes that FAILED. A feed that dies by
+        # answering empty 200s is stamped fully healthy every pass - fresh
+        # last_ok_at, zero consecutive_failures - so nothing in source_state
+        # can ever notice it. The items table can: a source that used to
+        # produce and has stored nothing for longer than its cadence explains
+        # is flat, whatever its state row says. Prices are exempt (they write
+        # snapshots, not items), and a source that has never produced at all
+        # is a coverage fact rather than an outage, reported apart so it never
+        # reads as red.
+        now = datetime.now(timezone.utc)
+        last_item = {
+            str(row["source"]): row["last_item_at"]
+            for row in self.db.conn.execute(
+                "SELECT source, MAX(collected_at) AS last_item_at "
+                "FROM items GROUP BY source"
+            ).fetchall()
+        }
+        flatlined: list[dict[str, Any]] = []
+        never_produced: list[str] = []
+        for key, source in sorted(self.config.sources.items()):
+            if not source.available or source.kind == "prices":
+                continue
+            last = last_item.get(key)
+            if not last:
+                never_produced.append(key)
+                continue
+            try:
+                seen = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=timezone.utc)
+            threshold_hours = (self.FLATLINE_FAST_HOURS
+                               if source.latency in self.FLATLINE_FAST_LATENCIES
+                               else self.FLATLINE_SLOW_HOURS)
+            silent_hours = (now - seen).total_seconds() / 3600
+            if silent_hours > threshold_hours:
+                flatlined.append({
+                    "source": key,
+                    "last_item_at": last,
+                    "silent_hours": round(silent_hours, 1),
+                    "threshold_hours": threshold_hours,
+                })
         return {
             "asof": datetime.now(timezone.utc).isoformat(),
             "db": self.db.counts(),
@@ -1169,6 +1220,8 @@ class Views:
                 for t in self.config.unresolved_tickers
             ],
             "degraded_sources": degraded,
+            "flatlined": flatlined,
+            "never_produced": never_produced,
             "source_state": states,
         }
 

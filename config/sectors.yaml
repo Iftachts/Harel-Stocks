@@ -63,12 +63,21 @@ sectors:
     label: Pharma - generics & branded
     regulators: [fda_press, fda_drug_approvals, fda_enforcement, fda_warning_letters,
                  ema_news, federal_register, clinicaltrials]
+    # A pharmaceutical tariff arrives as a trade action - a BIS Section 232
+    # investigation or a Presidential proclamation via USTR - not as anything
+    # the health agencies publish, and the linker refuses a sector match from
+    # an unwatched agency. BIS and USTR are watched here for exactly that.
     fr_agencies: [food-and-drug-administration, centers-for-medicare-medicaid-services,
-                  health-and-human-services-department]
+                  health-and-human-services-department, industry-and-security-bureau,
+                  trade-representative-office-of-united-states]
+    # "pharmaceutical ingredients" is deliberately absent from the tariff
+    # terms: it substring-matches the "active pharmaceutical ingredient"
+    # boilerplate in routine FDA drug notices.
     fr_terms:
       ["abbreviated new drug application", "generic drug user fee", "drug pricing",
        "biosimilar", "drug shortage", "Medicare drug price negotiation",
-       "340B", "orange book patent listing"]
+       "340B", "orange book patent listing", "patented pharmaceuticals",
+       "pharmaceutical tariff"]
     read_across: 0.55
     peer_read_across: 0.70
     high_impact_events:

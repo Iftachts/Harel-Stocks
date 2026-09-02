@@ -76,47 +76,61 @@ sources:
   maya_tase:
     kind: maya
     label: TASE MAYA - Israeli immediate reports
-    base_url: https://mayaapi.tase.co.il
+    # The keyless channel is the new Maya site's own same-origin JSON backend
+    # (verified live 2026-08-02). POST /api/v1/reports/companies with a JSON
+    # body; companyId is the ISSUER number (= tase_issuer_id, same registry the
+    # official API calls IssuerId). Server caps limit at 30 and rejects a
+    # toDate past its own today. DO NOT point base_url back at
+    # mayaapi.tase.co.il / premayaapi.tase.co.il - those hosts sit behind bot
+    # protection (HUMAN Security) that 403s every non-browser client no matter
+    # the headers, which is what killed the old fallback.
+    base_url: https://maya.tase.co.il
     endpoints:
-      company_reports: /api/report/company?companyId={tase_id}&fromDate={from}&toDate={to}
-      priority: /api/report/priority
-    headers:
-      X-Maya-With: allow
-      Referer: https://maya.tase.co.il/
-      Accept-Language: he-IL
+      company_reports: /api/v1/reports/companies
+    page_limit: 30
     # Per the MAYA 2.0.0 OpenAPI spec: server is datawise.tase.co.il and auth is
     # an `apiKey` header. openapi.tase.co.il is only the developer portal - it
     # serves the Angular site for every path, which is why it 403s as HTML.
     official_api_base: https://datawise.tase.co.il
     official_endpoint: /api/v2/market-announcements/companies-disclosures/by-issuer
-    official_language: he-IL          # Accept-Language is required, he-IL | en-US
+    official_language: he-IL          # Accept-Language: he-IL keeps titles Hebrew on both channels
     requires: TASE_API_KEY
-    key_optional: true            # without the key we fall back to the public endpoints
+    key_optional: true            # without the key we fall back to the public v1 channel
     trust: 1.0
     latency: realtime
     poll_sec: 120
     notes: >
       CRITICAL EDGE for this basket. 18 of these names are dual-listed. Israeli
       "immediate reports" (דיווח מיידי) are frequently published on MAYA during
-      Israeli hours - i.e. BEFORE the US pre-market. Endpoint shapes are
-      best-effort (see docs/LIMITATIONS.md); verify on first run.
+      Israeli hours - i.e. BEFORE the US pre-market. The public v1 channel is
+      the site's own backend: undocumented, no key, can change without notice
+      (see docs/LIMITATIONS.md); verify with `harel probe-maya` on first run.
 
   maya_schedule:
     kind: maya_schedule
     label: TASE expected financial-report dates
     official_api_base: https://datawise.tase.co.il
     schedule_endpoint: /api/v2/market-announcements/financial-report-schedule/by-schedule-date
+    # Keyless fallback: the same corporate-events feed the Maya site shows as
+    # "אירועים קרובים" - POST with by=company/companyId like the reports
+    # channel. eventId 2 (פרסום דוחות) is the calendar row; a same-day eventId
+    # 1 (שיחת ועידה) contributes the clock.
+    public_base: https://maya.tase.co.il
+    public_events_endpoint: /api/v1/corporate-actions/events
     official_language: he-IL
     horizon_days: 365
     requires: TASE_API_KEY
+    key_optional: true            # the public events channel needs no key
     trust: 1.0
     latency: daily
     poll_sec: 43200
     notes: >
       Closes docs/LIMITATIONS.md section 4 (official earnings calendar) with
-      issuer-published dates. Emits noise-capped items whose real payload is the
-      `calendar` row - "do not be short into this" is the whole point. Needs
-      tase_issuer_id per name; the endpoint keys on issuer number, not the
+      issuer-published dates - keyless since 2026-08 via the public events
+      channel; the official schedule product takes over when TASE_API_KEY is
+      active. Emits noise-capped items whose real payload is the `calendar`
+      row - "do not be short into this" is the whole point. Needs
+      tase_issuer_id per name; both channels key on issuer number, not the
       security id in tase_id.
 
   # ------------------------------------------------------------- regulator ---

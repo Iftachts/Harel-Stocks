@@ -225,7 +225,7 @@ events:
     label: Policy / tariff / export control
     patterns:
       - "\\b(export control|entity list|foreign direct product rule)\\b"
-      - "\\b(tariff|Section 232|Section 301|countervailing dut|antidumping)\\b"
+      - "\\b(tariffs?|Section 232|Section 301|countervailing dut(y|ies)|antidumping)\\b"
       - "\\b(sanction(s|ed)?)\\b"
       - "\\b(final rule|interim final rule|proposed rule)\\b"
       - "\\b(reimbursement (rate|cut)|fee schedule)\\b"

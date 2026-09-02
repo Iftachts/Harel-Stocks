@@ -137,14 +137,24 @@ def test_cutting_first_does_not_stop_anything_being_escaped():
 
 # ------------------------------------------------- collect-on-demand ------- #
 def _runner(monkeypatch, duration=0.0, boom=None):
-    """A CollectRunner whose pass is instant and never touches the network."""
+    """A CollectRunner whose pass is instant and never touches the network.
+
+    The report is a REAL RunReport, not a stub. The runner serialises the
+    report attribute-by-attribute, and a hand-rolled fake is exactly how the
+    `deduped` -> `dropped_unlinked` rename sailed through this file green
+    while the live button finished a four-minute pass and died serialising
+    it. A field rename must break here first."""
     import time as _time
 
+    from harel.pipeline import RunReport
     from harel.serve import api as api_mod
 
-    class FakeReport:
-        collected, stored, deduped, duration_sec = 147, 75, 72, 1.5
-        by_source, warnings, errors = {"globes": 12}, [], []
+    started = datetime(2026, 8, 1, 20, 0, tzinfo=timezone.utc)
+    report = RunReport(
+        started_at=started, finished_at=started + timedelta(seconds=1.5),
+        collected=147, stored=75, dropped_unlinked=72,
+        by_source={"globes": 12},
+    )
 
     class FakePipeline:
         def __init__(self, **kw):
@@ -155,7 +165,7 @@ def _runner(monkeypatch, duration=0.0, boom=None):
                 _time.sleep(duration)
             if boom:
                 raise RuntimeError(boom)
-            return FakeReport()
+            return report
 
     monkeypatch.setattr(api_mod, "Database", lambda path: type(
         "D", (), {"close": lambda self: None})())
@@ -183,8 +193,9 @@ def test_a_finished_pass_reports_what_it_collected(monkeypatch):
     runner._thread.join(timeout=10)
 
     state = runner.status()
-    assert state["status"] == "done"
+    assert state["status"] == "done", state.get("error")
     assert (state["collected"], state["stored"]) == (147, 75)
+    assert state["dropped"] == 72, "serialised from RunReport.dropped_unlinked"
     assert state["finished_at"]
 
 
@@ -199,6 +210,25 @@ def test_a_pass_that_raises_is_reported_not_swallowed(monkeypatch):
     assert state["status"] == "error"
     assert "the network went away" in state["error"]
     assert state["finished_at"], "a failed pass still has to stop being 'running'"
+
+
+def test_a_failed_pass_leaves_a_trace_beyond_the_process(monkeypatch, caplog):
+    """The state dict lives and dies with the server process, so a pass that
+    takes the process down with it would vanish without a trace. The traceback
+    has to reach serve.log.err, carrying the start timestamp that names the
+    run_log row the pass never got to write."""
+    import logging
+
+    runner = _runner(monkeypatch, boom="the network went away")
+    with caplog.at_level(logging.ERROR, logger="harel.serve"):
+        runner.start()
+        runner._thread.join(timeout=10)
+
+    records = [r for r in caplog.records if r.name == "harel.serve"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.ERROR
+    assert runner.status()["started_at"] in records[0].getMessage()
+    assert "RuntimeError: the network went away" in caplog.text
 
 
 def test_the_page_refreshes_itself_only_while_a_pass_is_running():

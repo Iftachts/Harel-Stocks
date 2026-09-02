@@ -24,7 +24,7 @@ ROUTES = {
     "federalregister.gov/api/v1/documents.json": fixture_json("federal_register.json"),
     "clinicaltrials.gov/api/v2/studies": fixture_json("clinicaltrials.json"),
     "api.fda.gov/drug/enforcement.json": fixture_json("openfda_enforcement.json"),
-    "mayaapi.tase.co.il": fixture_json("maya_reports.json"),
+    "maya.tase.co.il/api/v1/reports": fixture_json("maya_v1_reports.json"),
     # Same bars and the same +10% close as stooq_teva.csv, in Yahoo's shape.
     # The end-to-end test has to run the price path that production runs, and
     # prices_stooq is switched off: stooq answers the CSV endpoint with a
@@ -316,7 +316,10 @@ def test_health_reports_missing_keys_and_content(ran):
     _, views = ran
     health = views.health()
     assert health["db"]["items"] > 0
-    assert any(k["env_var"] == "TASE_API_KEY" for k in health["missing_api_keys"])
+    # Since the public v1 fallback, both MAYA sources are key_optional: the
+    # TASE key upgrades them rather than switching them on, so it belongs in
+    # running_degraded and must NOT read as "off".
+    assert not any(k["env_var"] == "TASE_API_KEY" for k in health["missing_api_keys"])
     assert any(k["env_var"] == "TASE_API_KEY" for k in health["running_degraded"])
     # courtlistener requires a token AND has no collector. It belongs in the
     # second list only: an API key cannot switch on code that does not exist.
@@ -1667,3 +1670,163 @@ def test_the_sweep_reaches_dates_older_than_the_rescore_window(config, db):
 
     assert result["calendar_purged"] == 1
     assert _calendar_rows(db) == []
+
+
+# --------------------------------------------------------------------------- #
+# The run report has to describe the run.
+# --------------------------------------------------------------------------- #
+def test_a_declared_cascade_is_actually_enforced(config, db):
+    """`item_tickers` has declared ON DELETE CASCADE since the first commit, and
+    SQLite ignores a foreign key unless `PRAGMA foreign_keys` is on - it is off
+    by default. `rescore` deletes items directly for its two purges, so 174 link
+    rows were left pointing at items that no longer existed."""
+    from datetime import datetime, timezone
+
+    from harel.models import Link, RawItem, ScoredItem
+
+    assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+    raw = RawItem(source="federal_register", source_kind="federal_register",
+                  external_id="fr:cascade", title="[FR] Something", url="http://x",
+                  published_at=datetime.now(timezone.utc))
+    db.upsert_item(ScoredItem(raw=raw,
+                              links=[Link(ticker="TATT", relation="SECTOR_REG",
+                                          confidence=0.6, why="sector")],
+                              events=[], score=20.0, per_ticker_score={"TATT": 20.0},
+                              tier="NOISE", reasons=[]), "k", "c")
+    db.conn.commit()
+    assert db.conn.execute("SELECT COUNT(*) FROM item_tickers").fetchone()[0] == 1
+
+    db.conn.execute("DELETE FROM items WHERE uid = ?", (raw.uid,))
+    db.conn.commit()
+    assert db.conn.execute("SELECT COUNT(*) FROM item_tickers").fetchone()[0] == 0, \
+        "the cascade must take the links with the item"
+
+
+def test_links_orphaned_while_the_cascade_was_inert_are_swept(config, tmp_path):
+    """Turning the pragma on protects every deletion from here, but SQLite does
+    not go back and validate what is already stored."""
+    import sqlite3
+
+    from harel.db import Database
+
+    path = tmp_path / "orphans.db"
+    Database(path).close()
+    # Write an orphan the way the old behaviour would have left one: with the
+    # pragma off, so the insert is not rejected.
+    raw_conn = sqlite3.connect(path)
+    raw_conn.execute("INSERT INTO item_tickers (uid,ticker,relation,confidence) "
+                     "VALUES ('gone','TEVA','DIRECT',0.9)")
+    raw_conn.commit()
+    raw_conn.close()
+
+    db = Database(path)          # migration sweeps on open
+    assert db.conn.execute("SELECT COUNT(*) FROM item_tickers").fetchone()[0] == 0
+    db.close()
+
+
+def test_the_run_report_counts_what_was_new(config, db):
+    """`upsert_item` has always returned whether the row was new and the caller
+    always threw it away, so `new` was serialised into every run report and
+    every run_log row as a permanent zero."""
+    client = FakeHttpClient(ROUTES)
+    first = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                     client=client).run(only=SOURCES)
+    assert first.new > 0, "a first pass over an empty database must find new items"
+    # NOT equal to `stored`, and the gap is the point: one article reaches us
+    # from several per-ticker queries in the same pass, so `stored` counts
+    # upsert operations while `new` counts distinct items first seen. On the
+    # fixture corpus that is 75 items behind 256 stores.
+    assert first.new <= first.stored
+    distinct = db.conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+    assert first.new == distinct, "every row in an empty database was new"
+
+    second = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient(ROUTES)).run(only=SOURCES)
+    assert second.stored > 0, "the same items are still stored"
+    assert second.new == 0, "but nothing about them is new the second time"
+
+
+def test_every_item_from_every_collector_survives_a_concurrent_fetch(
+        config, db, monkeypatch):
+    """Fetching overlaps in worker threads; storing stays serial on the main
+    thread, in submission order. Whatever the interleaving of the fetches,
+    every yielded item must be stored and each by_source entry must count its
+    own collector's items and nobody else's."""
+    from harel.collect.fda import OpenFdaCollector
+    from harel.collect.federal_register import FederalRegisterCollector
+
+    now = datetime.now(timezone.utc)
+
+    def fda_batch(self):
+        for i in range(2):
+            yield self.make_item(
+                external_id=f"fda:{i}", title=f"Teva recall notice {i}",
+                url=f"https://example.invalid/fda/{i}", published_at=now,
+                seed_tickers=["TEVA"], seed_relation="DIRECT")
+
+    def fr_batch(self):
+        for i in range(3):
+            yield self.make_item(
+                external_id=f"fr:{i}",
+                title=f"[FR] Rule naming Tower Semiconductor {i}",
+                url=f"https://example.invalid/fr/{i}", published_at=now,
+                seed_tickers=["TSEM"], seed_relation="DIRECT")
+
+    monkeypatch.setattr(OpenFdaCollector, "collect", fda_batch)
+    monkeypatch.setattr(FederalRegisterCollector, "collect", fr_batch)
+    report = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient({})).run(
+        only=["fda_enforcement", "federal_register"])
+
+    assert report.errors == [], report.errors
+    assert report.by_source == {"fda_enforcement": 2, "federal_register": 3}
+    assert report.collected == 5 and report.stored == 5
+    stored = {r["external_id"] for r in
+              db.conn.execute("SELECT external_id FROM items").fetchall()}
+    assert stored == {"fda:0", "fda:1", "fr:0", "fr:1", "fr:2"}
+
+
+def test_a_collector_that_dies_mid_pass_keeps_what_it_already_yielded(
+        config, db, monkeypatch):
+    """One malformed page must not lose the batch fetched before it: items
+    yielded before the crash are stored, the abort is reported, and the
+    source's own state records the failure for `harel doctor`."""
+    from harel.collect.fda import OpenFdaCollector
+
+    now = datetime.now(timezone.utc)
+
+    def dies_after_two(self):
+        for i in range(2):
+            yield self.make_item(
+                external_id=f"ok:{i}", title=f"Teva recall notice {i}",
+                url=f"https://example.invalid/fda/{i}", published_at=now,
+                seed_tickers=["TEVA"], seed_relation="DIRECT")
+        raise RuntimeError("the schema changed mid-page")
+
+    monkeypatch.setattr(OpenFdaCollector, "collect", dies_after_two)
+    report = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient({})).run(only=["fda_enforcement"])
+
+    assert report.by_source == {"fda_enforcement": 2}
+    assert report.stored == 2
+    assert db.counts()["items"] == 2, "the partial batch must survive the abort"
+    assert any("collector aborted" in e and "RuntimeError" in e
+               for e in report.errors)
+    state = db.get_source_state("fda_enforcement")
+    assert "RuntimeError" in (state.get("last_error") or "")
+    assert state.get("consecutive_failures") == 1
+
+
+def test_the_drop_counter_does_not_claim_to_be_deduplication(config, db):
+    """It counts items that touched nothing in the universe. The CLI printed the
+    honest wording all along while the field, the dict key and the run_log
+    column all said `deduped`, which never happened."""
+    report = Pipeline(config=config, db=db, lookback_hours=LOOKBACK,
+                      client=FakeHttpClient(ROUTES)).run(only=SOURCES)
+
+    assert "dropped_unlinked" in report.to_dict()
+    assert "deduped" not in report.to_dict()
+    cols = {r["name"] for r in db.conn.execute("PRAGMA table_info(run_log)")}
+    assert "dropped_unlinked" in cols and "deduped" not in cols
+    assert report.collected == report.stored + report.dropped_unlinked

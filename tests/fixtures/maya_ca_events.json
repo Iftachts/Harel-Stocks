@@ -1,0 +1,29 @@
+[
+  {
+    "date": "2026-11-12T00:00:00",
+    "eventId": 2,
+    "eventName": "פרסום דוחות",
+    "securityId": 629014,
+    "securityName": "טבע",
+    "moreInfo": "דוח רבעון 3",
+    "reportId": 1758001
+  },
+  {
+    "date": "2026-11-12T00:00:00",
+    "eventId": 1,
+    "eventName": "שיחת ועידה",
+    "securityId": 629014,
+    "securityName": "טבע",
+    "moreInfo": "דוח רבעון 3, תתכנס בשעה - 15:30",
+    "reportId": 1758001
+  },
+  {
+    "date": "2026-09-01T00:00:00",
+    "eventId": 203,
+    "eventName": "יום כינוס  - מועדי אסיפות",
+    "securityId": 629014,
+    "securityName": "טבע",
+    "moreInfo": "אסיפת בעלי מניות, תתכנס בשעה-16:30",
+    "reportId": 1758002
+  }
+]

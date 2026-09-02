@@ -242,6 +242,18 @@ def cmd_doctor(args) -> int:
             print(f"  {state['source']:<40} fails={state.get('consecutive_failures')} "
                   f"{C.GREY}{(state.get('last_error') or '')[:90]}{C.RESET}")
 
+    if health["flatlined"]:
+        print(f"\n{C.RED}Flatlined sources - nothing stored for longer than "
+              f"their cadence explains:{C.RESET}")
+        for entry in health["flatlined"]:
+            print(f"  {entry['source']:<40} silent {entry['silent_hours']:.0f}h "
+                  f"{C.GREY}threshold {entry['threshold_hours']}h, last item "
+                  f"{entry['last_item_at'][:16]}{C.RESET}")
+
+    if health["never_produced"]:
+        print(f"\n{C.GREY}{len(health['never_produced'])} source(s) have never "
+              f"stored an item: {', '.join(health['never_produced'])}{C.RESET}")
+
     by_source = health["db"]["by_source"]
     if by_source:
         print(f"\n{C.GREY}Items by source:{C.RESET}")
@@ -259,9 +271,12 @@ def cmd_collect(args) -> int:
     if _emit(args, report.to_dict()):
         return 0
 
+    # "stored 70" and "70 stored, 0 new" are different passes, and only the
+    # second one tells you whether anything actually arrived.
     print(f"{C.AMBER}collected{C.RESET} {report.collected}  "
-          f"{C.AMBER}stored{C.RESET} {report.stored}  "
-          f"{C.GREY}dropped (no universe link){C.RESET} {report.deduped}  "
+          f"{C.AMBER}stored{C.RESET} {report.stored} "
+          f"{C.GREY}({report.new} new){C.RESET}  "
+          f"{C.GREY}dropped (no universe link){C.RESET} {report.dropped_unlinked}  "
           f"in {report.duration_sec:.1f}s")
     for source, count in sorted(report.by_source.items(), key=lambda kv: -kv[1]):
         print(f"  {source:<40} {count}")
@@ -640,31 +655,36 @@ def cmd_probe_maya(args) -> int:
     collector = MayaCollector(source, CollectorContext(config=cfg, client=client, db=db))
 
     probe = next(
-        (t for t in cfg.active_tickers if cfg.ticker(t) and cfg.ticker(t).tase_id), None
+        (t for t in cfg.active_tickers
+         if cfg.ticker(t) and cfg.ticker(t).raw.get("tase_issuer_id")), None
     )
     if probe is None:
-        print(f"{C.RED}no ticker has a tase_id set{C.RESET}")
+        print(f"{C.RED}no ticker has a tase_issuer_id set{C.RESET}")
+        print("  Both MAYA channels key on the issuer number. Add")
+        print("  `tase_issuer_id` to universe.yaml.")
         return 1
 
     tc = cfg.ticker(probe)
-    tase_id = str(tc.tase_id)
-    issuer_id = tc.raw.get("tase_issuer_id")
-    if source.api_key and not issuer_id:
-        print(f"{C.RED}{probe} has no tase_issuer_id.{C.RESET}")
-        print(f"  The official v2 API keys on issuer number; tase_id ({tase_id}) is a")
-        print("  security id. Add `tase_issuer_id` to universe.yaml for this name.")
-        return 1
-
-    url, headers, params = collector._build_request(tc, issuer_id)
-    print(f"probing {probe} (TASE {tase_id})\n  GET {url}")
-    if params:
-        print(f"  params:  {params}")
-    print(f"  headers: {_mask_secrets(headers)}")
-    print(f"  auth: {'official API key' if source.api_key else 'public endpoint (undocumented)'}")
+    issuer_id = tc.raw["tase_issuer_id"]
+    tase_id = str(tc.tase_id or issuer_id)
 
     try:
-        resp = client.get(url, headers=headers, params=params,
-                          allow_status=(400, 401, 403, 404, 429, 500))
+        if source.api_key:
+            url, headers, params = collector._build_official_request(tc, issuer_id)
+            print(f"probing {probe} (issuer {issuer_id})\n  GET {url}")
+            print(f"  params:  {params}")
+            print(f"  headers: {_mask_secrets(headers)}")
+            print("  auth: official API key")
+            resp = client.get(url, headers=headers, params=params,
+                              allow_status=(400, 401, 403, 404, 429, 500))
+        else:
+            url, headers, body = collector._build_public_request(issuer_id)
+            print(f"probing {probe} (issuer {issuer_id})\n  POST {url}")
+            print(f"  body:    {body}")
+            print(f"  headers: {_mask_secrets(headers)}")
+            print("  auth: none - the Maya site's own v1 channel (undocumented)")
+            resp = client.post(url, json=body, headers=headers,
+                               allow_status=(400, 401, 403, 404, 429, 500))
     except Exception as exc:
         print(f"{C.RED}request failed: {exc}{C.RESET}")
         return 1
@@ -679,9 +699,14 @@ def cmd_probe_maya(args) -> int:
             print("  for it. Check the product status in the TASE developer portal;")
             print("  a subscription sitting at PENDING returns exactly this.")
         elif resp.status == 403:
-            print("  403 - the undocumented public endpoint refused us, which is now")
-            print("  its normal state. The supported route is the official API: set")
-            print("  TASE_API_KEY once the MAYA product subscription is active.")
+            print("  403 - the maya.tase.co.il v1 channel refused us; the site has")
+            print("  likely moved its backend again. Rediscover the endpoint from the")
+            print("  network tab on maya.tase.co.il and update sources.yaml. Do NOT")
+            print("  point config at mayaapi/premayaapi - those hosts are behind bot")
+            print("  protection and 403 every non-browser client.")
+        elif resp.status == 400:
+            print(f"  400 - the server rejected the query: {resp.text[:200]}")
+            print("  (It validates limit <= 30 and toDate <= its own today.)")
         else:
             print("  Update sources.yaml -> maya_tase.official_endpoint (official)")
             print("  or maya_tase.endpoints.company_reports (public fallback).")

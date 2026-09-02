@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from ..http import HttpError
 from ..models import PriceSnapshot, RawItem
-from .base import Collector, register
+from .base import Collector, log, register
 
 STOOQ_URL = "https://stooq.com/q/d/l/?s={symbol}&i=d"
 YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -52,9 +52,19 @@ class PriceCollector(Collector):
                     snap = self._yahoo_snapshot(symbol)
                     if snap is not None:
                         self.db.save_price(snap)
+                        # The connection runs deferred transactions, so an
+                        # uncommitted row pins SQLite's one write lock across
+                        # the NEXT symbol's network fetch - seconds against a
+                        # 30s busy timeout shared with the live serve reader.
+                        # Committed per row so the hold ends before any fetch.
+                        self.db.conn.commit()
                 except Exception as exc:
                     self.warn(f"benchmark {symbol}: {type(exc).__name__}: {exc}")
 
+        # Counts the basket only. Benchmarks are fetched from the same endpoint
+        # but they are index proxies, not coverage: a dead basket must not read
+        # as alive because SOXX still answered.
+        saved = 0
         for ticker in self.active_tickers:
             try:
                 snap = (
@@ -71,10 +81,24 @@ class PriceCollector(Collector):
             if snap is None:
                 continue
             self.db.save_price(snap)
+            # Same lock discipline as the benchmark loop: never hold the write
+            # lock across the next ticker's fetch.
+            self.db.conn.commit()
+            saved += 1
 
             alert = self._unexplained_move_item(snap)
             if alert is not None:
                 yield alert
+
+        if self.active_tickers and saved == 0:
+            # Every name failed, which is an outage, not a quiet day. Recorded
+            # on source_state so it reaches `harel doctor`, not only the log:
+            # warnings live in the run report, and doctor reads source_state.
+            msg = f"no price snapshots saved for any of {len(self.active_tickers)} tickers"
+            self.warn(msg)
+            self.save_state(last_error=msg)
+        else:
+            log.info("[%s] saved %d price snapshots", self.source.key, saved)
         self.db.conn.commit()
 
     # -- Stooq: daily bars, ADV, gap ---------------------------------------- #
@@ -194,6 +218,9 @@ class PriceCollector(Collector):
             })
         if bars:
             self.db.save_bars(ticker, bars)
+            # The quote fetch that follows this backfill is network I/O, and an
+            # uncommitted write would pin the write lock right across it.
+            self.db.conn.commit()
 
     def _refresh_today_bar(self, ticker: str, meta: dict[str, Any]) -> None:
         """Keep the bar for the session in progress in step with the quote.
@@ -243,8 +270,14 @@ class PriceCollector(Collector):
             )
             return None
 
-        result = ((resp.json() or {}).get("chart") or {}).get("result") or []
+        payload = resp.json() or {}
+        result = (payload.get("chart") or {}).get("result") or []
         if not result:
+            # Yahoo degrades by answering 200 with an empty result and the
+            # reason tucked into chart.error. A bare return here is how the
+            # whole basket goes blind without a single line in hourly.log.
+            self.warn(f"{ticker}: Yahoo answered 200 with empty chart result: "
+                      f"{(payload.get('chart') or {}).get('error')}")
             return None
         meta = result[0].get("meta") or {}
 

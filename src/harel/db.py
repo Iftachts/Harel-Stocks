@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS run_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT, finished_at TEXT,
     mode       TEXT, sources INTEGER,
-    collected  INTEGER, stored  INTEGER, deduped INTEGER,
+    collected  INTEGER, stored  INTEGER, dropped_unlinked INTEGER,
     errors_json TEXT
 );
 """
@@ -167,6 +167,14 @@ class Database:
         self.conn = sqlite3.connect(str(self.path), check_same_thread=False,
                                     timeout=30.0)
         self.conn.row_factory = sqlite3.Row
+        # SQLite ignores a declared foreign key unless this is switched on, and
+        # it is off by default - so `item_tickers`' ON DELETE CASCADE, written
+        # since the first commit, has never once fired. `rescore` deletes items
+        # directly for its two purges, and 174 link rows were left pointing at
+        # items that no longer existed. Per-connection, not stored in the file,
+        # so it has to be set here rather than in SCHEMA; and it is a no-op
+        # inside a transaction, hence before `executescript`.
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
         self.conn.executescript(TRIGGERS)
         self._migrate()
@@ -197,6 +205,35 @@ class Database:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
         self._migrate_calendar_key()
+        self._rename_deduped_column()
+        self._sweep_orphan_links()
+
+    def _rename_deduped_column(self) -> None:
+        """`run_log.deduped` never counted a duplicate.
+
+        It counts items dropped for touching nothing in the universe, which is a
+        different fact with a different meaning for the collect/keep ratio. The
+        column is renamed rather than shadowed by a second one, because two
+        columns where one is always NULL is how the next reader gets it wrong.
+        """
+        cols = {r["name"] for r in
+                self.conn.execute("PRAGMA table_info(run_log)").fetchall()}
+        if "deduped" in cols and "dropped_unlinked" not in cols:
+            self.conn.execute(
+                "ALTER TABLE run_log RENAME COLUMN deduped TO dropped_unlinked")
+
+    def _sweep_orphan_links(self) -> int:
+        """Clear links left behind while the cascade was inert.
+
+        Turning `foreign_keys` on protects every deletion from here, but SQLite
+        does not go back and validate what is already stored - so the rows the
+        cascade should have taken when their item was purged simply stay. They
+        are invisible in the feed, which joins through `items`, and any count
+        over `item_tickers` is wrong by exactly that much.
+        """
+        cur = self.conn.execute(
+            "DELETE FROM item_tickers WHERE uid NOT IN (SELECT uid FROM items)")
+        return cur.rowcount or 0
 
     def _migrate_calendar_key(self) -> None:
         """Re-key `calendar` on the source rather than on the label.
@@ -456,11 +493,11 @@ class Database:
     def log_run(self, **fields: Any) -> None:
         self.conn.execute(
             """INSERT INTO run_log (started_at, finished_at, mode, sources,
-                                    collected, stored, deduped, errors_json)
+                                    collected, stored, dropped_unlinked, errors_json)
                VALUES (?,?,?,?,?,?,?,?)""",
             (fields.get("started_at"), fields.get("finished_at"), fields.get("mode"),
              fields.get("sources", 0), fields.get("collected", 0),
-             fields.get("stored", 0), fields.get("deduped", 0),
+             fields.get("stored", 0), fields.get("dropped_unlinked", 0),
              json.dumps(fields.get("errors", []), ensure_ascii=False, default=str)),
         )
         self.conn.commit()
@@ -482,6 +519,37 @@ class Database:
             "SELECT cluster_id FROM items WHERE dedupe_key = ? LIMIT 1", (dedupe_key,)
         ).fetchone()
         return row["cluster_id"] if row else None
+
+    def cluster_seed(self, since_hours: float = 36.0) -> list[dict[str, Any]]:
+        """Recent items with what a `Clusterer` needs to recognise them again.
+
+        The near-duplicate matcher is rebuilt empty on every pass, so a second
+        source carrying the same story an hour later opened its own cluster.
+        This is the window it should have been reading. Tickers ride along
+        because the matcher will not merge two similar headlines that name no
+        company in common.
+        """
+        since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+        rows = self.conn.execute(
+            """SELECT i.uid, i.dedupe_key, i.cluster_id, i.title, i.published_at,
+                      GROUP_CONCAT(t.ticker) AS tickers
+                 FROM items i
+                 LEFT JOIN item_tickers t ON t.uid = i.uid
+                WHERE i.published_at >= ? AND i.dedupe_key IS NOT NULL
+                GROUP BY i.uid""",
+            (since,),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            published = _parse_utc(r["published_at"])
+            if published is None:
+                continue
+            out.append({
+                "dedupe_key": r["dedupe_key"], "cluster_id": r["cluster_id"],
+                "title": r["title"], "published_at": published,
+                "tickers": set((r["tickers"] or "").split(",")) - {""},
+            })
+        return out
 
     def feed(
         self,
@@ -729,6 +797,15 @@ class Database:
         d["events"] = json.loads(d.pop("events_json", None) or "[]")
         d["reasons"] = json.loads(d.pop("reasons_json", None) or "[]")
         return d
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    """Stored timestamps are ISO; a naive one is UTC by convention here."""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _cap_per_ticker(rows: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:

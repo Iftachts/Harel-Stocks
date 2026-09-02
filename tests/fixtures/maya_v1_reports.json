@@ -1,0 +1,87 @@
+[
+  {
+    "id": 1552211,
+    "title": "דיווח מיידי על תוצאות כספיות לרבעון השני",
+    "publishDate": "2026-07-30T09:05:00",
+    "isPriority": true,
+    "translated": false,
+    "deletedTranslated": false,
+    "translatedUpdated": null,
+    "reportType": null,
+    "isIntendToTaseMember": false,
+    "comment": null,
+    "reporterId": 629,
+    "reporterSecurityId": 629014,
+    "formId": "ת076",
+    "page": null,
+    "companies": [
+      {
+        "companyId": 629,
+        "name": "טבע",
+        "isAssociated": false,
+        "isDual": true,
+        "isDeleted": false,
+        "companyType": 1,
+        "mainSecurityId": 629014,
+        "tradeHaltTypeName": null,
+        "isTase": false,
+        "isTaseUp": false,
+        "indications": [],
+        "tradeHaltMessage": null
+      }
+    ],
+    "attachments": [
+      {
+        "reportId": 1552211,
+        "fileType": "pdf1",
+        "fileName": "teva_q2_results_isa.pdf",
+        "fileSize": 744,
+        "translated": false,
+        "url": "rpdf/1552001-1553000/P1552211-00.pdf"
+      },
+      {
+        "reportId": 1552211,
+        "fileType": "htm",
+        "fileName": null,
+        "fileSize": 94,
+        "translated": false,
+        "url": "rhtm/1552001-1553000/H1552211.htm"
+      }
+    ],
+    "correctives": null
+  },
+  {
+    "id": 1552212,
+    "title": "הודעה על אסיפה כללית שנתית של בעלי המניות",
+    "publishDate": "2026-07-30T08:00:00",
+    "isPriority": false,
+    "translated": false,
+    "deletedTranslated": false,
+    "translatedUpdated": null,
+    "reportType": null,
+    "isIntendToTaseMember": false,
+    "comment": null,
+    "reporterId": 629,
+    "reporterSecurityId": 629014,
+    "formId": "ת078",
+    "page": null,
+    "companies": [
+      {
+        "companyId": 629,
+        "name": "טבע",
+        "isAssociated": false,
+        "isDual": true,
+        "isDeleted": false,
+        "companyType": 1,
+        "mainSecurityId": 629014,
+        "tradeHaltTypeName": null,
+        "isTase": false,
+        "isTaseUp": false,
+        "indications": [],
+        "tradeHaltMessage": null
+      }
+    ],
+    "attachments": [],
+    "correctives": null
+  }
+]

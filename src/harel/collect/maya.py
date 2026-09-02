@@ -9,13 +9,18 @@ tape.
 
 Honesty about the endpoint
 --------------------------
-TASE's documented, supported route is the paid/registered API at
-openapi.tase.co.il (set ``TASE_API_KEY``). The unauthenticated mayaapi.tase.co.il
-endpoints that the site's own front-end uses are undocumented and can change
-without notice. This collector therefore:
+TASE's documented, supported route is the paid/registered API served from
+datawise.tase.co.il (set ``TASE_API_KEY``). The keyless fallback is the JSON
+backend of the new Maya site itself: ``maya.tase.co.il/api/v1/*``, same-origin
+with the site, no key, verified live 2026-08-02. The OLD fallback hosts -
+mayaapi.tase.co.il and premayaapi.tase.co.il - sit behind bot protection
+(HUMAN Security) that returns 403 to every non-browser client regardless of
+headers; do not point the config back at them. The v1 channel is undocumented
+and can change without notice, exactly like the channel it replaces, so this
+collector:
 
 * prefers the official API when a key is present,
-* falls back to the public endpoints from sources.yaml,
+* falls back to the public v1 endpoints otherwise,
 * parses responses **structurally rather than by fixed schema**, so a field
   rename degrades to "records found, fields unmapped" instead of a crash,
 * records what it saw in ``source_state`` so ``harel doctor`` can show it.
@@ -43,6 +48,18 @@ DATE_KEYS = ("pubDate", "PubDate", "publicationDate", "PublicationDate", "date",
 URL_KEYS = ("url", "Url", "link", "Link", "pdfUrl", "PdfUrl", "reportUrl")
 ID_KEYS = ("mayaReportId", "MayaReportId", "reportId", "ReportId", "id", "Id",
            "eventId", "EventId")
+
+# Public channel - the new Maya site's own backend, shared with the site. The
+# server validates `limit` to 1..30 and rejects a `toDate` later than its own
+# "today" (HTTP 400 either way); `companyId` is the ISSUER number - the same
+# value the official API calls IssuerId (TEVA is 629 in both).
+PUBLIC_BASE = "https://maya.tase.co.il"
+PUBLIC_REPORTS_PATH = "/api/v1/reports/companies"
+PUBLIC_EVENTS_PATH = "/api/v1/corporate-actions/events"
+PUBLIC_PAGE_LIMIT = 30
+# One name posting 300 reports in a 7-day window is not a busy week, it is a
+# parser walking in circles - stop and say so rather than hammer the host.
+PUBLIC_MAX_PAGES = 10
 
 # Official API - product "Market Announcements feed - MAYA 2.0.0".
 # Per its OpenAPI spec the server is datawise.tase.co.il and the security scheme
@@ -80,29 +97,31 @@ class MayaCollector(Collector):
             tc = self.cfg.ticker(ticker)
             if tc is None:
                 continue
+            # BOTH channels key on the issuer number: the official v2 API calls
+            # it IssuerId, the public v1 channel calls it companyId, and it is
+            # the same registry (TEVA is 629 in both). A name can be
+            # addressable by issuer with no security id recorded (PANW, LPSN).
+            # Sending tase_id instead would query an unrelated issuer - or
+            # nothing - and read exactly like "no news", so skip loudly.
             issuer_id = tc.raw.get("tase_issuer_id")
-            if official:
-                # v2 keys on issuer number, and a name can be addressable by
-                # issuer with no security id recorded (PANW, LPSN). Sending
-                # tase_id here would query an unrelated issuer - or nothing -
-                # and read exactly like "no news", so skip loudly instead.
-                if issuer_id:
-                    targets.append((ticker, tc, issuer_id))
-                elif tc.tase_id:
-                    missing_issuer.append(ticker)
+            if issuer_id:
+                targets.append((ticker, tc, issuer_id))
             elif tc.tase_id:
-                targets.append((ticker, tc, None))
+                missing_issuer.append(ticker)
 
         if not targets and not missing_issuer:
             self.warn(
-                "no MAYA-addressable ticker: the official API needs "
-                "tase_issuer_id, the public fallback needs tase_id"
+                "no MAYA-addressable ticker: both the official API and the "
+                "public channel need tase_issuer_id"
             )
             return
 
         for ticker, tc, issuer_id in targets:
             try:
-                yield from self._collect_company(ticker, tc, issuer_id)
+                if official:
+                    yield from self._collect_official(ticker, tc, issuer_id)
+                else:
+                    yield from self._collect_public(ticker, tc, issuer_id)
             except HttpError as exc:
                 self.warn(
                     f"{ticker} (TASE {tc.tase_id}): {exc} - if this persists the "
@@ -113,8 +132,8 @@ class MayaCollector(Collector):
 
         if missing_issuer:
             self.warn(
-                "no tase_issuer_id for " + ", ".join(missing_issuer) + " - the "
-                "official v2 API keys on issuer number, not the security id held "
+                "no tase_issuer_id for " + ", ".join(missing_issuer) + " - both "
+                "MAYA channels key on issuer number, not the security id held "
                 "in tase_id. These names are NOT being collected from MAYA."
             )
 
@@ -150,9 +169,70 @@ class MayaCollector(Collector):
                 f"{len(targets)} names"))
 
     # -- fetching ---------------------------------------------------------- #
-    def _collect_company(self, ticker: str, tc: Any,
-                         issuer_id: Any = None) -> Iterator[RawItem]:
-        url, headers, params = self._build_request(tc, issuer_id)
+    def _collect_public(self, ticker: str, tc: Any,
+                        issuer_id: Any) -> Iterator[RawItem]:
+        """The new Maya site's own JSON backend, paged.
+
+        Pages ride on limit/offset; a page shorter than the limit is the last
+        one. `dated` is counted separately from what is actually emitted so a
+        week of only-old reports is not misreported as a field rename.
+        """
+        tase_id = str(tc.tase_id or issuer_id)
+        limit = int(self.source.raw.get("page_limit", PUBLIC_PAGE_LIMIT))
+        seen_records = 0
+        dated = 0
+        for page in range(PUBLIC_MAX_PAGES):
+            url, headers, body = self._build_public_request(issuer_id, offset=page * limit)
+            resp = self.client.post(url, json=body, headers=headers,
+                                    allow_status=(400, 401, 403, 404, 500))
+            if resp.status >= 400:
+                self.warn(f"{ticker}: MAYA returned HTTP {resp.status}")
+                self.http_failures.append((ticker, resp.status))
+                return
+
+            try:
+                payload = resp.json()
+            except Exception:
+                self.warn(f"{ticker}: MAYA response was not JSON")
+                return
+
+            if payload == [] and page == 0:
+                # A clean empty list is a quiet week, not a shape change.
+                return
+
+            records = _find_records(payload)
+            if not records:
+                if page == 0:
+                    self.unparseable.append(ticker)
+                break
+
+            for rec in records:
+                item = self._record_to_item(rec, ticker, tase_id)
+                if item is None:
+                    continue
+                dated += 1
+                if item.published_at < self.ctx.since:
+                    continue
+                yield item
+
+            seen_records += len(records)
+            if len(records) < limit:
+                break
+        else:
+            self.warn(
+                f"{ticker}: more than {PUBLIC_MAX_PAGES * limit} MAYA reports "
+                f"in the window - tail dropped; shorten the collect window"
+            )
+
+        if seen_records and dated == 0:
+            self.warn(
+                f"{ticker}: MAYA returned {seen_records} records but none had a "
+                f"parseable date - field names may have changed"
+            )
+
+    def _collect_official(self, ticker: str, tc: Any,
+                          issuer_id: Any = None) -> Iterator[RawItem]:
+        url, headers, params = self._build_official_request(tc, issuer_id)
         resp = self.client.get(url, headers=headers, params=params,
                                allow_status=(400, 401, 403, 404, 500))
         if resp.status >= 400:
@@ -195,40 +275,53 @@ class MayaCollector(Collector):
                 f"parseable date - field names may have changed"
             )
 
-    def _build_request(
+    def _build_official_request(
         self, tc: Any, issuer_id: Any = None
-    ) -> tuple[str, dict[str, str], dict[str, Any] | None]:
+    ) -> tuple[str, dict[str, str], dict[str, Any]]:
         raw = self.source.raw
         frm = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
         to = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        key = self.source.api_key
-        if key:
-            # The public endpoint's browser-spoofing headers (X-Maya-With,
-            # Referer) mean nothing here - send a clean request. Accept-Language
-            # is REQUIRED by the v2 spec, not optional.
-            headers = {
-                "apiKey": key,
-                "Accept": "application/json",
-                "Accept-Language": raw.get("official_language", "he-IL"),
-            }
-            base = raw.get("official_api_base", OFFICIAL_BASE).rstrip("/")
-            path = raw.get("official_endpoint", DISCLOSURES_PATH)
-            params = {"FromDate": frm, "ToDate": to, "IssuerId": int(issuer_id)}
-            return base + path, headers, params
+        # No browser-spoofing headers here - send a clean request.
+        # Accept-Language is REQUIRED by the v2 spec, not optional.
+        headers = {
+            "apiKey": self.source.api_key,
+            "Accept": "application/json",
+            "Accept-Language": raw.get("official_language", "he-IL"),
+        }
+        base = raw.get("official_api_base", OFFICIAL_BASE).rstrip("/")
+        path = raw.get("official_endpoint", DISCLOSURES_PATH)
+        params = {"FromDate": frm, "ToDate": to, "IssuerId": int(issuer_id)}
+        return base + path, headers, params
 
-        headers = dict(raw.get("headers") or {})
-        base = raw.get("base_url", "https://mayaapi.tase.co.il").rstrip("/")
-        template = (raw.get("endpoints") or {}).get(
-            "company_reports",
-            "/api/report/company?companyId={tase_id}&fromDate={from}&toDate={to}",
-        )
-        path = (
-            template.replace("{tase_id}", str(tc.tase_id))
-            .replace("{from}", frm)
-            .replace("{to}", to)
-        )
-        return base + path, headers, None
+    def _build_public_request(
+        self, issuer_id: Any, offset: int = 0
+    ) -> tuple[str, dict[str, str], dict[str, Any]]:
+        raw = self.source.raw
+        base = raw.get("base_url", PUBLIC_BASE).rstrip("/")
+        path = (raw.get("endpoints") or {}).get("company_reports", PUBLIC_REPORTS_PATH)
+        limit = int(raw.get("page_limit", PUBLIC_PAGE_LIMIT))
+        now = datetime.now(timezone.utc)
+        # A toDate past the server's own "today" is a 400, and the named day is
+        # included in full - so today-UTC is both accepted and complete.
+        frm = (now - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00.000Z")
+        to = now.strftime("%Y-%m-%dT00:00:00.000Z")
+        headers = {
+            "Accept": "application/json",
+            # he-IL keeps titles in Hebrew. Without it the server prefers the
+            # English translation where one exists and the feed goes bilingual.
+            "Accept-Language": raw.get("official_language", "he-IL"),
+        }
+        body = {
+            "pageNumber": offset // limit + 1,
+            "fromDate": frm,
+            "toDate": to,
+            "by": "company",
+            "companyId": int(issuer_id),
+            "limit": limit,
+            "offset": offset,
+        }
+        return base + path, headers, body
 
     # -- shaping ----------------------------------------------------------- #
     def _record_to_item(self, rec: dict[str, Any], ticker: str,
@@ -240,9 +333,18 @@ class MayaCollector(Collector):
         if published is None:
             return None
 
-        url = _first(rec, URL_KEYS) or f"https://maya.tase.co.il/reports/company/{tase_id}"
-        if url and url.startswith("/"):
-            url = "https://mayaapi.tase.co.il" + url
+        report_id = (
+            rec.get("mayaReportId") or rec.get("MayaReportId")
+            or rec.get("reportId") or rec.get("ReportId") or rec.get("id")
+        )
+        url = _first(rec, URL_KEYS)
+        if not url:
+            # v1 records carry no URL of their own; the site's canonical page
+            # for a report is /he/reports/{id}.
+            url = (f"https://maya.tase.co.il/he/reports/{report_id}" if report_id
+                   else f"https://maya.tase.co.il/reports/company/{tase_id}")
+        if url.startswith("/"):
+            url = "https://maya.tase.co.il" + url
         ident = _first(rec, ID_KEYS) or f"{tase_id}:{published.isoformat()}:{title[:40]}"
 
         return self.make_item(
@@ -258,11 +360,11 @@ class MayaCollector(Collector):
                 "venue": "TASE",
                 "tase_id": tase_id,
                 "israeli_hours": True,
-                "maya_report_id": (
-                    rec.get("mayaReportId") or rec.get("MayaReportId")
-                    or rec.get("reportId") or rec.get("ReportId")
-                ),
-                "form_type": rec.get("reportType") or rec.get("ReportType"),
+                "maya_report_id": report_id,
+                # v1 has reportType: null but carries the TASE form number
+                # (e.g. "ת076") as formId.
+                "form_type": (rec.get("reportType") or rec.get("ReportType")
+                              or rec.get("formId")),
                 # v2 renamed this to isPriorityReport. Priority reports are the
                 # high-signal ones, so losing the flag would matter.
                 "is_priority": bool(
@@ -277,6 +379,14 @@ class MayaCollector(Collector):
                     for e in (rec.get("events") or [])
                     if isinstance(e, dict) and e.get("eventName")
                 ],
+                # v1 attachment paths are relative to the mayafiles CDN, which
+                # serves them with no auth - direct document links for the
+                # agent reading the item.
+                "attachment_urls": [
+                    "https://mayafiles.tase.co.il/" + str(a["url"]).lstrip("/")
+                    for a in (rec.get("attachments") or [])
+                    if isinstance(a, dict) and a.get("url")
+                ][:6],
                 "raw_keys": sorted(rec)[:25],
             },
         )
@@ -288,9 +398,14 @@ class MayaScheduleCollector(Collector):
 
     ``docs/LIMITATIONS.md`` section 4 rates the missing earnings calendar as one
     of the larger gaps versus Bloomberg - "לסוחר יומי, 'לא להיות שורט לתוך דוח'
-    זו הדרישה המינימלית" - and names this endpoint as the fix. TASE publishes
+    זו הדרישה המינימלית" - and names this source as the fix. TASE publishes
     the expected publication dates and conference-call times for every listed
     company, which is strictly better than scraping or a third-party guess.
+
+    Two channels: the official financial-report-schedule product when
+    ``TASE_API_KEY`` is active, and the new Maya site's keyless
+    corporate-actions feed otherwise - the same upcoming-events data the site
+    shows under "אירועים קרובים".
 
     The emitted items are noise-capped on purpose: the deliverable is the
     ``calendar`` row the pipeline harvests from ``scheduled_report_on``, not a
@@ -302,12 +417,6 @@ class MayaScheduleCollector(Collector):
 
     def collect(self) -> Iterator[RawItem]:
         key = self.source.api_key
-        if not key:
-            self.warn(
-                "TASE_API_KEY not set - the financial report schedule has no "
-                "public fallback, so the earnings calendar stays empty"
-            )
-            return
 
         targets: list[tuple[str, Any]] = []
         missing_issuer: list[str] = []
@@ -325,7 +434,10 @@ class MayaScheduleCollector(Collector):
 
         for ticker, issuer_id in targets:
             try:
-                yield from self._collect_schedule(ticker, issuer_id, key)
+                if key:
+                    yield from self._collect_schedule(ticker, issuer_id, key)
+                else:
+                    yield from self._collect_events_public(ticker, issuer_id)
             except HttpError as exc:
                 self.warn(f"{ticker}: {exc}")
             except Exception as exc:
@@ -455,8 +567,120 @@ class MayaScheduleCollector(Collector):
             },
         )
 
+    # -- keyless fallback --------------------------------------------------- #
+    def _collect_events_public(self, ticker: str, issuer_id: Any) -> Iterator[RawItem]:
+        """Expected report dates without the subscription.
+
+        The new Maya site publishes every company's upcoming corporate events
+        on the same keyless v1 channel as the reports themselves. Two event
+        kinds matter here: "פרסום דוחות" (report publication - the row a
+        trader must not be short into) and "שיחת ועידה" (conference call).
+        The clock usually rides in the call's moreInfo ("תתכנס בשעה - 15:30"),
+        so a same-day call annotates the publication row rather than becoming
+        a second calendar entry for the same date.
+        """
+        raw = self.source.raw
+        base = str(raw.get("public_base", PUBLIC_BASE)).rstrip("/")
+        path = raw.get("public_events_endpoint", PUBLIC_EVENTS_PATH)
+        horizon = int(raw.get("horizon_days", 365))
+        today = datetime.now(timezone.utc).date()
+        headers = {
+            "Accept": "application/json",
+            "Accept-Language": raw.get("official_language", "he-IL"),
+        }
+
+        rows: list[dict[str, Any]] = []
+        for page in range(PUBLIC_MAX_PAGES):
+            body = {
+                "pageNumber": page + 1,
+                "fromDate": f"{today.isoformat()}T00:00:00.000Z",
+                "toDate": f"{(today + timedelta(days=horizon)).isoformat()}T00:00:00.000Z",
+                "by": "company",
+                "companyId": int(issuer_id),
+                "limit": PUBLIC_PAGE_LIMIT,
+                "offset": page * PUBLIC_PAGE_LIMIT,
+            }
+            resp = self.client.post(base + path, json=body, headers=headers,
+                                    allow_status=(400, 401, 403, 404, 500))
+            if resp.status >= 400:
+                self.warn(f"{ticker}: events returned HTTP {resp.status}")
+                return
+            try:
+                page_rows = resp.json() or []
+            except Exception:
+                self.warn(f"{ticker}: events response was not JSON")
+                return
+            if not isinstance(page_rows, list):
+                self.warn(f"{ticker}: events response shape changed "
+                          f"({type(page_rows).__name__}) - run `harel probe-maya`")
+                return
+            rows.extend(r for r in page_rows if isinstance(r, dict))
+            if len(page_rows) < PUBLIC_PAGE_LIMIT:
+                break
+
+        # An empty list is normal: a name that has not yet filed its next
+        # report date simply has no rows. No warning for that.
+        calls: dict[str, str] = {}
+        for row in rows:
+            if _is_event(row, 1, "שיחת ועידה"):
+                clock = _clock_in(str(row.get("moreInfo") or ""))
+                date_str = str(row.get("date") or "")[:10]
+                if clock and len(date_str) == 10:
+                    calls[date_str] = clock
+
+        for row in rows:
+            if not _is_event(row, 2, "פרסום דוחות"):
+                continue
+            date_str = str(row.get("date") or "")[:10]
+            if len(date_str) != 10:
+                continue
+            info = str(row.get("moreInfo") or "").strip()
+            clock = calls.get(date_str) or _clock_in(info)
+            label = info or "פרסום דוחות"
+            when = " ".join(p for p in (date_str, clock) if p)
+            report_id = row.get("reportId")
+            yield self.make_item(
+                external_id=f"maya-events:{issuer_id}:{date_str}:{report_id or ''}",
+                title=f"[MAYA] {ticker} - {label} expected {when}",
+                url=(f"https://maya.tase.co.il/he/reports/{report_id}"
+                     if report_id else "https://maya.tase.co.il/he"),
+                summary=f"TASE-published expected publication date for {ticker}: {label}.",
+                published_at=datetime.now(timezone.utc),
+                lang="he",
+                seed_tickers=[ticker],
+                seed_relation="DIRECT",
+                meta={
+                    "venue": "TASE",
+                    "form_type": SCHEDULE_FORM_TYPE,
+                    "scheduled_report_on": date_str,
+                    "schedule_label": f"{ticker} {label}".strip(),
+                    "scheduled_time": clock,
+                    "time_zone": "Israel",
+                    "issuer_id": issuer_id,
+                    "report_year": None,
+                },
+            )
+
 
 # --------------------------------------------------------------------------- #
+# "תתכנס בשעה - 15:30" / "בשעה 09:30" - the clock inside an event's moreInfo.
+_CLOCK_RE = re.compile(r"בשעה\s*-?\s*(\d{1,2}:\d{2})")
+
+
+def _clock_in(text: str) -> str | None:
+    match = _CLOCK_RE.search(text)
+    return match.group(1) if match else None
+
+
+def _is_event(row: dict[str, Any], event_id: int, name: str) -> bool:
+    """The numeric event ids are undocumented and the labels are Hebrew
+    strings - either alone is a guess, both together survive a rename of one.
+    (Observed live: eventId 2 = פרסום דוחות, eventId 1 = שיחת ועידה.)"""
+    if row.get("eventId") == event_id:
+        return True
+    return name in str(row.get("eventName") or "")
+
+
 def _find_records(payload: Any, depth: int = 0) -> list[dict[str, Any]]:
     """Locate the list of report records anywhere in an unknown JSON shape."""
     if depth > 4:

@@ -286,17 +286,10 @@ def render_terminal(views: Views, collect: dict[str, Any] | None = None) -> str:
             parts.append(f"<div class='warn'>{_coverage_warning_he(entry)}</div>")
         parts.append("</section>")
 
-    # Tape alerts come first. A move that outran its sector with nothing behind
-    # it is the most urgent thing on the page precisely BECAUSE there is no
-    # story - and a news feed, by construction, could never raise it.
-    parts.append(_unexplained_section(brief.get("unexplained_moves") or []))
-
-    parts.append(_section(
-        he.UI["news_alerts"], brief["alerts"],
-        empty=he.UI["no_alerts"] if health["db"]["items"] else he.UI["db_empty"],
-    ))
-    parts.append(_movers_section(moving["movers"]))
-
+    # The feed leads. The panels under it are all narrower readings of the same
+    # tape, and a trader opening the page wants the tape before the arguments
+    # about it. Coverage warnings stay above even this: a dead source changes
+    # what an empty feed means, so it has to be read first.
     if feed["items"]:
         parts.append(_section(he.UI["feed"], feed["items"]))
     else:
@@ -307,6 +300,17 @@ def render_terminal(views: Views, collect: dict[str, Any] | None = None) -> str:
         # most three per name, and that number is the point of the panel.
         background = views.feed(min_score=0, hours=24, limit=400, max_per_ticker=None)
         parts.append(_background_section(background["items"], health))
+
+    # Below the feed, but not derived from it: a move that outran its sector
+    # with nothing behind it is urgent precisely BECAUSE there is no story, and
+    # a news feed, by construction, could never raise it.
+    parts.append(_unexplained_section(brief.get("unexplained_moves") or []))
+
+    parts.append(_section(
+        he.UI["news_alerts"], brief["alerts"],
+        empty=he.UI["no_alerts"] if health["db"]["items"] else he.UI["db_empty"],
+    ))
+    parts.append(_movers_section(moving["movers"]))
 
     if brief.get("tase_overnight"):
         parts.append(_section(he.UI["tase_overnight"], brief["tase_overnight"]))
