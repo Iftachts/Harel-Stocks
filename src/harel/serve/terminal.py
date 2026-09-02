@@ -161,6 +161,51 @@ pre.raw {{
 }}
 .check td {{ padding-block: 3px; padding-inline: 0 10px; }}
 .ok {{ color: #4ade80; }} .bad {{ color: #ff6b6b; }} .off {{ color: #6b6b6b; }}
+
+/* --- phones ------------------------------------------------------------ */
+/* Every column here is a fixed pixel width, and they sum to about 500px
+   before the headline is given any: on a 360px screen the tables scrolled
+   sideways, which on a tape read with one thumb put the score and the symbol
+   off the edge exactly when they are the reason you opened the page.
+   Under 720px the rows stop being table rows and become cards. Each table on
+   this page has the same shape - several classed metadata cells and exactly
+   one unclassed cell holding the payload (headline, driver, event) - so the
+   classed cells ride one compact line and the unclassed one drops to a full
+   width line beneath them. Keyed off that shape rather than a column count,
+   because the tables disagree about the count and agree about the shape. */
+@media (max-width: 720px) {{
+  body {{ font-size: 14px; }}
+  /* Three wrapped lines of chrome are not worth pinning above the tape. */
+  header {{ position: static; padding: 8px 10px; gap: 4px 12px; }}
+  main {{ padding: 10px 10px 48px; }}
+  section {{ margin-bottom: 20px; }}
+  h2 {{ font-size: 13px; }}
+
+  table, tbody {{ display: block; }}
+  /* The header row labels columns that no longer exist once cells stack. */
+  th {{ display: none; }}
+  tr.item {{
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    padding-block: 8px; border-bottom: 1px solid #1a1a1a;
+  }}
+  /* :hover on a touch screen latches after the tap and never clears. */
+  tr.item:hover {{ background: none; }}
+  tr.item > td {{
+    width: auto; padding-block: 0; padding-inline: 0; margin-inline-end: 12px;
+  }}
+  tr.item > td:not([class]) {{
+    flex: 1 0 100%; order: 9;
+    margin-block-start: 4px; margin-inline-end: 0;
+    /* A URL or an untokenisable Latin title must not widen the viewport. */
+    overflow-wrap: anywhere;
+  }}
+  .kv td.k {{ width: auto; }}
+  /* 10px pills are a miss with a thumb. */
+  .dig {{ font-size: 11px; padding: 2px 7px; }}
+  nav a {{ display: inline-block; padding-block: 4px; margin-inline-end: 14px; }}
+  #collect {{ padding: 4px 12px; }}
+  pre.raw {{ max-height: 220px; }}
+}}
 """
 
 
