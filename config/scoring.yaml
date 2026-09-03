@@ -29,15 +29,47 @@ tiers:
 # ---------------------------------------------------------------------------
 events:
 
+  trading_halt:
+    base: 94
+    label: Trading halted / news pending
+    # Second only to an outright takeover, and above every other event here, for
+    # one reason: it is the only one where the market has stopped and you cannot
+    # act. Everything else you can trade around; a T12 you can only be early or
+    # late to. Volatility pauses share this type and are held down by the
+    # HALT-VOLATILITY cap in `noise` below - they were 22 of 42 records in a
+    # single session and would otherwise bury the halts that carry information.
+    patterns:
+      - "\\[HALT\\]"
+      - "\\b(trading halt(ed)?|halted for news|news pending|trading suspension)\\b"
+      - "\\b(T12|T1|H10|H11)\\b.{0,30}\\bhalt"
+      - "\\bresumes? trading\\b"
+      - "עצירת מסחר|הפסקת מסחר"
+
   merger_acquisition:
     base: 96
     label: M&A / takeover
     patterns:
       - "\\b(to be acquired|agrees? to acquire|definitive (merger|acquisition) agreement)\\b"
+      # The plainest form of the headline, and the one that was missing:
+      # "Perion Acquires PRN" reached the terminal through the 6-K exhibit and
+      # matched nothing, because every pattern here wanted the negotiating verb
+      # rather than the completed act.
+      # `(?-i:[A-Z])` is deliberate: every pattern in this file compiles with
+      # IGNORECASE, so a bare [A-Z] matches lowercase too and "discuss acquires
+      # and buys in general terms" scored as a takeover. The scoped flag makes
+      # the capital mean what it looks like - the acquired party is a proper
+      # noun, which is what separates a headline from a sentence about M&A.
+      - "\\b(acquires?|acquired|to acquire|buys|purchases?)\\b\\s+(?-i:[A-Z0-9])"
+      - "\\bacquisition of\\b\\s+(?-i:[A-Z0-9])"
+      # "Teva Announces Proposed Acquisition of a Novel Neuroscience Product" -
+      # a real deal whose object is a common noun, so the capital-letter test
+      # above cannot see it. An announcing verb in front carries it instead.
+      - "\\b(announces?|proposed|completes?|completed|closes?|enters into)\\b.{0,30}\\bacquisition\\b"
       - "\\b(takeover (bid|offer)|tender offer|going private|buyout offer)\\b"
       - "\\b(merger agreement|scheme of arrangement)\\b"
       - "\\b(strategic alternatives|exploring a sale|review of strategic)\\b"
       - "הצעת רכש|מיזוג|רכישת השליטה"
+      - "(רוכשת|רוכש|רכשה|לרכוש)\\s+את\\b"
 
   short_seller_report:
     base: 88
@@ -50,13 +82,21 @@ events:
     base: 92
     label: FDA/EMA decision on our product
     patterns:
-      - "\\b(FDA approv|approves|approval of)\\b"
+      # The trailing \b used to sit after the whole group, so "FDA approv"
+      # could never match "FDA APPROVAL" - the next character is a letter, so
+      # there is no boundary there. That silently blanked the most common
+      # phrasing of the highest-base event in the taxonomy (92), including
+      # every one of the 70 items the openFDA collector titles "[FDA APPROVAL]".
+      - "\\bFDA approv\\w*"
+      - "\\b(approves|approval of)\\b"
+      - "\\bapproval\\b.{0,30}\\b(FDA|EMA|CHMP|MHRA|Health Canada)\\b"
       - "\\bcomplete response letter\\b|\\bCRL\\b"
       - "\\b(refuse to file|clinical hold|partial clinical hold)\\b"
       - "\\b(CHMP (positive|negative) opinion|marketing authorisation)\\b"
       - "\\b(PDUFA|BsUFA|GDUFA) (date|action)\\b"
       - "\\b(advisory committee|AdCom) (vote|meeting|recommend)"
-      - "\\b(510\\(k\\) clearance|De Novo (grant|classification)|premarket approval)\\b"
+      - "\\b510\\(k\\)\\b.{0,20}\\b(clearance|cleared)\\b|\\[FDA 510\\(k\\)\\]"
+      - "\\b(De Novo (grant|classification)|premarket approval)\\b"
       - "\\bbreakthrough therapy designation\\b|\\bfast track designation\\b"
       - "\\b(BLA|NDA|ANDA|sNDA|sBLA) (approv|accept|submi)"
 
@@ -70,6 +110,11 @@ events:
       - "\\b(pivotal|registrational) (trial|study)\\b.{0,30}\\b(result|data)"
       - "\\b(trial (halted|terminated|discontinued)|study discontinued)\\b"
       - "\\b(interim analysis|DSMB|data safety monitoring)\\b"
+      # Hebrew - Teva's celiac Phase 2a topline reached the Hebrew wire as
+      # "מדווחת על תוצאות חיוביות בניסוי".
+      - "תוצאות\\s+(חיוביות|שליליות|ביניים)\\s+ב?ניסוי"
+      - "ניסוי\\s+(קליני|שלב)"
+      - "עמד(ה)?\\s+ב?יעד\\s+ה?ראשוני"
 
   guidance_change:
     base: 86
@@ -80,6 +125,8 @@ events:
       - "\\bpre-?announce"
       - "\\bprofit warning\\b"
       - "עדכון תחזית|אזהרת רווח"
+      - "(מעלה|מורידה|מעדכנת|חותכת)\\s+את\\s+ה?תחזית"
+      - "(צופה|חוזה)\\s+.{0,20}(שנה|רבעון)\\s+(חזק|חלש)"
 
   earnings:
     base: 80
@@ -88,7 +135,18 @@ events:
       - "\\b(reports?|announces?) (fourth|third|second|first|Q[1-4]|full[- ]year|quarterly|annual)\\b.{0,30}\\b(results|earnings)\\b"
       - "\\b(Q[1-4]|first|second|third|fourth) quarter (\\d{4} )?(results|earnings)\\b"
       - "\\bfinancial results for\\b"
+      # "Announces Record Results for Revenue and Profitability" names no
+      # quarter, so every quarter-anchored shape above misses it.
+      - "\\b(record|preliminary|unaudited) (results|revenue|quarter)\\b"
+      - "\\b(reports?|announces?|posts?)\\b.{0,25}\\b(record )?(results|earnings|revenues?)\\b"
+      # Hebrew. Palo Alto's Q4 print reached MAYA as "8K-תוצאות כספיות לרבעון 4"
+      # and scored 7.1 NOISE, so a 9% move was reported as having no news.
       - "דוחות כספיים|תוצאות רבעון"
+      - "תוצאות\\s+כספיות"
+      - "(מפרסמת|מפרסם|פרסמה)\\s+דוחות"
+      - "דוח(ות)?\\s+(רבעון|רבעוני|כספי|שנתי|חציון)"
+      - "הרווח\\s+(הנקי|למניה)"
+      - "(עקפה|עקף|מכה|היכתה|היכו|הכתה)\\s+את\\s+ה?(תחזיות|צפיות|תחזית)"
     # No form_types here on purpose. 8-K / 6-K are far too generic to imply
     # earnings; the 8-K Item code (2.02) carries that signal instead, via
     # `item_severity` from the EDGAR collector.
@@ -97,12 +155,18 @@ events:
     base: 82
     label: Offering / dilution
     patterns:
-      - "\\b(public offering|registered direct|private placement|PIPE)\\b"
+      - "\\b(public offerings?|registered direct|private placements?|PIPE)\\b"
+      - "\\b(notes? issuance|notes? offering|senior notes)\\b"
       - "\\b(at-the-market|ATM) (offering|program|facility)\\b"
       - "\\b(pricing of|prices) .{0,30}\\boffering\\b"
       - "\\b(convertible (notes|senior notes) offering)\\b"
       - "\\bshelf registration\\b"
-      - "הנפקת מניות|גיוס הון|הקצאה פרטית"
+      # Hebrew. Gilat's $100M convertible placement - real dilution on a $10
+      # stock - arrived as "הנפקה פרטית של אג\"ח להמרה ל5 שנים בהיקף של 100מ$"
+      # and scored 14.5 NOISE.
+      - "הנפקת מניות|גיוס הון|הקצאה פרטית|הנפקה פרטית"
+      - "אג\"?ח\\s+להמרה|אגח להמרה"
+      - "(מגייס|מגייסת|גיוס)\\s+.{0,25}(מיליון|מיליארד|מ')"
     form_types: ["424B5", "424B4", "S-1", "S-3", "F-1", "F-3", "S-3ASR"]
     float_sensitive: true            # micro/small caps score much higher here
 
@@ -110,11 +174,41 @@ events:
     base: 78
     label: Large order / contract win
     patterns:
-      - "\\b(awarded|wins?|secures?|receives?)\\b.{0,40}\\b(contract|order|award|tender)\\b"
-      - "\\b\\$\\s?\\d+(\\.\\d+)?\\s?(million|billion|M|B)\\b.{0,30}\\b(contract|order|award|deal)\\b"
-      - "\\b(follow-on order|framework agreement|IDIQ|indefinite delivery)\\b"
+      # The nouns are plural far more often than not - "Awarded Contracts",
+      # "RECEIVES OVER $105 MILLION MULTI-SYSTEM ORDERS" - and a trailing \b
+      # after a singular stem cannot match its own plural, so the wire's normal
+      # phrasing was the one shape this never caught. Verbs widened for the same
+      # reason: issuers write "Signed", "Announces" and "Enters into", not
+      # "wins".
+      # Two shapes, because the verbs differ in how much they promise.
+      # "awarded / won / secured / signed" is already a completed deal, so
+      # the noun alone is enough. "announces / enters into" is not - it also
+      # heads "Announce Intent to Reach Agreement around Affordable
+      # Medicines", a drug-pricing policy story that read as a Teva contract
+      # win at 78 - so those require a stated amount.
+      - "\\b(awarded|wins?|winning|secures?|secured|receives?|signs?|signed|lands?)\\b.{0,45}\\b(contracts?|orders?|awards?|tenders?|agreements?|deals?)\\b"
+      - "\\b(announces?|announced|enters into|entered into|to (supply|provide|deliver))\\b.{0,45}\\b(contracts?|orders?|agreements?|deals?)\\b.{0,60}\\b(\\$|USD|million|billion)\\b"
+      - "\\b(announces?|announced|enters into|entered into)\\b.{0,30}(\\$|USD)\\s?\\d[\\d.,]*\\s?(million|billion)?\\b.{0,40}\\b(contracts?|orders?|agreements?|deals?)\\b"
+      - "\\$\\s?\\d[\\d.,]*\\s?(million|billion|M|B)\\b.{0,45}\\b(contracts?|orders?|awards?|deals?|agreements?)\\b"
+      # "Signed Contracts ... Valued at Approximately $270 Million" and
+      # "Awarded Contracts ... Totaling Over $370 Million" put the money AFTER
+      # the noun, which neither of the two shapes above reaches.
+      - "\\b(contracts?|orders?|awards?|agreements?)\\b.{0,45}\\b(valued at|worth|totalling|totaling|in the amount of)\\b"
+      - "\\b(follow-on orders?|framework agreements?|IDIQ|indefinite delivery)\\b"
       - "\\bforeign military sale\\b"
+      # Hebrew. Elbit's "~$270M international observation/intelligence
+      # contracts" reached MAYA as "חתמה על חוזים עם לקוח בינלאומי בהיקף של
+      # כ-270מ'$" and scored 7.6 NOISE - while the tape alert simultaneously
+      # reported the move as unexplained.
       - "זכייה במכרז|הזמנה בהיקף"
+      - "(חתמה|חתם|נחתם)\\s+על\\s+(חוז|הסכם|עסק)"
+      - "(עסקה|חוזה|הסכם|הזמנה|התקשרות)\\s+.{0,25}בהיקף\\s+של"
+      # NOT a bare "בהיקף של N million": that phrasing is equally common in a
+      # buyback and a bond placement, and it scored Nova's $200M repurchase
+      # as a $200M contract win (78 over its true 58). It needs a deal noun.
+      - "(מערכות|ציוד|שירותים|פרויקט|אספקה|מכרז)\\s+.{0,40}בהיקף\\s+של"
+      - "צבר\\s+ההזמנות"
+      - "תספק\\s+.{0,40}(מערכות|ציוד|שירותים)"
 
   litigation_outcome:
     base: 76
@@ -125,12 +219,16 @@ events:
       - "\\b(injunction|patent (invalidated|upheld)|infringement (found|ruling))\\b"
       - "\\b(DOJ|SEC|FTC|CMA|European Commission) (charges?|sues?|fines?|investigat)"
       - "\\bParagraph IV\\b"
+      # Kenon collected ~$93M on an ICSID award against Peru - a cash
+      # event, and the only shape in which that reaches the wire.
+      - "\\b(arbitration|arbitral) (award|ruling|tribunal|panel)\\b"
+      - "\\b(awarded|receipt of|collects?|recovers?)\\b.{0,40}\\b(damages|arbitration|judgment|settlement)\\b"
 
   compliance_action:
     base: 74
     label: Inspection / recall / warning letter
     patterns:
-      - "\\b(warning letter|Form 483|import alert|consent decree)\\b"
+      - "\\b(warning letters?|Form 483s?|import alerts?|consent decrees?)\\b"
       - "\\b(class (I|II) recall|recalls?|market withdrawal)\\b"
       - "\\b(OAI|official action indicated)\\b"
 
@@ -145,10 +243,28 @@ events:
   rating_change:
     base: 70
     label: Analyst rating / PT change
+    # Widened deliberately. docs/LIMITATIONS.md prices this gap at $200-400/mo
+    # (Benzinga), but the data was already arriving free and being discarded:
+    # "Stifel initiates Tower Semiconductor stock with buy" scored 4.1 NOISE
+    # because the old pattern demanded the literal word "coverage", and the
+    # Hebrew wires carry a full analyst desk - Investing.com publishes
+    # "פייפר סנדלר מעלה את יעד המחיר" for these names daily - which nothing read.
     patterns:
-      - "\\b(upgrades?|downgrades?)\\b.{0,30}\\b(to|from)\\b.{0,25}\\b(buy|sell|hold|overweight|underweight|neutral|outperform|underperform)\\b"
-      - "\\b(initiates? coverage|resumes? coverage)\\b"
-      - "\\b(price target)\\b.{0,20}\\b(raised|cut|lowered|to \\$)"
+      - "\\b(upgrades?|downgrades?)\\b.{0,30}\\b(to|from)\\b.{0,25}\\b(buy|sell|hold|overweight|underweight|neutral|outperform|underperform|equal[- ]weight|market perform)\\b"
+      - "\\b(double[- ]upgrade|double[- ]downgrade)\\b"
+      - "\\b(initiates?|initiated|starts?|assumes?|resumes?|launches)\\b.{0,40}\\b(coverage|at (buy|sell|hold|overweight|underweight|neutral|outperform))\\b"
+      - "\\b(initiates?|initiated)\\b.{0,60}\\bwith (a )?(buy|sell|hold|overweight|underweight|neutral|outperform|underperform)\\b"
+      - "\\b(reiterates?|reaffirms?|maintains?|keeps)\\b.{0,40}\\b(buy|sell|hold|overweight|underweight|neutral|outperform|underperform|rating|price target)\\b"
+      - "\\b(price target|target price|PT)\\b.{0,25}\\b(raised|lifted|cut|lowered|reduced|trimmed|boosted|increased|to \\$)"
+      - "\\b(raises?|lifts?|cuts?|lowers?|trims?|boosts?)\\b.{0,25}\\b(price target|target price)\\b"
+      # Hebrew - these are the exact phrasings Investing.com and the Israeli
+      # wires publish, taken from what this system actually collected.
+      - "יעד המחיר"
+      - "(מעלה|מוריד|מורידה|מעלה את|מפחית)\\s+את\\s+(יעד|הדירוג|ההמלצה)"
+      - "(חוזר|חוזרת|מאשרר|מאשררת|מאשר|מאשרת)\\s+על?\\s*(דירוג|המלצ)"
+      - "דירוג\\s+(ה)?(קנייה|קניה|מכירה|החזקה)"
+      - "(אושר|אושרה)\\s+מחדש"
+      - "(מעלה|מורידה)\\s+את\\s+המלצ"
 
   listing_compliance:
     base: 68
@@ -166,9 +282,13 @@ events:
     base: 58
     label: Buyback / dividend
     patterns:
-      - "\\b(share (repurchase|buyback)|buyback program)\\b"
-      - "\\b(initiates?|increases?|raises?|cuts?|suspends?) .{0,15}\\bdividend\\b"
+      - "\\b(share (repurchase|buyback)|buyback program|repurchase program)\\b"
+      - "\\b(initiates?|increases?|raises?|cuts?|suspends?|declares?|announces?) .{0,20}\\bdividends?\\b"
       - "\\bspecial dividend\\b"
+      # Hebrew. Nova's "$200M share repurchase programme" reached this system as
+      # "תכנית רכישה עצמית של מניות בהיקף של 200מ'$" and scored 19.0 NOISE.
+      - "רכישה\\s+עצמית"
+      - "דיבידנד"
 
   competitive_threat:
     base: 64
@@ -182,22 +302,28 @@ events:
       - "\\b(includ(e|es|ing)|adds?|offers?)\\b.{0,60}?\\b(for free|free of charge|at no (extra|additional) (cost|charge))\\b"
       - "\\b(price war|undercut(s|ting)?|slashes? prices|aggressive discounting)\\b"
       - "\\b(rip and replace|displac(e|es|ing)|migrat(e|es|ing) away from)\\b"
-      - "\\b(terminat(es|ed|ion)|ends?|does not renew|non-?renewal)\\b.{0,45}\\b(partnership|agreement|contract|collaboration)\\b"
+      - "\\b(terminat(es|ed|ion)|ends?|does not renew|non-?renewal)\\b.{0,45}\\b(partnerships?|agreements?|contracts?|collaborations?)\\b"
       - "\\b(bring(s|ing)?\\b.{0,40}\\bin-?house|insourc\\w+|builds? its own\\b.{0,40}\\b(platform|software|stack|solution|engine|model|tool))"
 
   management_change:
     base: 60
     label: CEO / CFO change
     patterns:
-      - "\\b(chief executive|CEO|chief financial|CFO|chairman)\\b.{0,40}\\b(resign|steps? down|departs?|appoint|named|to succeed|terminat)"
+      # Bidirectional: the wire writes "Announces Planned Transition of Chief
+      # Financial Officer" as often as "CFO steps down", and only one of those
+      # two orders was matched.
+      - "\\b(chief executive|CEO|chief financial|CFO|chairman|president)\\b.{0,40}\\b(resign|steps? down|departs?|appoint|named|to succeed|succeeds?|transition|terminat|interim)"
+      - "\\b(resign\\w*|steps? down|departure|appoints?|appointment|names?|transition|succeeds?|interim)\\b.{0,40}\\b(chief executive|CEO|chief financial|CFO|chairman|president)\\b"
       - "\\bsudden (resignation|departure)\\b"
+      - "(מנכ\"ל|סמנכ\"ל|יו\"ר|כספים)\\s+.{0,30}(מתפטר|התפטר|עוזב|פורש|מונה|ימונה|יחליף)"
 
   partnership_licensing:
     base: 62
     label: Partnership / licensing / milestone
     patterns:
-      - "\\b(license agreement|licensing deal|collaboration agreement|strategic partnership)\\b"
-      - "\\b(milestone payment|upfront payment|option exercise)\\b"
+      - "\\b(licen[sc]e agreements?|licensing deals?|collaboration agreements?|strategic partnerships?)\\b"
+      - "\\b(milestone payments?|upfront payments?|option exercises?)\\b"
+      - "\\b(expands?|extends?) .{0,30}\\b(strategic )?(relationship|partnership|collaboration)\\b"
       - "\\b(exclusive distribution agreement)\\b"
 
   insider_activity:
@@ -210,7 +336,9 @@ events:
       - "\\b(13D|schedule 13D)\\b"
       - "\\b(activist (stake|investor)|builds? (a )?stake)\\b"
       - "\\bsecondary offering by (a )?(shareholder|holder)\\b"
-    form_types: ["SC 13D", "SC 13D/A", "4"]
+    # Both spellings: EDGAR returns "SCHEDULE 13D" on recent filings and
+    # "SC 13D" on older ones, in the same history.
+    form_types: ["SC 13D", "SC 13D/A", "SCHEDULE 13D", "SCHEDULE 13D/A", "4"]
 
   operational_disruption:
     base: 70
@@ -234,7 +362,7 @@ events:
     base: 60
     label: Commodity / price benchmark
     patterns:
-      - "\\b(potash|bromine|phosphate|urea|ammonia) (price|contract)\\b"
+      - "\\b(potash|bromine|phosphate|urea|ammonia) (prices?|contracts?)\\b"
       - "\\b(contract (settled|settlement)) .{0,20}\\b(China|India)\\b"
       - "\\bspot price (jump|surge|collapse|falls?|rises?)\\b"
 
@@ -298,6 +426,23 @@ noise:
     "SCHEDULE 13G": 14
     "SCHEDULE 13G/A": 12
     "SC 13F-HR": 6
+    # An FDA supplement (label/site/packaging change) classifies as
+    # regulatory_decision_primary at base 92 like any other approval, and
+    # 61 of 70 approvals in a fortnight were supplements - mostly rival
+    # generics houses. Capped so the nine ORIG approvals, which are the
+    # actual competitive events, are not buried under them.
+    "FDA-SUPPL": 22
+    # An analyst "maintains" that moves no price target is the desk
+    # restating a position nobody asked about. Kept for corroboration -
+    # three maintains after a print is itself a signal to the agent - but
+    # held out of the ranked feed, exactly as routine Form 4s are.
+    # Upgrades, downgrades, initiations and any target change are tagged
+    # RATING-ACTION instead and are not capped.
+    "RATING-ROUTINE": 20
+    # A limit-up-limit-down pause says the stock moved fast, which the tape
+    # already said. Kept - the agent can use "halted twice in an hour" -
+    # but never allowed to outrank a news-pending halt.
+    "HALT-VOLATILITY": 24
     "ARS": 5
     "DEF 14A": 15
     "DEFA14A": 12

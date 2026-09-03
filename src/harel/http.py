@@ -37,10 +37,31 @@ HOST_RATE_LIMITS = {
     "news.google.com": 2.0,
     "stooq.com": 2.0,
     "query1.finance.yahoo.com": 2.0,
+    # Measured, not guessed: six StockTitan requests in a row returned 200,200,
+    # 200,200,200,200 then 429 on the seventh. One request every two seconds
+    # walks all 22 names in under a minute and has not tripped it.
+    "www.stocktitan.net": 0.5,
+    "stockanalysis.com": 1.0,
+    # fda.gov redirects a too-quick second request to an abuse-detection page
+    # that answers 404 - which read as "the feed moved" and left the pharma
+    # sleeve with no regulator channel for 5055 consecutive passes.
+    "www.fda.gov": 0.4,
+    "www.globenewswire.com": 1.0,
+    # Incapsula. Polling the halt feed hard turns it into a 200 that carries
+    # a JavaScript challenge instead of the feed - which reads as "nothing
+    # halted" unless the body is checked. See collect/halts.py::_is_bot_wall.
+    "www.nasdaqtrader.com": 0.2,
+    "feeds.finance.yahoo.com": 2.0,
 }
 DEFAULT_RATE = 2.0
 
-# Used for every host except sec.gov - see HttpClient._ua_for.
+# Hosts that serve a self-identifying crawler and turn away one wearing a
+# browser string. sec.gov *requires* a contact address; fda.gov silently
+# redirects Chrome to an abuse-detection page. Both are public data published
+# for programmatic use, and both prefer to be told who is asking.
+HONEST_UA_HOSTS = ("sec.gov", "fda.gov")
+
+# Used for every host not in HONEST_UA_HOSTS - see HttpClient._ua_for.
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
@@ -134,8 +155,24 @@ class HttpClient:
         1.5s to an ordinary browser string. These are public press-release feeds
         published for syndication; the request is the same, only the header
         differs.
+
+        fda.gov turned out to be a third case, and an expensive one. It is not
+        rate that trips it - it is the browser string itself. Measured on one
+        host, seconds apart, on the same URL:
+
+            research UA -> HTTP 200, 15940 bytes of valid RSS
+            Chrome UA   -> HTTP 302 -> /apology_objects/abuse-detection-apology
+                           .html -> HTTP 404
+
+        which is the "HTTP 404 - feed may have moved" this system had been
+        reporting. In production that had happened 5055 consecutive times
+        without a single success since deployment, taking the FDA press and
+        MedWatch channel - recalls, safety communications, approvals - off a
+        six-name pharma and device sleeve entirely, while the source row read
+        "ran OK, 0 items". A crawler that says who it is gets served; one
+        pretending to be Chrome gets shown the door.
         """
-        if host.endswith("sec.gov"):
+        if any(host == h or host.endswith("." + h) for h in HONEST_UA_HOSTS):
             return self.user_agent
         return BROWSER_UA
 

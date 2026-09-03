@@ -364,6 +364,14 @@ sources:
     kind: prices
     label: Yahoo Finance chart API
     base_url: https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
+    # Also fetch the Tel Aviv line for every dual-listed name, plus USD/ILS.
+    # Tel Aviv trades 02:50-10:25 ET, so all but its last hour happens BEFORE
+    # the US open - on the same company, in a market that has already read the
+    # morning's Hebrew news and MAYA's immediate reports. 21 of the 22 quote
+    # there. Stored under "<TICKER>.TA" with provider "yahoo:tase", in agorot
+    # as published; the FX row carries its own timestamp so the conversion is
+    # the reader's and is auditable, rather than being folded in silently.
+    tase_leg: true
     trust: 0.7
     latency: delayed_15m
     poll_sec: 300
@@ -420,6 +428,94 @@ sources:
       403. Tried the calcalistech.com feeds as an alternative - 404. Hebrew
       business coverage still arrives via globes and google_news_he. Re-enable
       if a working feed URL turns up.
+
+  nasdaq_halts:
+    kind: trading_halts
+    label: US trading halts and volatility pauses
+    feeds:
+      # HTTPS only. The http:// form 301s and the redirect drops the query, so
+      # the feed comes back empty rather than failing loudly.
+      - https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts
+    trust: 1.0
+    latency: realtime
+    # 60s tripped Incapsula, which then answers HTTP 200 with a JavaScript
+    # challenge - indistinguishable from "nothing halted" unless the body is
+    # inspected, which collect/halts.py now does. 180s stays well inside the
+    # useful window for an event whose whole point is the reopen.
+    poll_sec: 180
+    notes: >
+      The event class the taxonomy had no source for and no event type. A T12 -
+      the exchange halting a name because it has asked the company a question
+      and not had an answer - is the highest-information thing that can happen
+      to a position intraday, and the one where arriving late is worst: the
+      name reopens on a gap. Free, keyless, structured (ndaq:* namespace),
+      verified live at 42 records in one session.
+      Peers are matched as well as our own names, because "CyberArk halted,
+      news pending" is information about PANW; the peer symbols already live in
+      config/universe.yaml.
+      Polled at 60s - the fastest in the registry - which the poll_sec-aware
+      scheduler now honours without dragging the six-hourly regulators along.
+
+  analyst_ratings:
+    kind: analyst_ratings
+    label: Analyst rating actions (StockAnalysis)
+    per_ticker_url: https://stockanalysis.com/stocks/{ticker}/ratings/__data.json
+    trust: 0.85
+    latency: near_realtime
+    poll_sec: 900
+    notes: >
+      Closes docs/LIMITATIONS.md gap 1 - "the largest gap", priced there at
+      $200-400/month for Benzinga - for free and with no key. The page's own
+      SvelteKit JSON payload carries the whole action, not a headline about it:
+      firm, upgrade/downgrade/initiate/maintain, rating both sides, price
+      target both sides, timestamped to the second. Verified live on this
+      basket: Stifel initiating TSEM at Buy PT $270 (2026-09-01 20:15:08),
+      Northland cutting ALLT's target 19 -> 17, KBW upgrading NYAX to Buy.
+      The first of those previously arrived only as a Google News headline
+      scoring 4.1 NOISE; the second did not arrive at all.
+      Trust 0.85: the broker published it, StockAnalysis transcribed it - above
+      an aggregator rewriting a headline, below the issuer speaking.
+      ORMP and KMDA have no sell-side coverage and return an empty payload;
+      the collector reports that once as a note, not as a failure.
+
+  stocktitan_releases:
+    kind: rss
+    label: StockTitan - per-ticker issuer press releases
+    per_ticker_url: https://www.stocktitan.net/rss/news/{TICKER}
+    per_ticker_label: wire
+    # NOT `issuer: true`. The feed is headline-only, and issuer standing would
+    # grant it the body-fetch budget - which StockTitan rate-limits hard (four
+    # article fetches in a row returned a 2511-byte throttle page). The wire
+    # copy is the issuer's words, but this is the wire republishing them.
+    trust: 0.85
+    latency: realtime
+    poll_sec: 300
+    notes: >
+      The independent path to the issuer's own press release for the eight
+      names whose IR feeds sit behind Akamai (TSEM LPSN ORA ICL ALLT CGEN BWAY
+      PANW), which 403 every request from a datacenter IP no matter the
+      headers. Verified live: 50 items per ticker, keyless, plain UA, and the
+      pubDate is the ORIGINAL WIRE timestamp rather than an ingestion time.
+      Rate-limited to one request every two seconds in http.py - the seventh
+      rapid request returns 429.
+
+  yahoo_ticker_news:
+    kind: rss
+    label: Yahoo Finance - per-ticker headlines
+    per_ticker_url: https://feeds.finance.yahoo.com/rss/2.0/headline?s={TICKER}&region=US&lang=en-US
+    per_ticker_label: Yahoo news
+    trust: 0.6
+    latency: minutes
+    poll_sec: 600
+    notes: >
+      Breadth, not authority - the same standing as google_news, and useful for
+      the same reason: it answers for every one of the 22 including the names
+      Google News returns nothing DIRECT for. Unlike StockTitan it carries the
+      opening body text in <description>, wire dateline included, which is what
+      lets the event classifier see more than a headline.
+      Caveat verified live: the feed is NOT sorted by date - CGEN's entries ran
+      06-Aug, 03-Aug, ... then 31-Aug - so nothing may assume entry order means
+      recency.
 
   # ------------------------------------------------------- optional / paid ---
   courtlistener:

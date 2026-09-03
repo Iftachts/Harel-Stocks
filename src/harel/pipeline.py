@@ -166,6 +166,50 @@ class Pipeline:
         self.linker = EntityLinker(self.config)
         self.scorer = MaterialityScorer(self.config)
 
+    # ----------------------------------------------------------- scheduling --
+    def due_sources(self, only: list[str] | None = None,
+                    now: datetime | None = None) -> list[str]:
+        """The source keys whose own `poll_sec` has actually elapsed.
+
+        `poll_sec` is declared per source in config/sources.yaml and was, until
+        this existed, read by nothing: `config.py` parsed it and no scheduler
+        ever asked. Every source ran on every pass, so EDGAR at `poll_sec: 120`
+        - near-realtime, the highest-value channel here - was polled at exactly
+        the same cadence as FDA device clearances at `21600`, and a pass could
+        not be made faster than its slowest member. The documented policy and
+        the behaviour disagreed, and the documented one was right.
+
+        Honouring it decouples the two: the cheap fast sources can be checked
+        every minute without dragging the six-hourly ones along, which is what
+        `--interval` could not express on its own.
+
+        A source with no recorded run is always due, so a fresh install still
+        collects everything on its first pass.
+        """
+        now = now or datetime.now(timezone.utc)
+        due: list[str] = []
+        for key, source in self.config.sources.items():
+            if only and key not in only:
+                continue
+            if not source.available:
+                continue
+            last = (self.db.get_source_state(key) or {}).get("last_run_at")
+            if not last:
+                due.append(key)
+                continue
+            try:
+                last_dt = datetime.fromisoformat(str(last))
+            except ValueError:
+                due.append(key)
+                continue
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            # A little slack, so a pass that starts a second early does not push
+            # every source a whole interval to the right, pass after pass.
+            if (now - last_dt).total_seconds() >= source.poll_sec - 5:
+                due.append(key)
+        return due
+
     # ------------------------------------------------------------------ run --
     def run(self, only: list[str] | None = None) -> RunReport:
         report = RunReport(started_at=datetime.now(timezone.utc))
@@ -562,12 +606,20 @@ class Pipeline:
             add("comment_deadline", meta["comments_close_on"],
                 f"Comment deadline: {scored.raw.title[:90]}", 0.9)
         if meta.get("scheduled_report_on"):
-            # TASE-published expected results date. These are the dates a
-            # short-term trader must not be caught short into; they are official
-            # but can still move, hence 0.9 rather than 1.0.
+            # TASE-published forward dates. These are the days a short-term
+            # trader must not be caught the wrong way into; official, but they
+            # can still move, hence 0.9 rather than 1.0.
+            #
+            # The kind is carried by the collector rather than assumed here. It
+            # used to be hardcoded to "earnings", which was right while report
+            # dates were the only thing harvested and wrong the moment they were
+            # not: an ex-dividend filed as "Expected results" tells a trader to
+            # brace for a print on a day the stock will simply open lower by the
+            # dividend, which is a different trade and a different mistake.
+            kind = str(meta.get("scheduled_kind") or "earnings")
             clock = meta.get("scheduled_time")
-            add("earnings", meta["scheduled_report_on"],
-                "Expected results: "
+            add(kind, meta["scheduled_report_on"],
+                _SCHEDULE_PREFIX.get(kind, "Scheduled: ")
                 + (meta.get("schedule_label") or scored.raw.title[:90])
                 + (f" at {clock}" if clock else ""),
                 0.9)
@@ -682,6 +734,18 @@ _FIRST_PARTY_SOURCES = frozenset({
 # openFDA and html_table are deliberately absent: they seed from an entity
 # matcher that found a company, product or named peer in the record, which is
 # the evidence standard being enforced here rather than a violation of it.
+# How each TASE-published forward date is announced in the calendar. The words
+# matter: "do not be short into this" is the whole point of the row, and it
+# means something different for a results date than for an ex-date.
+_SCHEDULE_PREFIX = {
+    "earnings": "Expected results: ",
+    "ex_dividend": "Ex-dividend (stock opens lower by the dividend): ",
+    "dividend_payment": "Dividend payment: ",
+    "shareholder_meeting": "Shareholder meeting: ",
+    "last_trading_day": "LAST TRADING DAY (delisting): ",
+    "last_exercise_day": "Last exercise day: ",
+}
+
 _REGULATOR_KINDS = frozenset({"federal_register", "federal_register_pi"})
 
 

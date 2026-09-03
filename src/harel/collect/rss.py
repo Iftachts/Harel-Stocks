@@ -103,11 +103,71 @@ class RssCollector(Collector):
                 for url in tc.ir_feeds:
                     plan.append((url, [ticker], "DIRECT", f"{ticker} IR", True))
 
+        plan.extend(self._per_ticker_plan())
+
         base = self.source.base_url
         if base and "{q}" in base:
             plan.extend((*entry, False) for entry in self._query_plan(base))
 
         return plan
+
+    def _per_ticker_plan(self) -> list[tuple[str, list[str], str, str, bool]]:
+        """One templated feed per name, for sources that publish by symbol.
+
+        `feeds:` is a fixed list and `feeds_from: universe.ir_feeds` reads URLs
+        a human wrote per company; neither can express "the same URL shape with
+        the symbol substituted", which is how the wires and the per-ticker news
+        feeds are addressed. Declaring
+
+            per_ticker_url: https://host/feed?s={ticker}
+
+        covers all 22 without 22 lines of config, and keeps the substitution in
+        one place rather than in each new collector.
+
+        `issuer: true` marks the feed as the company speaking, which is what
+        buys the longer back-read and the body fetch - see `_feed_plan`. It is a
+        claim about provenance, so it stays opt-in per source: a wire that
+        republishes the issuer's own release earns it, an aggregator that
+        rewrites the story does not.
+        """
+        raw = self.source.raw
+        template = raw.get("per_ticker_url")
+        if not template:
+            return []
+        issuer = bool(raw.get("issuer", False))
+        relation = str(raw.get("per_ticker_relation", "DIRECT"))
+        skip = {t.upper() for t in raw.get("per_ticker_skip", [])}
+        label_hint = raw.get("per_ticker_label", self.source.key)
+
+        out: list[tuple[str, list[str], str, str, bool]] = []
+        for ticker in self.active_tickers:
+            if ticker.upper() in skip:
+                continue
+            tc = self.cfg.ticker(ticker)
+            if not tc:
+                continue
+            fields = {
+                "ticker": ticker,
+                "TICKER": ticker.upper(),
+                "ticker_lower": ticker.lower(),
+                "cik": (tc.cik or "").lstrip("0"),
+                "cik10": (tc.cik or "").rjust(10, "0") if tc.cik else "",
+                "tase_id": tc.tase_id or "",
+                "tase_issuer_id": tc.raw.get("tase_issuer_id") or "",
+                "name": quote_plus(tc.name or ticker),
+            }
+            try:
+                url = template.format(**fields)
+            except KeyError as exc:
+                self.warn(f"per_ticker_url references unknown field {exc}")
+                return out
+            # A template that needs an identifier this name does not have would
+            # otherwise fetch a URL with an empty segment and quietly return
+            # somebody else's feed.
+            if _has_empty_substitution(template, fields):
+                continue
+            out.append((url, [ticker], relation, f"{ticker} {label_hint}", issuer))
+        return out
 
     def _required_terms(self, seed_tickers: list[str], seed_relation: str) -> list[str]:
         """Terms a cross-read result must actually contain to keep its tag."""
@@ -409,6 +469,14 @@ _STRIPPED_TAGS = re.compile(
 # stamp or an editor's note left in the markup becomes a sentence the date
 # extractor then reads.
 _HTML_COMMENT = re.compile(r"(?s)<!--.*?-->")
+
+
+def _has_empty_substitution(template: str, fields: dict[str, object]) -> bool:
+    """True when the template asks for an id this ticker does not have."""
+    for key, value in fields.items():
+        if "{" + key + "}" in template and not str(value).strip():
+            return True
+    return False
 
 
 def _page_text(html_text: str) -> str:

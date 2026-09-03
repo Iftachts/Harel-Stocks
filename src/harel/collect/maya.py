@@ -628,19 +628,23 @@ class MayaScheduleCollector(Collector):
                 if clock and len(date_str) == 10:
                     calls[date_str] = clock
 
+        matched = 0
         for row in rows:
-            if not _is_event(row, 2, "פרסום דוחות"):
+            kind = _schedule_kind(row)
+            if kind is None:
                 continue
+            matched += 1
             date_str = str(row.get("date") or "")[:10]
             if len(date_str) != 10:
                 continue
             info = str(row.get("moreInfo") or "").strip()
             clock = calls.get(date_str) or _clock_in(info)
-            label = info or "פרסום דוחות"
+            label = info or str(row.get("eventName") or kind).strip()
             when = " ".join(p for p in (date_str, clock) if p)
             report_id = row.get("reportId")
             yield self.make_item(
-                external_id=f"maya-events:{issuer_id}:{date_str}:{report_id or ''}",
+                external_id=(f"maya-events:{issuer_id}:{kind}:{date_str}"
+                             f":{report_id or ''}"),
                 title=f"[MAYA] {ticker} - {label} expected {when}",
                 url=(f"https://maya.tase.co.il/he/reports/{report_id}"
                      if report_id else "https://maya.tase.co.il/he"),
@@ -653,12 +657,34 @@ class MayaScheduleCollector(Collector):
                     "venue": "TASE",
                     "form_type": SCHEDULE_FORM_TYPE,
                     "scheduled_report_on": date_str,
+                    "scheduled_kind": kind,
                     "schedule_label": f"{ticker} {label}".strip(),
                     "scheduled_time": clock,
                     "time_zone": "Israel",
                     "issuer_id": issuer_id,
                     "report_year": None,
+                    "event_id": row.get("eventId"),
                 },
+            )
+
+        # Rows that are only ever bond-series events are skipped by design, so
+        # "nothing matched" among those is the intended outcome and not a
+        # vocabulary change. Warning on it would cry wolf on ORA every pass.
+        unexplained = [r for r in rows if r.get("eventId") not in _BOND_EVENT_IDS]
+        if unexplained and not matched:
+            # THE failure this collector had and could not see. An empty list is
+            # a quiet company; a non-empty list in which nothing matches is the
+            # channel having changed its vocabulary underneath us. It did:
+            # eventId 2 ("פרסום דוחות") stopped appearing entirely, so the one
+            # filter this ever applied matched nothing, for every name, for a
+            # year forward - and reported that as "no rows", which is what a
+            # company with no scheduled events also looks like. The calendar sat
+            # empty of report dates while the source read as healthy.
+            self.warn(
+                f"{ticker}: {len(unexplained)} corporate-action rows returned "
+                f"and none matched a known event kind - ids seen: "
+                f"{sorted({r.get('eventId') for r in unexplained})}. The MAYA event "
+                f"vocabulary has changed; see _SCHEDULE_EVENTS."
             )
 
 
@@ -670,6 +696,53 @@ _CLOCK_RE = re.compile(r"בשעה\s*-?\s*(\d{1,2}:\d{2})")
 def _clock_in(text: str) -> str | None:
     match = _CLOCK_RE.search(text)
     return match.group(1) if match else None
+
+
+# The corporate-action vocabulary, as measured live on 2026-09-03 rather than
+# read from documentation - there is none. Keyed on the numeric id with the
+# Hebrew label as a second witness, because either alone is a guess.
+#
+# eventId 2 ("פרסום דוחות", the expected-results date) is DELIBERATELY absent:
+# it is no longer served on this channel for any of the 22 names, over a full
+# year forward. It is left listed here so the next reader knows it was looked
+# for and not forgotten.
+_SCHEDULE_EVENTS: tuple[tuple[int, str, str], ...] = (
+    (2, "פרסום דוחות", "earnings"),
+    # The ex-date is the tradeable one: the stock opens lower by the dividend,
+    # mechanically, and a trader short into it owes the dividend. The payment
+    # day is bookkeeping and is carried at a lower standing.
+    (22, "יום אקס", "ex_dividend"),
+    (22, "יום תשלום", "dividend_payment"),
+    (203, "מועדי אסיפות", "shareholder_meeting"),
+    (203, "יום כינוס", "shareholder_meeting"),
+    # The last day the share trades at all - a delisting, usually because the
+    # company is being acquired. LivePerson's is 2026-09-07, out of the
+    # SoundHound merger. There is no more absolute deadline on this calendar:
+    # after it there is no position to manage.
+    (101, "יום מסחר אחרון", "last_trading_day"),
+    (4, "יום מימוש אחרון", "last_exercise_day"),
+)
+
+# eventId 7 is a BOND coupon (יום אקס/תשלום - ריבית) and is deliberately not
+# collected. It rides on a different securityId - the company's debt series,
+# not its share - so filing it under the equity ticker would put a coupon date
+# in the path of someone trading the stock. ORA's rows are all of this kind.
+_BOND_EVENT_IDS = frozenset({7, 9})
+
+
+def _schedule_kind(row: dict[str, Any]) -> str | None:
+    """Which calendar kind this corporate-action row is, or None to skip it."""
+    if row.get("eventId") in _BOND_EVENT_IDS:
+        return None
+    name = str(row.get("eventName") or "")
+    for event_id, label, kind in _SCHEDULE_EVENTS:
+        if row.get("eventId") == event_id and label in name:
+            return kind
+    # id alone, for a label that has been reworded.
+    for event_id, _label, kind in _SCHEDULE_EVENTS:
+        if row.get("eventId") == event_id:
+            return kind
+    return None
 
 
 def _is_event(row: dict[str, Any], event_id: int, name: str) -> bool:

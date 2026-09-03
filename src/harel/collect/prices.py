@@ -61,6 +61,9 @@ class PriceCollector(Collector):
                 except Exception as exc:
                     self.warn(f"benchmark {symbol}: {type(exc).__name__}: {exc}")
 
+        if use_yahoo and self.source.raw.get("tase_leg"):
+            self._collect_tase_leg()
+
         # Counts the basket only. Benchmarks are fetched from the same endpoint
         # but they are index proxies, not coverage: a dead basket must not read
         # as alive because SOXX still answered.
@@ -100,6 +103,57 @@ class PriceCollector(Collector):
         else:
             log.info("[%s] saved %d price snapshots", self.source.key, saved)
         self.db.conn.commit()
+
+    # -- Tel Aviv: the leg that trades before the US open -------------------- #
+    # Israeli hours are 09:50-17:25 local, which is 02:50-10:25 ET. All but the
+    # last hour of the Tel Aviv session happens BEFORE the US open, on the same
+    # company, in a market that has already read the morning's Hebrew news. For
+    # a basket that is 21/22 dual-listed that is the single cheapest piece of
+    # genuine lead this system can hold, and it costs one Yahoo symbol per name.
+    TASE_SUFFIX = ".TA"
+    # Tel Aviv quotes in agorot (ILA), one hundredth of a shekel. Stored as
+    # published rather than converted: the conversion needs a rate with its own
+    # timestamp, and silently folding one into the other would produce a price
+    # that reconciles against nothing the trader can look up.
+    FX_SYMBOL = "ILS=X"
+
+    def _collect_tase_leg(self) -> None:
+        """Save the Tel Aviv print for every dual-listed name, plus USD/ILS."""
+        wanted = [t for t in self.active_tickers
+                  if (self.cfg.ticker(t) and self.cfg.ticker(t).tase_id)]
+        missing: list[str] = []
+        for ticker in wanted:
+            symbol = f"{ticker}{self.TASE_SUFFIX}"
+            try:
+                snap = self._yahoo_snapshot(symbol)
+            except HttpError as exc:
+                # 404 means Yahoo carries no Tel Aviv line for this name - true
+                # of PANW, which reports to MAYA but has no .TA quote. Collected
+                # into one note rather than warned per name per pass.
+                if getattr(exc, "status", None) == 404:
+                    missing.append(ticker)
+                else:
+                    self.warn(f"{symbol}: {exc}")
+                continue
+            except Exception as exc:
+                self.warn(f"{symbol}: unexpected {type(exc).__name__}: {exc}")
+                continue
+            if snap is None:
+                missing.append(ticker)
+                continue
+            snap.provider = "yahoo:tase"
+            self.db.save_price(snap)
+            self.db.conn.commit()
+        try:
+            fx = self._yahoo_snapshot(self.FX_SYMBOL)
+            if fx is not None:
+                fx.provider = "yahoo:fx"
+                self.db.save_price(fx)
+                self.db.conn.commit()
+        except Exception as exc:
+            self.warn(f"{self.FX_SYMBOL}: {type(exc).__name__}: {exc}")
+        if missing:
+            self.warn("no Tel Aviv quote for " + ", ".join(missing))
 
     # -- Stooq: daily bars, ADV, gap ---------------------------------------- #
     def _stooq_snapshot(self, ticker: str) -> PriceSnapshot | None:
@@ -352,6 +406,46 @@ class PriceCollector(Collector):
         return _mean(vols) or None
 
     # -- synthetic alert ---------------------------------------------------- #
+    # Events material enough to explain a move on their own, whatever their
+    # decayed score. Read from the taxonomy so it tracks config, not a copy.
+    # 55 is chosen to admit capital_return (58) - a $200M buyback moves a
+    # mid-cap - while leaving out product_launch (52), insider_activity (48)
+    # and the sub-30 housekeeping, none of which carries a 5% move by itself.
+    _EXPLAINS_A_MOVE_BASE = 55.0
+
+    def _explanation_exists(self, ticker: str) -> bool:
+        """Is there already a story for this name - decay aside?
+
+        Two questions get asked of the same number here, and only one of them
+        wants recency. Ranking a feed does: an eight-hour half-life is exactly
+        how a day trader should read a headline. Asking "did anything happen?"
+        does not - a set of results published before this morning's open is the
+        reason for the afternoon's move, and it is no less the reason for being
+        sixteen hours old.
+
+        Scoring by score alone conflated the two. Palo Alto reported Q4 at
+        06:08Z; by 21:45Z the report had decayed to x0.25 and scored 31.9, under
+        the 45 this used to require, so a 9% fall was announced as having no
+        matching news while its cause sat in the database, correctly classified,
+        two rows below. A forced 70 on that alert made the wrong answer the
+        loudest line in the terminal.
+
+        So: a fresh high score still explains a move, and separately, any
+        genuinely material event in the window explains it too, however old.
+        """
+        if self.db.feed(tickers=[ticker], min_score=45, since_hours=18, limit=1,
+                        collapse_clusters=False):
+            return True
+        material = [rule.key for rule in self.cfg.scoring.events
+                    if rule.base >= self._EXPLAINS_A_MOVE_BASE]
+        if not material:
+            return False
+        # min_score stays above the hard noise cap so suppressed paperwork - an
+        # S-8, a 13G, a scheduling notice - cannot count as an explanation.
+        return bool(self.db.feed(tickers=[ticker], min_score=15, since_hours=18,
+                                 limit=200, events=material,
+                                 collapse_clusters=False, include_tape=False))
+
     def _unexplained_move_item(self, snap: PriceSnapshot) -> RawItem | None:
         conf = self.cfg.scoring.price_confirmation
         if not conf.get("enabled", True):
@@ -369,11 +463,7 @@ class PriceCollector(Collector):
             return None
 
         # Only "unexplained" if nothing decent landed for this name recently.
-        recent = self.db.feed(
-            tickers=[snap.ticker], min_score=45, since_hours=18, limit=1,
-            collapse_clusters=False,
-        )
-        if recent:
+        if self._explanation_exists(snap.ticker):
             return None
 
         direction = "up" if move > 0 else "down"

@@ -798,8 +798,17 @@ def test_maya_schedule_falls_back_to_public_events_without_a_key(config, db, mon
     )
     items = [i for i in collector.collect() if "TEVA" in i.seed_tickers]
 
-    assert len(items) == 1, "the conference call must not become a second row"
-    item = items[0]
+    # The conference call (eventId 1) is NOT a row of its own - it exists to
+    # give the results date its clock. The shareholder meeting (eventId 203) is
+    # a row, and a different kind: the collector no longer filters on the single
+    # id it used to, because that id stopped being served and the calendar went
+    # empty without saying so.
+    kinds = {i.meta.get("scheduled_kind") for i in items}
+    assert kinds == {"earnings", "shareholder_meeting"}, kinds
+    assert not any("שיחת ועידה" in i.title for i in items), \
+        "the conference call must not become a row of its own"
+
+    item = next(i for i in items if i.meta["scheduled_kind"] == "earnings")
     assert item.meta["scheduled_report_on"] == "2026-11-12"
     assert item.meta["scheduled_time"] == "15:30", \
         "the clock rides in the conference-call row"

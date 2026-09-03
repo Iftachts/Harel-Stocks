@@ -50,9 +50,14 @@ MAX_ROWS_PER_PAGE = 400
 # Following a row to its release page is the only way to read AudioCodes' date:
 # the listing says "Announces Second Quarter 2026 Reporting Date" and the date
 # itself - August 4, 2026 - is in the release. Same budget reasoning as
-# rss.MAX_BODY_LOOKUPS_PER_RUN: a page of forty announcements must not turn one
+# rss.MAX_BODY_LOOKUPS_PER_PAGE: a page of forty announcements must not turn one
 # collection pass into forty fetches. Two pages, one live announcement each.
-MAX_BODY_LOOKUPS_PER_RUN = 6
+# Per PAGE, not per run. As a run-wide budget this was six lookups shared by
+# two pages; at five pages the first two issuers to be walked would have spent
+# it and the last three could never follow a row to its release - which is the
+# only way some of them state a date. Per-page keeps each issuer's allowance
+# independent of how many others are configured.
+MAX_BODY_LOOKUPS_PER_PAGE = 4
 # Enough for the lede, where a release states its reporting date. Same cap and
 # same reason as rss.MAX_BODY_CHARS.
 MAX_BODY_CHARS = 4000
@@ -77,6 +82,9 @@ class IrPageCollector(Collector):
         self._check_attribution()
         for url, ticker in self._page_plan():
             label = f"{ticker} IR page"
+            # Reset per page: the budget is each issuer's, not a race between
+            # them won by whoever `_page_plan` happens to yield first.
+            self._body_lookups = 0
             try:
                 yield from self._read_page(url, ticker, label)
             except HttpError as exc:
@@ -256,7 +264,7 @@ class IrPageCollector(Collector):
         """
         if item.body or not item.url or item.url == item.meta.get("ir_page"):
             return
-        if self._body_lookups >= MAX_BODY_LOOKUPS_PER_RUN:
+        if self._body_lookups >= MAX_BODY_LOOKUPS_PER_PAGE:
             return
         if not _announces_a_reporting_date(item.title):
             return

@@ -301,10 +301,20 @@ def cmd_watch(args) -> int:
           flush=True)
     while True:
         try:
-            report = pipeline.run(only=only)
+            # Each source is polled at its own declared `poll_sec`, not at the
+            # loop interval - so `--interval 60` chases EDGAR and MAYA every
+            # minute without also re-fetching the six-hourly regulators sixty
+            # times an hour. See Pipeline.due_sources.
+            due = pipeline.due_sources(only=only)
             stamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+            if not due:
+                print(f"[{stamp}] nothing due", flush=True)
+                time.sleep(args.interval)
+                continue
+            report = pipeline.run(only=due)
             print(f"[{stamp}] {report.collected} collected, {report.stored} stored, "
-                  f"{len(report.alerts)} alerts, {len(report.errors)} errors",
+                  f"{len(report.alerts)} alerts, {len(report.errors)} errors "
+                  f"({len(due)} of {len(pipeline.config.sources)} sources due)",
                   flush=True)
             for alert in report.alerts[:5]:
                 print(f"  {C.RED}ALERT{C.RESET} {alert.get('ticker', ''):<6} "

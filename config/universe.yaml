@@ -77,6 +77,10 @@ tickers:
     float_class: mid
     ir_feeds:
       - https://ir.towersemi.com/rss/news-releases.xml
+      # the corporate host is not behind the Akamai block that 403s ir.towersemi.com
+      # from a datacenter IP; verified live, 10 real releases incl. 'Tower
+      # Semiconductor Announces Record Results for Revenue and Profitability'
+      - https://towersemi.com/feed/
     peers: [GFS, UMC, SMIC, VIS, SKYT, TSM, INTC, X-FAB]
     peer_names: ["GlobalFoundries", "UMC", "United Microelectronics", "SMIC",
                  "Vanguard International Semiconductor", "SkyWater", "X-FAB",
@@ -155,6 +159,12 @@ tickers:
       # empty. At trust 1.0 that is worse than nothing - it published
       # evergreen collateral as breaking company news. EDGAR, Google
       # News and MAYA still cover this name.
+    # Server-rendered dated rows, verified live: 'Jun 05, 2026 CAMTEK RECEIVES
+    # OVER $105 MILLION MULTI-SYSTEM ORDERS FROM A TIER-1 OSAT AND A LEADING
+    # HBM MANUFACTURER' - a major_contract that reached this system through
+    # nothing at all before.
+    ir_pages:
+      - https://www.camtek.com/newsroom/
     peers: [ONTO, KLAC, NVMI, ASMPT, TER]
     peer_names: ["Onto Innovation", "KLA", "Nova", "ASMPT", "Besi",
                  "Amkor", "ASE Technology", "JCET", "Rudolph Technologies"]
@@ -294,7 +304,8 @@ tickers:
   NYAX:
     name: Nayax Ltd
     aliases: ["Nayax", "נייקס", "ניאקס", "Nayax Ltd", "Retail Pro", "Weezmo", "UPmarket"]
-    cik: "0001857816"
+    cik: "0001901279"   # verified against SEC company_tickers.json;
+    # was GigaCloud Technology Inc (GCT) - EDGAR was serving that company's filings as NYAX at trust 1.0
     tase_id: "1175033"
     tase_issuer_id: 1894
     exchange: NASDAQ
@@ -414,6 +425,12 @@ tickers:
       # empty. At trust 1.0 that is worse than nothing - it published
       # evergreen collateral as breaking company news. EDGAR, Google
       # News and MAYA still cover this name.
+    # Server-rendered, verified live: '1 September, 2026 Elbit Systems Signed
+    # Contracts with an International Customer Valued at Approximately $270
+    # Million for Advanced ISR & Targeting Payloads'. That event reached the
+    # terminal only as a Hebrew MAYA title scoring 7.6 NOISE.
+    ir_pages:
+      - https://www.elbitsystems.com/news
     peers: [RTX, LMT, GD, NOC, LHX, RHM.DE, BA.L, LDO.MI, HO.PA, KOG.OL, SAABB.ST]
     peer_names: ["RTX", "Lockheed Martin", "General Dynamics", "Northrop Grumman",
                  "L3Harris", "Rheinmetall", "BAE Systems", "Leonardo", "Thales",
@@ -483,7 +500,8 @@ tickers:
   GILT:
     name: Gilat Satellite Networks Ltd
     aliases: ["Gilat", "גילת", "Gilat Satellite Networks", "Wavestream", "Stellar Blu", "DataPath"]
-    cik: "0001090203"
+    cik: "0000897322"   # verified against SEC company_tickers.json;
+    # was Tax Exempt Securities Trust New Jersey Trust 143 - EDGAR was serving that company's filings as GILT at trust 1.0
     tase_id: "1082494"
     tase_issuer_id: 2030
     exchange: NASDAQ
@@ -555,7 +573,8 @@ tickers:
   AUDC:
     name: AudioCodes Ltd
     aliases: ["AudioCodes", "אודיוקודס", "AudioCodes Live", "Voca CIC"]
-    cik: "0001086222"
+    cik: "0001086434"   # verified against SEC company_tickers.json;
+    # was Akamai Technologies (AKAM) - EDGAR was serving that company's filings as AUDC at trust 1.0
     tase_id: "1084215"
     tase_issuer_id: 2134
     exchange: NASDAQ
@@ -608,6 +627,11 @@ tickers:
     sector: diagnostics_pharma
     float_class: small
     ir_feeds:
+      # Discovered from the press-release page's own
+      # <link rel="alternate" type="application/rss+xml">. Verified live:
+      # 'OPKO Health Expands Strategic Relationship with HealthCare Royalty
+      # Through $125 Million Notes Issuance' (13 Aug 2026).
+      - https://www.opko.com/investors/news-events/press-releases/rss
     peers: [LH, DGX, ASND, PFE, NVO, MRK, EXAS, NTRA]
     peer_names: ["Labcorp", "Quest Diagnostics", "Ascendis Pharma", "Pfizer",
                  "Novo Nordisk", "Merck", "Exact Sciences", "Natera", "Guardant"]
@@ -668,6 +692,10 @@ tickers:
       # empty. At trust 1.0 that is worse than nothing - it published
       # evergreen collateral as breaking company news. EDGAR, Google
       # News and MAYA still cover this name.
+    # Server-rendered with full ledes, verified live: '17 Aug. 2026 Kamada
+    # Declares Cash Dividend of $0.17 Per Share'.
+    ir_pages:
+      - https://www.kamada.com/news-main/
     peers: [GRFS, ADMA, TAK, CSL.AX, EBS]
     peer_names: ["Grifols", "ADMA Biologics", "Takeda", "CSL Behring",
                  "Emergent BioSolutions", "Octapharma", "Kedrion", "BioLife Plasma"]
@@ -731,7 +759,8 @@ tickers:
   BWAY:
     name: BrainsWay Ltd
     aliases: ["BrainsWay", "בריינסוואי", "Brainsway Ltd", "Deep TMS", "dTMS"]
-    cik: "0001505497"
+    cik: "0001505065"   # verified against SEC company_tickers.json;
+    # was BioRestorative Therapies (BRTX) - EDGAR was serving that company's filings as BWAY at trust 1.0
     tase_id: "1132158"
     tase_issuer_id: 1386
     exchange: NASDAQ
@@ -739,6 +768,10 @@ tickers:
     float_class: micro
     ir_feeds:
       - https://investors.brainsway.com/rss/news-releases.xml
+      # same reasoning as TSEM. Verified live: 'BrainsWay Deep TMS Study Shows 70%
+      # Reduction in Patients Experiencing Suicidal Ideation' (27 Aug 2026).
+      # This is the news CATEGORY feed, not the site-wide WordPress firehose
+      - https://www.brainsway.com/newscat/news/feed/
     peers: [STIM, CMPS, JNJ, NUVA]
     # NeuroStar is Neuronetics' device and Spravato is J&J's drug; both are
     # products, and both companies are already named here.
@@ -771,6 +804,11 @@ tickers:
     sector: power_holding
     float_class: micro
     ir_feeds:
+    # Kenon's own site renders no news server-side; its Investis-hosted feed page
+    # does. Verified live: '08/19/2026 Kenon Announces Receipt of approximately
+    # $93 million in connection with Payment of Arbitration Award by Peru'.
+    ir_pages:
+      - https://otp.investis.com/clients/us/kenon_holdings/usn/usnews.aspx?cid=999
     peers: [VST, CEG, NRG, TLN, ZIM]
     peer_names: ["Vistra", "Constellation Energy", "NRG Energy", "Talen Energy",
                  "OPC Energy", "ZIM Integrated Shipping", "Calpine"]

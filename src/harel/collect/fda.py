@@ -193,6 +193,17 @@ class OpenFdaCollector(Collector):
                 "brand_names": brands,
                 "substances": substances,
                 "submission_type": sub_type,
+                # A supplement is a label change, a new manufacturing site or a
+                # packaging revision - routine, and 61 of the 70 approvals in a
+                # fortnight. Only ORIG is a molecule reaching the market for the
+                # first time, which is the read-across a generics trader wants.
+                # Surfaced as a form_type so the existing noise cap can hold the
+                # supplements down without also hiding the originals: they share
+                # the base-92 `regulatory_decision_primary` classification, and
+                # scoring them alike put 61 routine competitor supplements at the
+                # same materiality as an approval on our own product.
+                "form_type": ("FDA-SUPPL" if str(sub_type).upper() == "SUPPL"
+                              else "FDA-ORIG"),
                 "match_reasons": [why for _, _, why in hits],
                 "relations": {t: rel for t, rel, _ in hits},
             },
