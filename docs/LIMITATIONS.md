@@ -508,17 +508,40 @@ terms" נוקד כהשתלטות.
 23 מקורות היו "due" בבדיקה, לא 23. זה מה שמאפשר `--interval 60` בלי למשוך את
 הרגולטורים השש-שעתיים איתו.
 
-### ⚠️ מה שרץ הוא `/opt/harel`, לא הרפו הזה
+### ✅ נפרס ל-`/opt/harel` ב-2026-09-03 (commit `442a786`)
 
 `harel-collect.service` ו-`harel-terminal.service` מריצים מ-`/opt/harel`, שהוא
-checkout נפרד. **שום דבר מהעבודה הזאת לא מגיע לטרמינל שלך עד שהוא מתעדכן** —
-כולל תיקון ה-CIK, שעד אז ממשיך להזרים את ההגשות של Akamai כ-AUDC.
+checkout נפרד של אותו remote. הוא מסונכרן עכשיו.
+
+**איך פורסים** (ההתקנה היא `pip install -e`, ולכן אין צורך בהתקנה מחדש —
+`HAREL_CONFIG_DIR=/opt/harel/config` הוא הקונפיג שב-git, כך שגם שינויי YAML
+מגיעים עם ה-pull):
+
+```bash
+systemctl stop harel-collect                     # שלא ייכתב באמצע
+cp -p /opt/harel/data/harel.db /opt/harel-backups/harel.db.bak-<commit>
+cd /opt/harel && git fetch origin && git merge --ff-only origin/main
+harel rescore --hours 800                        # ← לפני collect, לא אחרי
+harel collect --hours 336                        # מילוי ראשוני לערוצים חדשים
+systemctl start harel-collect && systemctl restart harel-terminal
+```
+
+**הסדר בין `rescore` ל-`collect` חשוב, ונלמד בדרך הקשה.** בפריסה הזאת ה-collect
+רץ ראשון: באותו רגע הפריטים הישנים עדיין נשאו את הסיווג הישן (כלומר, שום סיווג),
+ולכן `_explanation_exists` לא מצא להם הסבר ונוצרו ארבע התראות
+`[TAPE] ... with no matching news` על תנועות שכן היו מוסברות. אחרי `rescore` כל
+הארבע נבדקו שוב והתבררו כמוסברות, ונמחקו. **קודם `rescore`, אחר כך `collect`.**
+
+**מה שנוקה בפריסה:** 21 הפריטים המשויכים לחברה הלא נכונה (GigaCloud תחת NYAX,
+Akamai תחת AUDC, BioRestorative תחת BWAY) נמחקו מהמסד. גיבוי לפני הפריסה יושב
+ב-`/opt/harel-backups/`, וגלגול אחורה של הקוד הוא
+`git -C /opt/harel reset --hard 27572ff`.
 
 ## סדר עדיפויות מוצע
 
 **עכשיו, בחינם:**
-1. **לפרוס את `/opt/harel` מחדש.** עד אז ה-CIK השגויים ממשיכים לרוץ שם, ושום
-   דבר מ-§11 לא מגיע לטרמינל. זה הצעד הראשון, לא האחרון.
+1. ~~לפרוס את `/opt/harel` מחדש~~ — **בוצע ב-2026-09-03**, commit `442a786`.
+   נוהל הפריסה, וסדר `rescore` לפני `collect`, בסוף §11.
 2. `SEC_CONTACT_EMAIL` — בלי זה ה־SEC חוסמת.
 3. `harel doctor`, ואז `harel collect --hours 336`.
 4. `harel probe-maya` — לאמת את הערוץ הישראלי.
