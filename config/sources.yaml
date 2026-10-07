@@ -133,6 +133,50 @@ sources:
       tase_issuer_id per name; both channels key on issuer number, not the
       security id in tase_id.
 
+  # ------------------------------------------------------ Israeli regulators ---
+  boi_interest:
+    kind: boi_interest
+    label: Bank of Israel - policy rate and next decision date
+    base_url: https://www.boi.org.il/PublicApi/GetInterest
+    trust: 1.0
+    latency: realtime
+    poll_sec: 3600
+    notes: >
+      The Bank of Israel's own JSON behind its rate widget, verified live
+      2026-10-07. Its press-release and Supervisor-of-Banks pages answer this
+      host with a Radware challenge and publish no RSS, so this is the only
+      first-party channel. Emits the next decision date as a calendar row and
+      each published decision as a cut / hike / hold item, seeded SECTOR_REG to
+      every sector that lists it under `regulators:`.
+
+  israel_regulators_news:
+    kind: rss
+    label: Israeli regulators (Hebrew press coverage)
+    # A regulator source in the linker's sense: SECTOR_REG for the sectors that
+    # list it under `regulators:`, gated by each sector's fr_terms.
+    sector_regulator: true
+    feeds:
+      - https://news.google.com/rss/search?q=site%3Aboi.org.il+when%3A30d&hl=he&gl=IL&ceid=IL:he
+      - https://news.google.com/rss/search?q=%22%D7%94%D7%A4%D7%99%D7%A7%D7%95%D7%97+%D7%A2%D7%9C+%D7%94%D7%91%D7%A0%D7%A7%D7%99%D7%9D%22+when%3A7d&hl=he&gl=IL&ceid=IL:he
+      - https://news.google.com/rss/search?q=%22%D7%A8%D7%A9%D7%95%D7%AA+%D7%A9%D7%95%D7%A7+%D7%94%D7%94%D7%95%D7%9F%22+when%3A7d&hl=he&gl=IL&ceid=IL:he
+      - https://news.google.com/rss/search?q=%22%D7%A8%D7%A9%D7%95%D7%AA+%D7%94%D7%AA%D7%97%D7%A8%D7%95%D7%AA%22+when%3A7d&hl=he&gl=IL&ceid=IL:he
+      - https://news.google.com/rss/search?q=%22%D7%A8%D7%A9%D7%95%D7%AA+%D7%A0%D7%99%D7%99%D7%A8%D7%95%D7%AA+%D7%A2%D7%A8%D7%9A%22+when%3A7d&hl=he&gl=IL&ceid=IL:he
+      - https://news.google.com/rss/search?q=%22%D7%9E%D7%A9%D7%A8%D7%93+%D7%94%D7%AA%D7%A7%D7%A9%D7%95%D7%A8%D7%AA%22+when%3A7d&hl=he&gl=IL&ceid=IL:he
+      - https://news.google.com/rss/search?q=%22%D7%9E%D7%A9%D7%A8%D7%93+%D7%94%D7%90%D7%A0%D7%A8%D7%92%D7%99%D7%94%22+%D7%92%D7%96+when%3A7d&hl=he&gl=IL&ceid=IL:he
+      - https://news.google.com/rss/search?q=%22%D7%A8%D7%A9%D7%95%D7%AA+%D7%9E%D7%A7%D7%A8%D7%A7%D7%A2%D7%99+%D7%99%D7%A9%D7%A8%D7%90%D7%9C%22+when%3A7d&hl=he&gl=IL&ceid=IL:he
+    trust: 0.6
+    latency: minutes
+    poll_sec: 1800
+    notes: >
+      Second-hand on purpose, because first-hand is unreachable: all of gov.il -
+      Capital Market Authority, Competition Authority, the energy and
+      communications ministries, the Land Authority - returns Cloudflare 403 to
+      this host, JSON APIs and robots.txt included, and the Securities
+      Authority's site is a JS app whose API went stale in 2023 (checked
+      2026-10-07). Google News coverage of each body by name, plus a
+      boi.org.il site query that returns the Bank of Israel's own titles. Low
+      trust: it cannot reach ALERT without corroboration.
+
   # ------------------------------------------------------------- regulator ---
   fda_press:
     kind: rss

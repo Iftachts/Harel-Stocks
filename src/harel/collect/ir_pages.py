@@ -110,6 +110,7 @@ class IrPageCollector(Collector):
                       f"filed as second-hand")
 
     def _page_plan(self) -> list[tuple[str, str]]:
+        self._date_order: dict[str, str] = {}
         """(page url, ticker). Configured in universe.yaml next to ir_feeds, so
         adding a name is a config change - the two URLs here are not the point,
         the shape is."""
@@ -120,9 +121,16 @@ class IrPageCollector(Collector):
             tc = self.cfg.ticker(ticker)
             if not tc:
                 continue
-            for url in tc.raw.get("ir_pages") or []:
-                if url:
-                    plan.append((str(url), ticker))
+            for entry in tc.raw.get("ir_pages") or []:
+                # A bare URL, or {url, date_order} for a page that writes its
+                # dates as numbers - see `_DATE_NUMERIC`.
+                if isinstance(entry, dict):
+                    if entry.get("url"):
+                        plan.append((str(entry["url"]), ticker))
+                        self._date_order[str(entry["url"])] = str(
+                            entry.get("date_order") or "")
+                elif entry:
+                    plan.append((str(entry), ticker))
         return plan
 
     # -- fetching ---------------------------------------------------------- #
@@ -148,7 +156,8 @@ class IrPageCollector(Collector):
                       f"now blocks us")
             return
 
-        rows = _page_rows(resp.text or "", now.date())
+        rows = _page_rows(resp.text or "", now.date(),
+                          date_order=getattr(self, "_date_order", {}).get(url, ""))
         # The loud failure. A scrape that finds nothing has not had a quiet day.
         if not rows:
             self.warn(f"{label}: no dated rows found on {url} - the page layout "
@@ -384,10 +393,10 @@ def _text_blocks(page: str) -> list[_Block]:
     return blocks
 
 
-def _page_rows(page: str, today: date) -> list[_Row]:
+def _page_rows(page: str, today: date, date_order: str = "") -> list[_Row]:
     blocks = _text_blocks(page)
     dated = [(i, found) for i, block in enumerate(blocks)
-             if (found := _block_date(block.text))]
+             if (found := _block_date(block.text, date_order))]
     rows: list[_Row] = []
     for n, (index, found) in enumerate(dated):
         previous = dated[n - 1][0] if n else -1
@@ -452,8 +461,25 @@ def _headline_shaped(text: str) -> bool:
     return len(stripped) >= MIN_TITLE_CHARS and len(stripped.split()) >= MIN_TITLE_WORDS
 
 
-def _block_date(text: str) -> date | None:
+# Numeric dates, read only where the page is declared to write them. Israeli
+# issuers write 24/09/2026, 12.08.26 and 17-08-2026 - day first - while Kenon's
+# US-hosted page writes 08/19/2026, month first. Guessing the order per row
+# would date 08/05 a quarter wrong on one of the two, so the config says which
+# (`date_order: dmy` or `mdy`) and a page that says nothing keeps month names only.
+_DATE_NUMERIC = re.compile(r"(?<![\d.])(\d{1,2})[./-](\d{1,2})[./-](20\d{2}|\d{2})(?![\d.])")
+
+
+def _block_date(text: str, date_order: str = "") -> date | None:
     """The date this block states, if it states one."""
+    if date_order in ("dmy", "mdy"):
+        match = _DATE_NUMERIC.search(text)
+        if match:
+            first, second, year = (int(g) for g in match.groups())
+            day, month = (first, second) if date_order == "dmy" else (second, first)
+            try:
+                return date(year if year > 99 else 2000 + year, month, day)
+            except ValueError:
+                return None
     for pattern, month_first in ((_DATE_MDY, True), (_DATE_DMY, False)):
         match = pattern.search(text)
         if not match:

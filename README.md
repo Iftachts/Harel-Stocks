@@ -19,11 +19,13 @@ hours", and serves the result to an LLM agent.
 | **Semis / semicap** | TSEM, NVMI, CAMT | |
 | **Defense / aero** | ESLT, TATT | |
 | **Comms / satcom** | GILT, AUDC, ALLT | |
-| **Software** | NICE, LPSN | PERI (adtech), NYAX (payments) |
+| **Software** | NICE | PERI (adtech), NYAX (payments) |
 | **Cybersecurity** | PANW | |
 | **Energy / chemicals** | ORA, ICL, KEN | |
 
-22 שמות, כולם נאספים. אין טיקר לא פתור.
+47 שמות (21 לאחר הסרת LPSN + 26 מת"א-35). אין טיקר לא פתור.
+
+**מת"א-35 (TASE בלבד):** AZRG POLI LUMI BEZQ BIG CLIS DLEKG ENLT FIBI HARL DSCT MGOR MLSR MMHD MGDL MZTF NVPT NWMD NXSN OPCE SPEN SAE STRS TASE PHOE DIMRI. מחירים מ־Yahoo (`.TA`, באגורות); `tase_id`/`tase_issuer_id` עדיין ריקים ולכן MAYA לא נאסף עבורם.
 
 > **PANW** נכנס כ־`cybersecurity_platform` עם סט העמיתים שלו (CrowdStrike, Zscaler,
 > Fortinet, SentinelOne, Check Point, Wiz) ו־`peer_read_across: 0.80` — פלטפורמות

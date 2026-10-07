@@ -90,6 +90,9 @@ class AnalystRatingsCollector(Collector):
             return
         uncovered: list[str] = []
         for ticker in self.active_tickers:
+            tc = self.cfg.ticker(ticker)
+            if tc and tc.exchange == "TASE":
+                continue  # US ratings page for a bare TASE symbol is a namesake
             try:
                 rows = self._ratings_for(ticker, template)
             except HttpError as exc:

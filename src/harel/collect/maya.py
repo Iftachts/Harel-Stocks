@@ -628,10 +628,15 @@ class MayaScheduleCollector(Collector):
                 if clock and len(date_str) == 10:
                     calls[date_str] = clock
 
-        matched = 0
+        tc = self.cfg.ticker(ticker)
+        share_id = str((tc.tase_id if tc else "") or "")
+        matched = other_security = 0
         for row in rows:
             kind = _schedule_kind(row)
             if kind is None:
+                continue
+            if _other_security(row, kind, share_id):
+                other_security += 1
                 continue
             matched += 1
             date_str = str(row.get("date") or "")[:10]
@@ -671,7 +676,7 @@ class MayaScheduleCollector(Collector):
         # "nothing matched" among those is the intended outcome and not a
         # vocabulary change. Warning on it would cry wolf on ORA every pass.
         unexplained = [r for r in rows if r.get("eventId") not in _BOND_EVENT_IDS]
-        if unexplained and not matched:
+        if unexplained and not matched and not other_security:
             # THE failure this collector had and could not see. An empty list is
             # a quiet company; a non-empty list in which nothing matches is the
             # channel having changed its vocabulary underneath us. It did:
@@ -727,7 +732,27 @@ _SCHEDULE_EVENTS: tuple[tuple[int, str, str], ...] = (
 # collected. It rides on a different securityId - the company's debt series,
 # not its share - so filing it under the equity ticker would put a coupon date
 # in the path of someone trading the stock. ORA's rows are all of this kind.
-_BOND_EVENT_IDS = frozenset({7, 9})
+# The TA-35 banks, insurers and property names added the rest of the debt
+# vocabulary, measured live 2026-10-07: 8 is a coupon too ("יום אקס והקצאה -
+# ריבית", CLIS/MGOR bond series), 9 a partial and 10 a final redemption ("פדיון
+# סופי", DSCT/MGOR), 12 a forced redemption ("פדיון כפוי", POLI's CoCo bond).
+_BOND_EVENT_IDS = frozenset({7, 8, 9, 10, 12})
+
+# Kinds that only mean something for the SHARE. An issuer's other securities
+# carry the same event ids: Hapoalim's CoCo bond (security 6620470) has its own
+# "יום מסחר אחרון" on 2026-10-16, and filed under POLI that row would announce
+# the bank's delisting. The share's own rows carry its security id, which is
+# `tase_id`. A meeting is the company's; a last exercise day is by definition a
+# warrant's - neither is filtered.
+_SHARE_ONLY_KINDS = frozenset({"ex_dividend", "dividend_payment", "last_trading_day"})
+
+
+def _other_security(row: dict[str, Any], kind: str, share_id: str) -> bool:
+    """True when a share-only event was read off another of the issuer's securities."""
+    if kind not in _SHARE_ONLY_KINDS or not share_id:
+        return False
+    security = row.get("securityId")
+    return security is not None and str(security) != str(share_id)
 
 
 def _schedule_kind(row: dict[str, Any]) -> str | None:

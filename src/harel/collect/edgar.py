@@ -176,6 +176,8 @@ class EdgarSubmissionsCollector(Collector):
             tc = self.cfg.ticker(ticker)
             if not tc:
                 continue
+            if tc.exchange == "TASE":
+                continue  # not an SEC filer; the bare symbol may be a US namesake
             if ticker in rejected:
                 # Deliberately collect NOTHING rather than the wrong company.
                 continue
@@ -196,6 +198,7 @@ class EdgarSubmissionsCollector(Collector):
         missing = [
             t for t in self.active_tickers
             if not (self.cfg.ticker(t) and self.cfg.ticker(t).cik10)
+            and self.cfg.ticker(t).exchange != "TASE"
         ]
         cached = self.state().get("cursor")
         if not missing and cached:

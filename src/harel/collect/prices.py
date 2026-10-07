@@ -69,11 +69,24 @@ class PriceCollector(Collector):
         # as alive because SOXX still answered.
         saved = 0
         for ticker in self.active_tickers:
+            tc = self.cfg.ticker(ticker)
+            tase_only = bool(tc and tc.exchange == "TASE")
+            if tase_only and not use_yahoo:
+                continue  # Stooq has no Tel Aviv line; a bare symbol would hit a US namesake
             try:
-                snap = (
-                    self._yahoo_snapshot(ticker) if use_yahoo
-                    else self._stooq_snapshot(ticker)
-                )
+                if tase_only:
+                    # TASE-only name: quote the .TA line (agorot) but store it
+                    # under the plain ticker so every view finds it. The bare
+                    # symbol must never be queried - BIG, SAE are US tickers.
+                    snap = self._yahoo_snapshot(f"{ticker}{self.TASE_SUFFIX}")
+                    if snap is not None:
+                        snap.ticker = ticker
+                        snap.provider = "yahoo:tase"
+                else:
+                    snap = (
+                        self._yahoo_snapshot(ticker) if use_yahoo
+                        else self._stooq_snapshot(ticker)
+                    )
             except HttpError as exc:
                 self.warn(f"{ticker}: {exc}")
                 continue
@@ -120,7 +133,8 @@ class PriceCollector(Collector):
     def _collect_tase_leg(self) -> None:
         """Save the Tel Aviv print for every dual-listed name, plus USD/ILS."""
         wanted = [t for t in self.active_tickers
-                  if (self.cfg.ticker(t) and self.cfg.ticker(t).tase_id)]
+                  if (self.cfg.ticker(t) and self.cfg.ticker(t).tase_id
+                      and self.cfg.ticker(t).exchange != "TASE")]
         missing: list[str] = []
         for ticker in wanted:
             symbol = f"{ticker}{self.TASE_SUFFIX}"

@@ -673,3 +673,12 @@ def test_the_agency_gate_reads_slugs_and_names_alike(config):
 
     assert "homeland-security-department" in slugs({"agencies": ["Homeland Security Department"]})
     assert "food-and-drug-administration" in slugs({"agency_slugs": ["food-and-drug-administration"]})
+
+
+def test_tase_only_symbols_are_not_matched_bare(linker):
+    """TASE appears in every Israeli filing and BIG/SAE are US words; a TASE-only
+    name is linked by its name or Hebrew alias, never by its bare symbol."""
+    assert rel(linker.link(item("Teva to host call; shares also trade on TASE")), "TASE") is None
+    assert rel(linker.link(item("BIG discounts at the retailer this weekend")), "BIG") is None
+    assert rel(linker.link(item("Sol-Gel results; shares listed on the Tel Aviv Stock Exchange")), "TASE") is None
+    assert rel(linker.link(item("Shufersal Ltd reports third quarter results")), "SAE") == "DIRECT"

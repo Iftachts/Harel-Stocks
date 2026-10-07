@@ -70,7 +70,7 @@ tickers:
     name: Tower Semiconductor Ltd
     aliases: ["Tower Semiconductor", "TowerJazz", "טאואר", "Tower Partners Semiconductor", "TPSCo"]
     cik: "0000928876"
-    tase_id: "1082510"
+    tase_id: "1082379"
     tase_issuer_id: 2028
     exchange: NASDAQ
     sector: semiconductors_foundry
@@ -148,7 +148,7 @@ tickers:
     name: Camtek Ltd
     aliases: ["Camtek", "קמטק"]
     cik: "0001109138"
-    tase_id: "1095478"
+    tase_id: "1095264"
     tase_issuer_id: 2174
     exchange: NASDAQ
     sector: semicap_inspection
@@ -212,7 +212,7 @@ tickers:
     # without a browser. Read by collect/ir_pages.py.
     ir_pages:
       - https://www.nice.com/company/investors/ir-events
-    peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, LPSN, PEGA]
+    peers: [FIVN, VRNT, TWLO, ZM, CRM, MSFT, NOW, EGHT, PEGA]
     # Amazon Connect is AWS's contact-centre PRODUCT, so it belongs in
     # competitor_products; the company here is Amazon.
     peer_names: ["Genesys", "Five9", "Verint", "Twilio", "Salesforce", "Zoom",
@@ -235,34 +235,6 @@ tickers:
       ["Salesforce Agentforce", "Five9 guidance cut", "Genesys IPO",
        "Twilio AI", "OpenAI voice agents", "Sierra AI funding"]
     catalysts: [earnings, interactions_conference]
-
-  LPSN:
-    name: LivePerson Inc
-    aliases: ["LivePerson", "לייבפרסון"]
-    cik: "0001102993"
-    tase_id: null
-    tase_issuer_id: 1579
-    exchange: NASDAQ
-    sector: enterprise_software_cx
-    float_class: micro
-    ir_feeds:
-      - https://ir.liveperson.com/rss/news-releases.xml
-    peers: [NICE, VRNT, TWLO, ZM, EGHT]
-    peer_names: ["NICE", "Verint", "Twilio", "Genesys", "Intercom", "Zendesk",
-                 "Ada", "Sierra AI", "Kore.ai"]
-    themes:
-      ["conversational AI", "chatbot", "convertible notes", "debt exchange",
-       "going concern", "Nasdaq minimum bid price", "reverse stock split",
-       "customer churn", "restructuring", "activist investor"]
-    products:
-      CONVERSATIONAL_CLOUD: ["Conversational Cloud", "LiveEngage"]
-      LIVEPERSON_AI: ["LivePerson AI", "conversational AI platform"]
-    # A rival's launch, approval or design win here reads across.
-    competitor_products:
-      ["Intercom Fin", "Zendesk AI", "Salesforce Einstein", "Genesys Cloud CX",
-       "Twilio Flex", "Sprinklr Service", "Verint Da Vinci"]
-    risk_flags: [dilution_risk, delisting_risk, high_short_interest]
-    catalysts: [earnings]
 
   PERI:
     name: Perion Network Ltd
@@ -502,7 +474,7 @@ tickers:
     aliases: ["Gilat", "גילת", "Gilat Satellite Networks", "Wavestream", "Stellar Blu", "DataPath"]
     cik: "0000897322"   # verified against SEC company_tickers.json;
     # was Tax Exempt Securities Trust New Jersey Trust 143 - EDGAR was serving that company's filings as GILT at trust 1.0
-    tase_id: "1082494"
+    tase_id: "1082510"
     tase_issuer_id: 2030
     exchange: NASDAQ
     sector: satcom
@@ -798,7 +770,7 @@ tickers:
     name: Kenon Holdings Ltd
     aliases: ["Kenon", "Kenon Holdings", "קנון", "OPC Energy", "CPV Group", "Quantum Power"]
     cik: "0001611005"
-    tase_id: "1141661"
+    tase_id: "1134139"
     tase_issuer_id: 1635
     exchange: NYSE
     sector: power_holding
@@ -877,3 +849,411 @@ tickers:
        "Google/Wiz consolidating cloud security"]
     risk_flags: [high_multiple_derate_risk, platform_transition_optics]
     catalysts: [earnings, ignite_conference, rsa_conference, black_hat]
+
+  # --- TA-35 additions (TASE-only; MAYA ids still to be filled in) ---
+
+  AZRG:
+    name: Azrieli Group Ltd
+    aliases: ["Azrieli Group", "קבוצת עזריאלי", "עזריאלי קבוצה", "עזריאלי"]
+    cik: null
+    tase_id: "1119478"
+    tase_issuer_id: 1420
+    exchange: TASE
+    sector: israeli_real_estate
+    float_class: large
+    peers: []
+    peer_names: ["Melisron", "Big Shopping Centers", "Amot Investments"]
+    themes: ["Israel Land Authority", "רשות מקרקעי ישראל", "מכרזי קרקע", "התחדשות עירונית", "מחירי הדירות", "מרכזי קניות", "פדיון השוכרים", "shopping center occupancy", "Azrieli data center", "Green Mountain data center", "מרכז עזריאלי"]
+    catalysts: [earnings]
+
+  POLI:
+    name: Bank Hapoalim B.M.
+    aliases: ["Bank Hapoalim", "Hapoalim", "בנק הפועלים", "הפועלים"]
+    cik: null
+    tase_id: "662577"
+    tase_issuer_id: 662
+    exchange: TASE
+    sector: israeli_banks
+    float_class: large
+    peers: []
+    peer_names: ["Bank Leumi", "Israel Discount Bank", "Mizrahi Tefahot"]
+    themes: ["Bank of Israel interest rate decision", "Supervisor of Banks", "bank levy", "windfall tax on banks", "החלטת הריבית", "היטל על הבנקים", "מס רווחי יתר על הבנקים", "הפיקוח על הבנקים"]
+    catalysts: [earnings]
+
+  LUMI:
+    name: Bank Leumi le-Israel B.M.
+    aliases: ["Bank Leumi", "Leumi le-Israel", "בנק לאומי", "לאומי לישראל", "לאומי"]
+    cik: null
+    tase_id: "604611"
+    tase_issuer_id: 604
+    exchange: TASE
+    sector: israeli_banks
+    float_class: large
+    peers: []
+    peer_names: ["Bank Hapoalim", "Israel Discount Bank", "Mizrahi Tefahot"]
+    themes: ["Bank of Israel interest rate decision", "Supervisor of Banks", "bank levy", "windfall tax on banks", "החלטת הריבית", "היטל על הבנקים", "מס רווחי יתר על הבנקים", "הפיקוח על הבנקים"]
+    catalysts: [earnings]
+
+  BEZQ:
+    name: Bezeq The Israel Telecommunication Corp. Ltd
+    aliases: ["Bezeq", "קבוצת בזק", "בזק בינלאומי", "בזק"]
+    cik: null
+    tase_id: "230011"
+    tase_issuer_id: 230
+    exchange: TASE
+    sector: israeli_telecom
+    float_class: large
+    peers: [PTNR, CEL]
+    peer_names: ["Partner Communications", "Cellcom Israel", "HOT Telecom"]
+    themes: ["Ministry of Communications", "משרד התקשורת", "שוק סיטונאי", "פריסת סיבים", "fiber deployment Israel", "Bezeq wholesale market"]
+    catalysts: [earnings]
+
+  BIG:
+    name: BIG Shopping Centers Ltd
+    aliases: ["Big Shopping Centers", "BIG Shopping Centers", "ביג מרכזי קניות", "קבוצת ביג"]
+    cik: null
+    tase_id: "1097260"
+    tase_issuer_id: 1327
+    exchange: TASE
+    sector: israeli_real_estate
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_feeds:
+      - https://www.bigcenters.co.il/feed/?post_type=irm-releases
+    peers: []
+    peer_names: ["Melisron", "Azrieli Group"]
+    themes: ["מרכזי קניות", "פדיון השוכרים", "shopping center occupancy", "BIG Shopping Centers USA", "מרכזי קניות פתוחים"]
+    catalysts: [earnings]
+
+  CLIS:
+    name: Clal Insurance Enterprises Holdings Ltd
+    aliases: ["Clal Insurance", "Clal Holdings", "כלל ביטוח", "כלל עסקי ביטוח", "כלל החזקות ביטוח", "קבוצת כלל"]
+    cik: null
+    tase_id: "224014"
+    tase_issuer_id: 224
+    exchange: TASE
+    sector: israeli_insurance_financials
+    float_class: mid
+    peers: []
+    peer_names: ["Harel Insurance", "Migdal Insurance", "Phoenix Financial", "Menora Mivtachim"]
+    themes: ["Capital Market Authority", "solvency ratio", "Solvency II", "רשות שוק ההון", "יחס כושר פירעון", "קרנות הפנסיה", "הגמל וההשתלמות"]
+    catalysts: [earnings]
+
+  DLEKG:
+    name: Delek Group Ltd
+    aliases: ["Delek Group", "קבוצת דלק", "דלק קבוצה"]
+    cik: null
+    tase_id: "1084128"
+    tase_issuer_id: 1095
+    exchange: TASE
+    sector: israeli_oil_gas
+    float_class: mid
+    peers: []
+    peer_names: ["NewMed Energy", "Ithaca Energy", "Energean"]
+    themes: ["Leviathan gas field", "Tamar gas field", "מאגר לוויתן", "מאגר תמר", "יצוא גז למצרים", "Egypt gas export", "Israel natural gas export", "Ithaca Energy", "איתקה", "North Sea oil production"]
+    risk_flags: [geopolitical_headline_risk]
+    catalysts: [earnings]
+
+  ENLT:
+    name: Enlight Renewable Energy Ltd
+    aliases: ["Enlight Renewable", "Enlight Energy", "אנלייט", "אנלייט אנרגיה", "אנלייט אנרגיה מתחדשת"]
+    cik: "0001922641"
+    tase_id: "720011"
+    tase_issuer_id: 720
+    exchange: NASDAQ
+    sector: renewable_power
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_pages:
+      - url: "https://enlightenergy.com/data/press-releases/"
+        date_order: mdy   # numeric dates
+    peers: [ORA, CWEN, BEP]
+    peer_names: ["Ormat Technologies", "Clearway Energy", "Brookfield Renewable", "Energix"]
+    themes: ["renewable energy PPA", "solar plus storage", "Israeli renewable tender", "מכרז אנרגיה מתחדשת", "Inflation Reduction Act tax credit", "Clenera"]
+    catalysts: [earnings]
+
+  FIBI:
+    name: First International Bank of Israel Ltd
+    aliases: ["First International Bank of Israel", "FIBI", "הבנק הבינלאומי", "הבינלאומי הראשון"]
+    cik: null
+    tase_id: "593038"
+    tase_issuer_id: 593
+    exchange: TASE
+    sector: israeli_banks
+    float_class: mid
+    peers: []
+    peer_names: ["Bank Hapoalim", "Bank Leumi", "Mizrahi Tefahot"]
+    themes: ["Bank of Israel interest rate decision", "Supervisor of Banks", "bank levy", "windfall tax on banks", "החלטת הריבית", "היטל על הבנקים", "מס רווחי יתר על הבנקים", "הפיקוח על הבנקים"]
+    catalysts: [earnings]
+
+  HARL:
+    name: Harel Insurance Investments & Financial Services Ltd
+    aliases: ["Harel Investments", "Harel Insurance", "הראל השקעות", "הראל ביטוח", "קבוצת הראל"]
+    cik: null
+    tase_id: "585018"
+    tase_issuer_id: 585
+    exchange: TASE
+    sector: israeli_insurance_financials
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_pages:
+      - url: "https://pr.harel-group.co.il/he/publications?cat=פרסומים"
+        date_order: dmy   # numeric dates
+    peers: []
+    peer_names: ["Clal Insurance", "Migdal Insurance", "Phoenix Financial", "Menora Mivtachim"]
+    themes: ["Capital Market Authority", "solvency ratio", "Solvency II", "רשות שוק ההון", "יחס כושר פירעון", "קרנות הפנסיה", "הגמל וההשתלמות"]
+    catalysts: [earnings]
+
+  DSCT:
+    name: Israel Discount Bank Limited
+    aliases: ["Discount Bank", "Israel Discount Bank", "בנק דיסקונט", "דיסקונט"]
+    cik: null
+    tase_id: "691212"
+    tase_issuer_id: 691
+    exchange: TASE
+    sector: israeli_banks
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_pages:
+      - url: "https://investors.discountbank.co.il/regulatory-filings/"
+        date_order: dmy   # numeric dates
+    peers: []
+    peer_names: ["Bank Hapoalim", "Bank Leumi", "Mizrahi Tefahot"]
+    themes: ["Bank of Israel interest rate decision", "Supervisor of Banks", "bank levy", "windfall tax on banks", "החלטת הריבית", "היטל על הבנקים", "מס רווחי יתר על הבנקים", "הפיקוח על הבנקים", "Mercantile Discount", "מרכנתיל"]
+    catalysts: [earnings]
+
+  MGOR:
+    name: Mega Or Holdings Ltd
+    aliases: ["Mega Or Holdings", "מגה אור"]
+    cik: null
+    tase_id: "1104488"
+    tase_issuer_id: 1450
+    exchange: TASE
+    sector: israeli_real_estate
+    float_class: small
+    peers: []
+    peer_names: ["Melisron", "Big Shopping Centers"]
+    themes: ["Israel Land Authority", "רשות מקרקעי ישראל", "מכרזי קרקע", "התחדשות עירונית", "מחירי הדירות", "מרכזי קניות", "פדיון השוכרים", "shopping center occupancy"]
+    catalysts: [earnings]
+
+  MLSR:
+    name: Melisron Ltd
+    aliases: ["Melisron", "מליסרון"]
+    cik: null
+    tase_id: "323014"
+    tase_issuer_id: 323
+    exchange: TASE
+    sector: israeli_real_estate
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_feeds:
+      - https://ir.melisron.co.il/feed/?post_type=irm-releases
+    peers: []
+    peer_names: ["Azrieli Group", "Big Shopping Centers", "Amot Investments"]
+    themes: ["Israel Land Authority", "רשות מקרקעי ישראל", "מכרזי קרקע", "התחדשות עירונית", "מחירי הדירות", "מרכזי קניות", "פדיון השוכרים", "shopping center occupancy", "Ofer Investments"]
+    catalysts: [earnings]
+
+  MMHD:
+    name: Menora Mivtachim Holdings Ltd
+    aliases: ["Menora Mivtachim", "מנורה מבטחים", "מנורה מב החזקות", "מנורה ביטוח"]
+    cik: null
+    tase_id: "566018"
+    tase_issuer_id: 566
+    exchange: TASE
+    sector: israeli_insurance_financials
+    float_class: mid
+    peers: []
+    peer_names: ["Clal Insurance", "Harel Insurance", "Migdal Insurance", "Phoenix Financial"]
+    themes: ["Capital Market Authority", "solvency ratio", "Solvency II", "רשות שוק ההון", "יחס כושר פירעון", "קרנות הפנסיה", "הגמל וההשתלמות"]
+    catalysts: [earnings]
+
+  MGDL:
+    name: Migdal Insurance and Financial Holdings Ltd
+    aliases: ["Migdal Insurance", "Migdal Holdings", "מגדל ביטוח", "מגדל אחזקות ביטוח", "מגדל"]
+    cik: null
+    tase_id: "1081165"
+    tase_issuer_id: 1041
+    exchange: TASE
+    sector: israeli_insurance_financials
+    float_class: mid
+    peers: []
+    peer_names: ["Clal Insurance", "Harel Insurance", "Phoenix Financial", "Menora Mivtachim"]
+    themes: ["Capital Market Authority", "solvency ratio", "Solvency II", "רשות שוק ההון", "יחס כושר פירעון", "קרנות הפנסיה", "הגמל וההשתלמות"]
+    catalysts: [earnings]
+
+  MZTF:
+    name: Mizrahi Tefahot Bank Ltd
+    aliases: ["Mizrahi Tefahot", "Mizrahi-Tefahot", "מזרחי טפחות", "בנק מזרחי", "מזרחי-טפחות"]
+    cik: null
+    tase_id: "695437"
+    tase_issuer_id: 695
+    exchange: TASE
+    sector: israeli_banks
+    float_class: large
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_pages:
+      - url: "https://www.mizrahi-tefahot.co.il/about-mizrahi-tefahot-he/press-releases/"
+        date_order: dmy   # numeric dates
+    peers: []
+    peer_names: ["Bank Hapoalim", "Bank Leumi", "Israel Discount Bank"]
+    themes: ["Bank of Israel interest rate decision", "Supervisor of Banks", "bank levy", "windfall tax on banks", "החלטת הריבית", "היטל על הבנקים", "מס רווחי יתר על הבנקים", "הפיקוח על הבנקים", "mortgage market share", "שוק המשכנתאות"]
+    catalysts: [earnings]
+
+  NVPT:
+    name: Navitas Petroleum Limited Partnership
+    aliases: ["Navitas Petroleum", "נאוויטס", "נביטס", "נאוויטס פטרוליום", "נביטס פטרוליום"]
+    cik: null
+    tase_id: "1141969"
+    tase_issuer_id: 1688
+    exchange: TASE
+    sector: israeli_oil_gas
+    float_class: small
+    peers: []
+    peer_names: ["Talos Energy", "Kosmos Energy"]
+    themes: ["Shenandoah oil field", "שדה שננדואה", "Sea Lion project", "פרויקט סי ליון", "Gulf of Mexico deepwater", "Falkland Islands oil"]
+    risk_flags: [geopolitical_headline_risk]
+    catalysts: [earnings]
+
+  NWMD:
+    name: NewMed Energy Limited Partnership
+    aliases: ["NewMed Energy", "NewMed", "ניו מד", "ניו-מד", "ניומד", "ניו-מד אנרגיה"]
+    cik: null
+    tase_id: "475020"
+    tase_issuer_id: 475
+    exchange: TASE
+    sector: israeli_oil_gas
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_pages:
+      - url: "https://newmedenergy.com/investor-relations/immediate-reports/"
+        date_order: dmy   # numeric dates
+    peers: []
+    peer_names: ["Energean", "Chevron Israel", "Ratio Energies"]
+    themes: ["Leviathan gas field", "Tamar gas field", "מאגר לוויתן", "מאגר תמר", "יצוא גז למצרים", "Egypt gas export", "Israel natural gas export", "Dalia Energy", "דליה אנרגיה", "Aphrodite gas field"]
+    risk_flags: [geopolitical_headline_risk]
+    catalysts: [earnings]
+
+  NXSN:
+    name: NextVision Stabilized Systems Ltd
+    aliases: ["NextVision", "Next Vision Stabilized", "נקסט ויז'ן", "נקסט ויז׳ן", "נקסטויז'ן", "נקסט ויזן"]
+    cik: null
+    tase_id: "1176593"
+    tase_issuer_id: 1916
+    exchange: TASE
+    sector: defense
+    float_class: small
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_feeds:
+      - https://investor-relations.nextvision-sys.com/press-releases/feed/
+    peers: [AVAV, KTOS]
+    peer_names: ["AeroVironment", "Teledyne FLIR", "Kratos Defense"]
+    themes: ["drone payload camera", "gimbal camera", "UAV payload", "loitering munition", "NDAA Blue UAS"]
+    risk_flags: [geopolitical_headline_risk, customer_concentration]
+    catalysts: [earnings]
+
+  OPCE:
+    name: OPC Energy Ltd
+    aliases: ["OPC Energy", "או.פי.סי", "או פי סי", "או.פי.סי אנרגיה", "אופי סי", "CPV Group", "Competitive Power Ventures"]
+    cik: null
+    tase_id: "1141571"
+    tase_issuer_id: 1682
+    exchange: TASE
+    sector: renewable_power
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_feeds:
+      - https://opc-energy.com/en/feed/?post_type=irm-releases
+    peers: [ORA]
+    peer_names: ["Energix", "Doral Energy", "Dorad Energy", "Calpine"]
+    themes: ["CPV Group", "Competitive Power Ventures", "Israeli electricity tariff", "רשות החשמל", "תעריף החשמל", "PJM capacity auction", "gas-fired power plant"]
+    catalysts: [earnings]
+
+  SPEN:
+    name: Shapir Engineering and Industry Ltd
+    aliases: ["Shapir Engineering", "שפיר הנדסה", "שפיר הנדסה ותעשייה"]
+    cik: null
+    tase_id: "1133875"
+    tase_issuer_id: 1633
+    exchange: TASE
+    sector: israeli_construction_infra
+    float_class: mid
+    peers: []
+    peer_names: ["Electra", "Ashtrom", "Danya Cebus"]
+    themes: ["Tel Aviv metro tender", "מכרז המטרו", "infrastructure tender Israel", "מכרז תשתיות", "PPP project Israel", "desalination plant"]
+    catalysts: [earnings]
+
+  SAE:
+    name: Shufersal Ltd
+    aliases: ["Shufersal", "שופרסל"]
+    cik: null
+    tase_id: "777037"
+    tase_issuer_id: 777
+    exchange: TASE
+    sector: israeli_retail_consumer
+    float_class: mid
+    peers: []
+    peer_names: ["Rami Levy", "Victory Supermarkets", "Yochananof"]
+    themes: ["food prices Israel", "יוקר המחיה", "רפורמת היבוא", "Be Pharm", "Shufersal Online"]
+    catalysts: [earnings]
+
+  STRS:
+    name: Strauss Group Ltd
+    aliases: ["Strauss Group", "Strauss-Elite", "קבוצת שטראוס", "שטראוס גרופ", "שטראוס"]
+    cik: null
+    tase_id: "746016"
+    tase_issuer_id: 746
+    exchange: TASE
+    sector: israeli_retail_consumer
+    float_class: mid
+    peers: []
+    peer_names: ["Tnuva", "Osem", "Unilever Israel"]
+    themes: ["Strauss Coffee", "Sabra hummus", "מחירי הקפה", "cocoa futures", "coffee prices", "food prices Israel", "יוקר המחיה"]
+    risk_flags: [commodity_cost_risk]
+    catalysts: [earnings]
+
+  TASE:
+    name: Tel Aviv Stock Exchange Ltd
+    aliases: ["Tel Aviv Stock Exchange", "הבורסה לניירות ערך", "הבורסה בתל אביב"]
+    cik: null
+    tase_id: "1159029"
+    tase_issuer_id: 1778
+    exchange: TASE
+    sector: israeli_exchange
+    float_class: small
+    peers: []
+    # Listed exchange operators by full name - never bare "Nasdaq", which is
+    # in every "NASDAQ:XXX" headline and linked ~400 of them on a dry run.
+    peer_names: ["London Stock Exchange Group", "Deutsche Boerse", "Euronext", "Cboe Global Markets"]
+    themes: ["TASE trading volume", "מחזורי המסחר בבורסה", "הנפקות ראשוניות בתל אביב"]
+    catalysts: [earnings]
+
+  PHOE:
+    name: Phoenix Financial Ltd
+    aliases: ["Phoenix Financial", "Phoenix Holdings", "הפניקס החזקות", "קבוצת הפניקס", "הפניקס"]
+    cik: null
+    tase_id: "767012"
+    tase_issuer_id: 767
+    exchange: TASE
+    sector: israeli_insurance_financials
+    float_class: mid
+    # Verified from this host 2026-10-07 (status, entries, newest date).
+    ir_feeds:
+      - https://phoenixfinancial.co.il/feed/?post_type=irm-news
+    peers: []
+    peer_names: ["Clal Insurance", "Harel Insurance", "Migdal Insurance", "Menora Mivtachim"]
+    themes: ["Capital Market Authority", "solvency ratio", "Solvency II", "רשות שוק ההון", "יחס כושר פירעון", "קרנות הפנסיה", "הגמל וההשתלמות", "Excellence Investments", "אקסלנס"]
+    catalysts: [earnings]
+
+  DIMRI:
+    name: Y.H. Dimri Construction & Development Ltd
+    aliases: ["Y.H. Dimri", "Dimri Construction", "י.ח. דמרי", "דמרי"]
+    cik: null
+    tase_id: "1090315"
+    tase_issuer_id: 1193
+    exchange: TASE
+    sector: israeli_real_estate
+    float_class: small
+    peers: []
+    peer_names: ["Shikun & Binui", "Electra Real Estate", "Africa Israel Residences"]
+    themes: ["Israel Land Authority", "רשות מקרקעי ישראל", "מכרזי קרקע", "התחדשות עירונית", "מחירי הדירות", "housing starts Israel", "מכירת דירות", "דירה בהנחה"]
+    catalysts: [earnings]

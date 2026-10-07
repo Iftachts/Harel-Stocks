@@ -6,6 +6,7 @@ from .base import Collector, CollectorContext, build_collectors, register
 
 # Importing the modules is what populates the registry.
 from . import (  # noqa: F401  (side-effect imports)
+    boi,
     clinicaltrials,
     edgar,
     fda,

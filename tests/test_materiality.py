@@ -71,7 +71,7 @@ def test_form_144_is_capped(parts):
 def test_late_filing_notice_is_not_treated_as_noise(parts):
     """NT 10-Q looks like paperwork but is a genuine red flag."""
     result = score(
-        parts, "[NT 10-Q] LivePerson Inc - notification of late filing",
+        parts, "[NT 10-Q] Perion Network Ltd - notification of late filing",
         source="sec_edgar_submissions", meta={"form_type": "NT 10-Q"},
     )
     assert result.score >= 35, result.reasons

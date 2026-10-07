@@ -68,7 +68,11 @@ events:
       - "\\b(takeover (bid|offer)|tender offer|going private|buyout offer)\\b"
       - "\\b(merger agreement|scheme of arrangement)\\b"
       - "\\b(strategic alternatives|exploring a sale|review of strategic)\\b"
-      - "הצעת רכש|מיזוג|רכישת השליטה"
+      - 'הצעת רכש|רכישת השליטה|מכירת השליטה|העברת השליטה'
+      # "הסכם למיזוג מרכנתיל דיסקונט (בת בבעלות מלאה) עם ולתוך הבנק" is Discount
+      # folding its own wholly-owned bank into itself - group housekeeping that
+      # scored as a takeover at 96. A merger is only news when it is not in-house.
+      - 'מיזוג(?!.{0,60}(בת\s+בבעלות\s+מלאה|חברה\s+בת|חברת\s+בת|חברות\s+בנות|בבעלות\s+מלאה))'
       - "(רוכשת|רוכש|רכשה|לרכוש)\\s+את\\b"
 
   short_seller_report:
@@ -147,6 +151,8 @@ events:
       - "דוח(ות)?\\s+(רבעון|רבעוני|כספי|שנתי|חציון)"
       - "הרווח\\s+(הנקי|למניה)"
       - "(עקפה|עקף|מכה|היכתה|היכו|הכתה)\\s+את\\s+ה?(תחזיות|צפיות|תחזית)"
+      # Bank and insurer prints lead with net profit and return on equity.
+      - 'רווח\s+(נקי|כולל)\s+(של|בסך|ברבעון)|תשואה\s+(להון|על\s+ההון)'
     # No form_types here on purpose. 8-K / 6-K are far too generic to imply
     # earnings; the 8-K Item code (2.02) carries that signal instead, via
     # `item_severity` from the EDGAR collector.
@@ -165,8 +171,12 @@ events:
       # stock - arrived as "הנפקה פרטית של אג\"ח להמרה ל5 שנים בהיקף של 100מ$"
       # and scored 14.5 NOISE.
       - "הנפקת מניות|גיוס הון|הקצאה פרטית|הנפקה פרטית"
-      - "אג\"?ח\\s+להמרה|אגח להמרה"
-      - "(מגייס|מגייסת|גיוס)\\s+.{0,25}(מיליון|מיליארד|מ')"
+      - 'אג["״]?ח\s+להמרה|אגח\s+להמרה'
+      # Not when the money is DEBT. "מידרוג קובעת דירוג P-1.il לגיוס נע"מ 10 בעד
+      # 800מ'שח" - a rating on Discount's commercial paper - scored as an equity
+      # raise, because "גיוס ... 800מ'" was all this asked for. A bank or a
+      # landlord borrows every month; see debt_financing.
+      - '(מגייס|מגייסת|גיוס)\s+(?!.{0,40}(נע["״]?מ|אג["״]?ח|אגרות\s+חוב|ניירות\s+ערך\s+מסחריים|חוב|הלווא|אשראי|מימון\s+בנקאי)).{0,25}(מיליון|מיליארד|מ[''׳])'
     form_types: ["424B5", "424B4", "S-1", "S-3", "F-1", "F-3", "S-3ASR"]
     float_sensitive: true            # micro/small caps score much higher here
 
@@ -209,6 +219,19 @@ events:
       - "(מערכות|ציוד|שירותים|פרויקט|אספקה|מכרז)\\s+.{0,40}בהיקף\\s+של"
       - "צבר\\s+ההזמנות"
       - "תספק\\s+.{0,40}(מערכות|ציוד|שירותים)"
+      # MAYA's own phrasing of an order. Next Vision's "קבלת הזמנה לרכישת מצלמות
+      # ... תמורת סך כולל של 24מ'$" - $24M against a small float - and its
+      # English twin "Receipt of purchase order" both matched nothing.
+      - '(קבלת|התקבלה|התקבלו|קיבלה|קיבל)\s+(ה)?(הזמנה|הזמנות|הזמנת)'
+      - 'הזמנ(ה|ות)\s+.{0,80}תמורת\s+(סך\s+(כולל\s+)?(של\s+)?)?(כ[-־]?)?\d'
+      - '(זכתה|זכה|זכו)\s+במכרז|הוכרז(ה)?\s+כזוכ(ה|ת)'
+      # A signed deal turning real: conditions precedent met, deal effective,
+      # closing. "דליה הודיעה לנומד ורצו כי ההסכם נכנס לתוקף" was NewMed's
+      # Leviathan supply deal going live and scored as nothing.
+      - '(ההסכם|העסקה|החוזה)\s+נכנס(ה)?\s+לתוקף|התקיימו\s+(כל\s+)?התנאים\s+(ה)?מתלים|הושגו\s+כל\s+התנאים|השלמת\s+(ה)?עסקה|הושלמה\s+(ה)?עסקה'
+      - '\breceipt\s+of\s+(an?\s+)?(new\s+|additional\s+|follow-on\s+)?(purchase\s+)?orders?\b'
+      - '\b(purchase|follow-on)\s+orders?\b.{0,60}(\$|USD|million|NIS|ILS)'
+      - '\b(agreement|deal|contract)\s+(becomes|became|has\s+become)\s+effective\b|\bconditions\s+precedent\b.{0,30}\b(met|satisfied|fulfilled)\b|\b(declared|selected\s+as)\s+(the\s+)?winn(er|ing\s+bidder)\b'
 
   litigation_outcome:
     base: 76
@@ -223,6 +246,9 @@ events:
       # event, and the only shape in which that reaches the wire.
       - "\\b(arbitration|arbitral) (award|ruling|tribunal|panel)\\b"
       - "\\b(awarded|receipt of|collects?|recovers?)\\b.{0,40}\\b(damages|arbitration|judgment|settlement)\\b"
+      # Hebrew, and only with money attached: Israeli banks and insurers file a
+      # class-action notice most weeks, and those are capped in `noise`.
+      - '(פסק\s+דין|פס["״]ד|הכרעת\s+בורר|פסק\s+בוררות|הסדר\s+פשרה)\s+.{0,60}(מיליון|מיליארד|מ[''׳]\s*ש|₪|ש["״]ח|\$)'
 
   compliance_action:
     base: 74
@@ -238,7 +264,7 @@ events:
     patterns:
       - "\\b(added to|removed from|deleted from|joins?)\\b.{0,25}\\b(S&P|Russell|Nasdaq-100|MSCI|FTSE|TA-35|TA-125|TA-90)\\b"
       - "\\bindex (rebalance|reconstitution)\\b"
-      - "נכנסת למדד|נגרעת מהמדד"
+      - '(נכנסת|נכנס|תיכנס|ייכנס|יצטרף|תצטרף|הצטרפה|הצטרף)\s+ל(מדד|מדדי)|(נגרעת|נגרע|ייגרע|תיגרע|יוצאת|יוצא|תצא|ייצא)\s+מ(ה)?(מדד|מדדי)|עדכון\s+(ה)?(הרכב\s+)?(ה)?מדד(ים)?\s+(ת["״]א|תל\s+אביב)'
 
   rating_change:
     base: 70
@@ -315,7 +341,10 @@ events:
       - "\\b(chief executive|CEO|chief financial|CFO|chairman|president)\\b.{0,40}\\b(resign|steps? down|departs?|appoint|named|to succeed|succeeds?|transition|terminat|interim)"
       - "\\b(resign\\w*|steps? down|departure|appoints?|appointment|names?|transition|succeeds?|interim)\\b.{0,40}\\b(chief executive|CEO|chief financial|CFO|chairman|president)\\b"
       - "\\bsudden (resignation|departure)\\b"
-      - "(מנכ\"ל|סמנכ\"ל|יו\"ר|כספים)\\s+.{0,30}(מתפטר|התפטר|עוזב|פורש|מונה|ימונה|יחליף)"
+      # Both quote marks: MAYA writes מנכ"ל, the press often מנכ״ל - and
+      # "המועמדים לתפקיד מנכ״ל מליסרון" matched neither form before.
+      - '(מנכ["״]ל|מנכ["״]לית|סמנכ["״]ל|יו["״]ר|כספים)\s+.{0,30}(מתפטר|מתפטרת|התפטר|התפטרה|עוזב|עוזבת|פורש|פורשת|מונה|מונתה|ימונה|תמונה|יחליף|תחליף|יסיים|תסיים|סיים|סיימה)'
+      - '(מינוי|סיום\s+כהונת|התפטרות|פרישת|מועמד(ים)?\s+לתפקיד)\s+(ה)?(מנכ["״]ל|מנכ["״]לית|יו["״]ר|סמנכ["״]ל\s+(ה)?כספים)'
 
   partnership_licensing:
     base: 62
@@ -347,6 +376,8 @@ events:
       - "\\b(cyber ?attack|ransomware|data breach|security incident)\\b"
       - "\\b(plant (shutdown|fire|explosion)|production (halt|suspension)|force majeure)\\b"
       - "\\b(supply (disruption|shortage)|unplanned outage)\\b"
+      - '(השבתת|השבתה\s+של|הפסקת|הפסקה\s+ב|עצירת)\s+(ה)?(הפקה|הפקת|אספקת|ייצור|פעילות|המפעל|הקידוח|המאגר|הזרמת)'
+      - 'כוח\s+עליון|מתקפת\s+סייבר|אירוע\s+סייבר|דליפת\s+מידע|סגירת\s+(ה)?(מאגר|אסדה|אסדת|מפעל)'
 
   macro_sector_policy:
     base: 66
@@ -357,6 +388,15 @@ events:
       - "\\b(sanction(s|ed)?)\\b"
       - "\\b(final rule|interim final rule|proposed rule)\\b"
       - "\\b(reimbursement (rate|cut)|fee schedule)\\b"
+      # Israel. The TA-35 banks, insurers, telecom and gas names answer to these
+      # bodies, and every pattern above is American.
+      - '(הפיקוח\s+על\s+הבנקים|המפקח(ת)?\s+על\s+הבנקים|רשות\s+שוק\s+ההון|הממונה\s+על\s+שוק\s+ההון|רשות\s+ניירות\s+ערך|רשות\s+התחרות|הממונה\s+על\s+התחרות|משרד\s+התקשורת|משרד\s+האנרגיה|הממונה\s+על\s+ענייני\s+הנפט|רשות\s+הגז|רשות\s+החשמל|רשות\s+מקרקעי\s+ישראל|משרד\s+האוצר|בנק\s+ישראל)\s+.{0,50}(מחליט|החליט|החליטה|מחליטה|קובע|קבע|קבעה|מטיל|הטיל|הטילה|דורש|דרש|דרשה|מאשר|אישר|אישרה|מתנגד|התנגד|התנגדה|הוראה|הוראות|הנחיה|הנחיות|טיוטת|קנס|עיצום|אסר|אוסר|הגביל|מגביל|ביטל|ביטלה|רפורמה)'
+      - 'היטל\s+(על\s+)?(ה)?(בנקים|רווחי)|מס\s+(על\s+)?רווחי\s+(ה)?בנקים|מס\s+רווחי\s+יתר|מס\s+על\s+(ה)?בנקים'
+      - '(העלאת|הורדת|העלה\s+את|הוריד\s+את|מעלה\s+את|מוריד\s+את|הותיר\s+את|מותיר\s+את|השאיר\s+את|משאיר\s+את)\s+(ה)?ריבית|החלטת\s+(ה)?ריבית|ריבית\s+בנק\s+ישראל'
+      - 'עיצום\s+כספי|קנס\s+(בסך|של)\s'
+      - '\bBank\s+of\s+Israel\b.{0,50}\b(rate|interest|decision|hikes?|cuts?|holds?|leaves?)\b'
+      - '\b(bank\s+levy|windfall\s+tax|excess\s+profits?\s+tax)\b'
+      - '\b(Israel\s+Securities\s+Authority|Competition\s+Authority|Capital\s+Market\s+Authority|Supervisor\s+of\s+Banks)\b'
 
   commodity_move:
     base: 60
@@ -372,6 +412,82 @@ events:
     patterns:
       - "\\b(launches?|unveils?|introduces?|announces? availability)\\b"
       - "\\b(design win|qualified by|volume production)\\b"
+
+  contract_termination:
+    base: 74
+    label: Contract cancelled / terminated
+    # The inverse of a contract win and just as tradeable. NewMed and Ratio's
+    # notice cancelling the $6.7b Leviathan supply deal with Dalia reached MAYA
+    # three times in two days - "הודעת הביטול תקפה" - and scored as nothing.
+    patterns:
+      - '(ביטול|הודעת\s+(ה)?ביטול|סיום|הפסקת|ביטל|ביטלה|מבטלת|מבטל)\s+(את\s+)?(ה)?(הסכם|חוזה|עסקה|עסקת|התקשרות|הזמנה|הזמנת)'
+      - '(ההסכם|החוזה|העסקה|ההתקשרות|ההזמנה)\s+.{0,50}(בוטל|בוטלה|מבוטל|מבוטלת|לא\s+ייכנס\s+לתוקף)'
+      - 'הודעת\s+(ה)?ביטול'
+      - '\b(cancel(s|led|ling|lation\s+of)?|terminat(es|ed|ion\s+of))\b.{0,40}\b(supply|purchase|gas|sales?|offtake)\s+(agreements?|contracts?|deals?)\b'
+      - '\b(agreements?|contracts?|deals?|orders?)\b.{0,30}\b(cancell?ed|terminated)\b'
+
+  exploration_result:
+    base: 84
+    label: Drilling result / discovery / reserves
+    # For an exploration partnership the well IS the company: Navitas and
+    # NewMed move on a discovery, a dry hole or a reserves report the way a
+    # biotech moves on a readout.
+    patterns:
+      - '(תגלית|גילוי)\s+(של\s+)?(גז|נפט|מסחרי|מסחרית)|הכרזה\s+על\s+תגלית'
+      - 'קידוח\s+.{0,40}(יבש|הצליח|הצלחה|תוצאות|נמצאו|נמצא|גילה|אותרו)'
+      - '(דוח|עדכון)\s+(ה)?(משאבים|עתודות|רזרבות)|משאבים\s+מותנים|עתודות\s+מוכחות'
+      - '(תחילת|התחלת)\s+(ה)?(הפקה|הפקת)|הפקה\s+ראשונה|גז\s+ראשון|נפט\s+ראשון|מבחני?\s+הפקה'
+      - '\b(commercial\s+discovery|dry\s+(well|hole)|flow\s+test|first\s+(oil|gas)|reserves?\s+report|contingent\s+resources|proved\s+reserves|spud(ded)?)\b'
+      - '\bdiscovery\b.{0,30}\b(well|field|gas|oil|reservoir)\b'
+
+  asset_transaction:
+    base: 64
+    label: Asset purchase / sale
+    # Below M&A on purpose. A landlord buying a mall or a holding company
+    # selling a stake is material, but it is not a takeover of the listed
+    # company - and "Ithaca signs a deal to buy Suncor's offshore assets"
+    # (Delek Group's subsidiary) matched nothing at all.
+    patterns:
+      - '(הסכם|עסקה|עסקת|התקשרות|הצעה\s+מחייבת)\s+(ל|של\s+)?(רכישת|מכירת|מימוש)\s'
+      - '(חתימה|חתמה|נחתם|נחתמה|חותמת)\s+על\s+(הסכם|עסקה)\s+(ל|של\s+)?(רכישת|מכירת)'
+      - '(רכישת|מכירת|מימוש)\s+(ה)?(נכס|נכסי|נכסים|קרקע|קרקעות|מגרש|זכויות|החזקות|מקרקעין|בניין|קניון|מרכז\s+מסחרי|פעילות)'
+      - '\b(sale|disposal|divestiture|divestment)\s+of\b.{0,40}\b(stake|interest|assets?|business|portfolio|propert(y|ies)|holdings?|subsidiary)\b'
+      - '\b(acquir(e|es|ed|ing)|acquisition\s+of|purchas(e|es|ed|ing))\b.{0,30}\b(assets|portfolio|propert(y|ies)|land|stake\s+in|interest\s+in|working\s+interest)\b'
+
+  disclosure_clarification:
+    base: 52
+    label: Company clarification / response to reports
+    # A TASE issuer answering the press or an exchange query ("הבהרה בעקבות
+    # פניות משקיעים") is usually responding to something that already moved
+    # the stock - worth a look, not an alert on its own.
+    patterns:
+      - '(?<!\w)הבהרה(?!\w)|דיווח\s+מבהיר|תגובת\s+(ה)?חברה\s+ל|(התייחסות|תגובה)\s+(ה?חברה\s+)?ל(פרסום|פרסומים|כתבה|כתבות|דיווח|דיווחים)|בהמשך\s+לפרסומים'
+      - '\b(clarif(ication|ying)\s+(report|announcement|statement|notice)|response\s+to\s+(media|press)\s+reports?|in\s+response\s+to\s+(an?\s+)?(article|report)\s+published)\b'
+
+  operating_update:
+    base: 48
+    label: Operating / capital update
+    # Solvency ratios for the insurers, apartment sales for the developers,
+    # property revaluations for the landlords - each a number the sector
+    # trades on between results.
+    patterns:
+      - '(יחס|יחסי)\s+(ה)?(כושר\s+(ה)?פירעון|סולבנסי|הון\s+(עצמי\s+)?(רובד|ליבה)|לימות\s+(ה)?הון)'
+      - '(נתוני|עדכון)\s+(ה)?(מכירות|פעילות|תפעול|תפוסה)'
+      - '(מכירת|נמכרו|מכר|מכרה)\s+\d[\d,]*\s+(יחידות\s+)?(דירות|יח["״]ד)'
+      - '(שערוך|שיערוך)\s+(של\s+)?(נכסי|נדל["״]ן|הנכסים)'
+      - '\bsolvency\s+(ratio|II)\b|\b(occupancy\s+rate|apartment\s+sales)\b'
+
+  debt_financing:
+    base: 30
+    label: Bond / commercial-paper financing
+    # Banks, insurers and landlords tap the TASE bond market constantly -
+    # Leumi alone filed three in one week. It is funding, not dilution, and it
+    # must not reach equity_offering at 82, which is what "גיוס ... מ'" did.
+    patterns:
+      - '(הנפקת|הנפקה\s+של|גיוס|הרחבת)\s+(סדר(ה|ת)\s+)?(אג["״]?ח|אגרות\s+(ה)?חוב|נע["״]?מ|ניירות\s+ערך\s+מסחריים|כתבי\s+התחייבות)'
+      - 'מכרז\s+(ל)?מוסדיים'
+      - '\b(issuance|offering|placement|expansion)\s+of\s+(a\s+)?(new\s+)?(series\s+of\s+)?(bonds?|debentures?|commercial\s+paper)\b'
+      - '\b(bonds?|debentures?|commercial\s+paper)\s+(issuance|offering|series\s+expansion)\b'
 
   conference_presentation:
     base: 18
@@ -406,6 +522,8 @@ noise:
     # for the `calendar` table; capping it keeps it out of the ranked feed while
     # the source still shows a live item count.
     "MAYA-SCHEDULE": 6
+    # Same for the Bank of Israel's next decision date (collect/boi.py).
+    "BOI-SCHEDULE": 6
     # A Form 4 whose only transaction codes are grants, option exercises, tax
     # withholding or gifts is compensation plumbing, not a trade. Left as plain
     # "4" these outranked real earnings at the top of the feed. Open-market
@@ -534,6 +652,35 @@ noise:
       cap: 10
     - pattern: "דוח מיידי על שינוי בהחזקות בעל עניין|הודעה על אסיפה|תשקיף מדף"
       cap: 12
+    # MAYA's routine report types, as the new Maya site titles them. They had
+    # no event and sat on the default base, so the share register, officer
+    # rosters and dormant-share counts of 26 TA-35 names competed with news.
+    - pattern: 'מרשם\s+בעלי\s+(ה)?מניות|מצבת\s+(ה)?הון|מצבת\s+נושאי\s+משרה|הנהלה\s+ונושאי\s+משרה|מניות\s+רדומות|\bdormant\s+shares\b|\bregister\s+of\s+(securities\s+)?holders\b'
+      cap: 8
+    - pattern: '(שינוי|שינויים)\s+(ב)?החזקות\s+(ב["״]ע|בעל(י)?\s+(ה)?עני(י)?ן)|החזקות\s+בעלי\s+עני(י)?ן|\bholdings?\s+of\s+interested\s+parties\b'
+      cap: 10
+    # A holder crossing 5% either way. Worth seeing, not ranking.
+    - pattern: 'חדל(ה)?\s+להיות\s+בעל(ת)?\s+עני(י)?ן|(הפך|הפכה)\s+לבעל(ת)?\s+עני(י)?ן|\bceased\s+to\s+be\s+an?\s+interested\s+party\b|\bbecame\s+an?\s+interested\s+party\b'
+      cap: 20
+    # Bond service - coupons and redemptions on the issuer's debt series.
+    - pattern: '(פדיון|פירעון)\s+(מוקדם|חלקי|סופי|מנדטורי)|תשלום\s+(ריבית|קרן)|\b(partial|early|final)\s+redemption\b|\binterest\s+payment\b'
+      cap: 10
+    - pattern: '(זימון|כינוס|תוצאות|דוח\s+(מיידי\s+)?על)\s+(ה)?אסיפה|אסיפה\s+(כללית|שנתית|מיוחדת)|אסיפת\s+(בעלי|מחזיקי)'
+      cap: 14
+    # A rating ASSIGNED to a new bond or affirmed unchanged. Up- and downgrades
+    # do not match this and are scored as rating actions.
+    - pattern: '(קובעת|נותנת|מאשררת|מותירה|הותירה|אישררה|מאשרת)\s+(את\s+)?(ה)?דירוג|דירוג\s+.{0,40}ל(הנפקת|גיוס)'
+      cap: 14
+    # Class-action procedure. Banks and insurers get a filing, a withdrawal or
+    # a discovery motion most weeks; a settlement with an amount on it is not
+    # caught here and scores as litigation_outcome.
+    - pattern: 'הסתלקות|בקשה\s+לאישור\s+(ה)?תובענה\s+(כ)?ייצוגית|בקשה\s+לגילוי\s+(ו)?עיון|מחיקת\s+(ה)?(ערעור|ערעורים|תביעה|בקשה)|לייצוגית\s+בק["״]ע'
+      cap: 20
+    # Shares or options issued to directors and staff - pay, not a raise.
+    - pattern: '(הנפקה|הקצאה)\s+פרטית.{0,80}(דירקטור|עובד|נושא(י)?\s+משרה|מנכ["״]ל|יו["״]ר)|(הקצאת|הענקת)\s+(אופציות|מניות|יחידות)\s+(חסומות\s+)?ל(עובדים|דירקטורים|נושאי\s+משרה|מנכ)|תגמול\s+(הוני|נושאי\s+משרה)'
+      cap: 12
+    - pattern: 'FORM\s*144|הודעה\s+על\s+כוונה\s+למכור'
+      cap: 6
     - pattern: "\\b(price target)\\b.{0,20}\\b(maintained|reiterat)"
       cap: 20
     # 13F holdings filler. Automated "Fund X Buys N Shares of Y" pieces are
@@ -663,10 +810,6 @@ overrides:
     keyword_boosts:
       - pattern: "\\b(reverse (stock )?split|Nasdaq (minimum bid|compliance))\\b"
         boost: 15
-  LPSN:
-    keyword_boosts:
-      - pattern: "\\b(convertible|exchange offer|debt restructur|going concern)\\b"
-        boost: 18
   PANW:
     # The metrics the print actually reacts to are NGS ARR and RPO, not revenue.
     keyword_boosts:
@@ -676,3 +819,43 @@ overrides:
         boost: 10
       - pattern: "\\bMicrosoft\\b.{0,60}\\b(bundl|includ|E5|G5|Defender)\\b"
         boost: 18
+  # --- TA-35 additions ------------------------------------------------------ #
+  # The one storyline each of these trades on between results.
+  NWMD:
+    keyword_boosts:
+      - pattern: '(לוויתן|לויתן|Leviathan).{0,60}(ייצוא|יצוא|מצרים|הרחבת|export|Egypt|expansion|FID)'
+        boost: 12
+  DLEKG:
+    # Delek Group's value is NewMed's Leviathan stake and Ithaca's North Sea
+    # barrels, so the same storyline reaches it one step removed.
+    keyword_boosts:
+      - pattern: '(לוויתן|לויתן|Leviathan|Ithaca|איתקה)'
+        boost: 6
+  NVPT:
+    keyword_boosts:
+      - pattern: '(Shenandoah|שננדואה|Sea\s+Lion|סי\s+ליון)'
+        boost: 12
+  BEZQ:
+    keyword_boosts:
+      - pattern: '(משרד\s+התקשורת|Ministry\s+of\s+Communications).{0,60}(סיטונאי|wholesale|תעריפ|tariff|פיקוח)'
+        boost: 12
+  POLI:
+    keyword_boosts:
+      - pattern: '(היטל|מס\s+רווחי\s+יתר|bank\s+levy|windfall\s+tax)'
+        boost: 15
+  LUMI:
+    keyword_boosts:
+      - pattern: '(היטל|מס\s+רווחי\s+יתר|bank\s+levy|windfall\s+tax)'
+        boost: 15
+  DSCT:
+    keyword_boosts:
+      - pattern: '(היטל|מס\s+רווחי\s+יתר|bank\s+levy|windfall\s+tax)'
+        boost: 15
+  MZTF:
+    keyword_boosts:
+      - pattern: '(היטל|מס\s+רווחי\s+יתר|bank\s+levy|windfall\s+tax)'
+        boost: 15
+  FIBI:
+    keyword_boosts:
+      - pattern: '(היטל|מס\s+רווחי\s+יתר|bank\s+levy|windfall\s+tax)'
+        boost: 15

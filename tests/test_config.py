@@ -21,9 +21,11 @@ def edited_config(tmp_path, *edits: tuple[str, str], file: str = "scoring.yaml")
 
 
 def test_universe_loads_and_is_complete(config):
-    assert len(config.active_tickers) == 22
+    assert len(config.active_tickers) == 47
     assert "TEVA" in config.active_tickers
     assert "PANW" in config.active_tickers
+    assert "LPSN" not in config.active_tickers
+    assert "HARL" in config.active_tickers
 
 
 def test_the_shipped_universe_has_no_unresolved_tickers(config):

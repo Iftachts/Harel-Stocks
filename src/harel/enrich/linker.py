@@ -72,6 +72,10 @@ AMBIGUOUS_NAMES = {
     "nova",     # a star, a region, a hundred product names
     "orbit",
     "one",
+    # Every Israeli filing says it; only "TASE reports/ results/ shares" is news
+    # about the exchange company itself.
+    "tel aviv stock exchange",
+    "tel aviv stock exchange ltd",
 }
 
 # Hebrew company names that are also ordinary Hebrew words. טבע is the word
@@ -82,7 +86,35 @@ AMBIGUOUS_NAMES = {
 # word is financial grammar, see `_word_re_with_context_he`. כיל needs no
 # entry - הכיל/מכיל/יכיל fuse their prefix onto the word, Hebrew letters count
 # as \w, and so the ordinary word boundary already refuses them.
-AMBIGUOUS_NAMES_HE = {"טבע"}
+#
+# The TA-35 names brought a dozen more, measured on what the Hebrew channel
+# actually returned for them (2026-10-07): bare לאומי filed National Insurance
+# allowances (ביטוח לאומי) and Vietnamese national roads (כביש לאומי) under Bank
+# Leumi. בזק is "lightning" (בחירות בזק - snap elections), מגדל a tower,
+# הפועלים "the workers", דיסקונט a discount, עזריאלי the towers and the college.
+# Names with no safe bare form at all - הבינלאומי ("the international"), הראל
+# (a first name), מנורה, שפיר, ביג - are not aliases in the first place.
+AMBIGUOUS_NAMES_HE = {
+    "טבע", "הבורסה לניירות ערך", "הבורסה בתל אביב",
+    "לאומי", "הפועלים", "דיסקונט", "בזק", "מגדל", "עזריאלי", "שטראוס",
+    "הפניקס", "דמרי",
+}
+
+# The word IN FRONT that settles an ambiguous Hebrew name as the ordinary word,
+# however corporate the verb after it: "ביטוח לאומי הודיע" is National
+# Insurance announcing, and "הודיע" is exactly the verb Bank Leumi would take.
+_HE_NOT_AFTER: dict[str, tuple[str, ...]] = {
+    "לאומי": ("ביטוח", "ביטחון", "בטחון", "כביש", "פארק", "גן", "שירות", "אוצר",
+              "חג", "אסון", "מוזיאון", "הימנון", "משחק", "מחדל", "אבל", "יום",
+              "פרויקט", "מאמץ", "משבר", "אינטרס", "ערך", "ספורט", "מבצע"),
+    "בזק": ("בחירות", "מבצע", "ביקור", "סקר", "מלחמת", "פגישת", "מבחן", "גיחת",
+            "תגובת", "מתקפת", "פשיטת", "סיור", "סקירת", "דיון", "החלטת"),
+    "הפועלים": ("ועד", "מפלגת", "הסתדרות", "ההסתדרות", "שכונת", "רחוב", "מעמד"),
+    "דיסקונט": ("רשת", "מחיר", "מחירי", "חנות", "חנויות", "סופר", "מבצע"),
+    "שטראוס": ("לוי", "יוהן", "ריכרד"),
+    "עזריאלי": ("מגדלי", "מכללת", "קרן", "משפחת", "פרס", "מגדל"),
+    "הפניקס": ("ציפור", "עוף"),
+}
 
 
 def _min_name_len(name: str) -> int:
@@ -167,17 +199,21 @@ class EntityLinker:
         # Prefix-or-sigil alone was too strict: "NICE Price Target Cut to
         # $111.00 by Morgan Stanley" is unmistakably about NICE and carried
         # neither.
-        if t in AMBIGUOUS_TICKERS:
-            pattern = _word_re_with_context(t)
-            confidence = 0.9
-        else:
-            pattern = re.compile(rf"(?<![\w.]){re.escape(t)}(?!\w)")
-            confidence = 0.8
-        self.rules.append(_Rule(
-            pattern=pattern, ticker=t, relation="DIRECT",
-            why=f"symbol {t}", base_confidence=confidence, title_only_bonus=0.08,
-            probe=t.lower(),
-        ))
+        # A TASE-only symbol is never written in US text; the bare string is a
+        # US namesake or a word (TASE appears in every Israeli filing). Those
+        # names are matched by name and Hebrew alias only.
+        if tc.exchange != "TASE":
+            if t in AMBIGUOUS_TICKERS:
+                pattern = _word_re_with_context(t)
+                confidence = 0.9
+            else:
+                pattern = re.compile(rf"(?<![\w.]){re.escape(t)}(?!\w)")
+                confidence = 0.8
+            self.rules.append(_Rule(
+                pattern=pattern, ticker=t, relation="DIRECT",
+                why=f"symbol {t}", base_confidence=confidence, title_only_bonus=0.08,
+                probe=t.lower(),
+            ))
 
         # 3. Our own products - a story about AUSTEDO is a story about Teva even
         #    if Teva is never named. That is the weakest evidence DIRECT accepts,
@@ -267,6 +303,9 @@ class EntityLinker:
         #    nothing. See `_is_shouty`.
         for peer in tc.peers:
             symbol = peer.split(".")[0]
+            peer_tc = self.config.ticker(symbol)
+            if peer_tc and peer_tc.exchange == "TASE":
+                continue  # not a symbol in text; named via peer_names instead
             if len(symbol) >= 3 and symbol.upper() not in AMBIGUOUS_TICKERS:
                 self.rules.append(_Rule(
                     pattern=re.compile(rf"(?<![\w.]){re.escape(symbol)}(?!\w)"),
@@ -487,13 +526,26 @@ class EntityLinker:
         """A regulator document that names a sector term touches every ticker in
         that sector, even when no company is named."""
         source = self.config.sources.get(item.source)
-        if source is None or source.kind not in (
-            "federal_register", "federal_register_pi", "openfda", "html_table"
-        ):
+        if source is None:
+            return
+        structured = source.kind in (
+            "federal_register", "federal_register_pi", "openfda", "html_table")
+        # A regulator that publishes only a feed - the Bank of Israel, the
+        # Israeli ministries - is a regulator for the sectors that name its
+        # source key under `regulators:`, and for no others. It must also say
+        # so itself (`sector_regulator: true`): ferc_filings is listed under
+        # renewable_power for the collectors' sake, and reading every FERC
+        # filing that says "interconnection" as sector news for ORA, ENLT and
+        # OPCE was 112 new links on the first dry run.
+        if not structured and not (
+                source.raw.get("sector_regulator")
+                and any(item.source in s.regulators for s in self.config.sectors.values())):
             return
 
         text = item.text.lower()
         for sector_key, sector in self.config.sectors.items():
+            if not structured and item.source not in sector.regulators:
+                continue
             tickers = [
                 t for t in self.config.active_tickers
                 if self.config.ticker(t) and self.config.ticker(t).sector == sector_key
@@ -656,9 +708,10 @@ def direct_evidence(tc, text: str) -> bool:
             else:
                 builder = _word_re
             parts.append(builder(name).pattern)
-        parts.append(_word_re_with_context(tc.ticker).pattern
-                     if tc.ticker in AMBIGUOUS_TICKERS
-                     else rf"(?<![\w.]){re.escape(tc.ticker)}(?!\w)")
+        if tc.exchange != "TASE":
+            parts.append(_word_re_with_context(tc.ticker).pattern
+                         if tc.ticker in AMBIGUOUS_TICKERS
+                         else rf"(?<![\w.]){re.escape(tc.ticker)}(?!\w)")
         pattern = re.compile("|".join(f"(?:{p})" for p in parts), re.IGNORECASE)
         _DIRECT_EVIDENCE_CACHE[key] = pattern
     return bool(pattern.search(text or ""))
@@ -727,24 +780,34 @@ def _word_re_with_context(term: str) -> re.Pattern[str]:
 # earnings mover - and none of the drowning or nature titles. Prefixed forms
 # like לטבע (attached preposition) are deliberately left unmatched: reading
 # inside a fused form would reopen the ambiguity this gate exists to close.
-_FIN_NOUN_HE = (r'מניית|מניות|דוחות|דוח|תוצאות|הכנסות|רווחי|תחזית|מנכ"ל|'
-                r"אנליסטים")
+# Both quote marks: Hebrew writes מנכ"ל with ASCII " and with gershayim ״.
+_FIN_NOUN_HE = (r'מניית|מניות|דוחות|דוח|תוצאות|הכנסות|רווחי|תחזית|מנכ["״]ל|'
+                r'אנליסטים|בנק|הבנק|קבוצת|חברת|דירקטוריון|יו["״]ר|אג["״]ח')
+# Feminine for a company (חברה), masculine for a bank (בנק): "לאומי הציג",
+# "הפועלים דיווח" - the feminine-only list could not read a bank at all.
 _CORP_VERB_HE = (
     r"מזנקת|מזנק|זינקה|זינק|קפצה|צנחה|נופלת|יורדת|ירדה|עולה|עלתה|היכתה|הכתה|"
     r"החמיצה|החמיצו|פספסה|העלתה|הורידה|עדכנה|מדווחת|דיווחה|פרסמה|תפרסם|חתמה|"
     r"זכתה|רוכשת|רכשה|מכרה|גייסה|השיקה|קיבלה|צפויה|הודיעה|נסחרת|מציגה|הציגה|"
-    r"רשמה|מאבדת|מתרסקת"
+    r"רשמה|מאבדת|מתרסקת|"
+    r"מדווח|דיווח|מציג|הציג|רשם|פרסם|יפרסם|העלה|הוריד|עדכן|צנח|קפץ|היכה|החמיץ|"
+    r"גייס|מגייס|מגייסת|רכש|רוכש|חתם|זכה|הודיע|נסחר|מאבד|צפוי|"
+    r"מחלק|מחלקת|חילק|חילקה|יחלק|תחלק|מנפיק|מנפיקה|הנפיק|הנפיקה|"
+    r"משלים|משלימה|השלים|השלימה"
 )
 
 
 def _word_re_with_context_he(term: str) -> re.Pattern[str]:
     """Match an ordinary-word Hebrew company name only inside financial grammar."""
     escaped = re.escape(term)
+    # One fixed-width lookbehind per word: `re` refuses alternatives of
+    # different lengths inside a single lookbehind.
+    guard = "".join(rf"(?<!{re.escape(word)}\s)" for word in _HE_NOT_AFTER.get(term, ()))
     return re.compile(
         # מניית טבע / דוחות טבע - a construct-state noun owns what follows it.
         rf"(?:(?:{_FIN_NOUN_HE})\s+{escaped}(?!\w))"
         # טבע מדווחת / טבע זינקה - the word is the subject of a corporate verb.
-        rf"|(?:(?<!\w){escaped}\s+(?:{_CORP_VERB_HE})(?!\w))",
+        rf"|(?:{guard}(?<!\w){escaped}\s+(?:{_CORP_VERB_HE})(?!\w))",
         re.IGNORECASE,
     )
 

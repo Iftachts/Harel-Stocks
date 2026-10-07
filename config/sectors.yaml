@@ -55,6 +55,14 @@ benchmarks:
     satcom: QQQ
     renewable_power: ICLN
     power_holding: XLU
+    israeli_banks: EIS
+    israeli_insurance_financials: EIS
+    israeli_exchange: EIS
+    israeli_real_estate: EIS
+    israeli_telecom: EIS
+    israeli_oil_gas: EIS
+    israeli_retail_consumer: EIS
+    israeli_construction_infra: EIS
     specialty_chemicals_fertilizer: XLB
 
 sectors:
@@ -358,6 +366,90 @@ sectors:
     high_impact_events:
       ["PJM capacity auction clearing price", "ERCOT scarcity pricing",
        "data-center PPA at a peer IPP", "asset sale / special dividend"]
+
+  # Israeli sectors: fr_terms name the SUBJECT, never the regulator - every
+  # Competition Authority story named the regulator and reached Strauss and
+  # Shufersal, the Leviathan gas deal included.
+  israeli_banks:
+    label: Israeli banks
+    regulators: [boi_interest, israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["הפיקוח על הבנקים", "המפקח על הבנקים", "בנק ישראל", "ריבית", "היטל על הבנקים", "הבנקים", "Supervisor of Banks", "Bank of Israel"]
+    read_across: 0.35
+    peer_read_across: 0.60
+    high_impact_events:
+      ["Bank of Israel rate decision", "bank levy / windfall tax", "dividend policy change", "Supervisor of Banks directive"]
+
+  israeli_insurance_financials:
+    label: Israeli insurance, asset managers & exchange
+    regulators: [boi_interest, israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["רשות שוק ההון", "הממונה על שוק ההון", "חברות הביטוח", "קרנות הפנסיה", "קופות הגמל", "Capital Market Authority"]
+    read_across: 0.35
+    peer_read_across: 0.60
+    high_impact_events:
+      ["Capital Market Authority directive", "pension / gemel default-fund tender", "solvency ratio update", "TASE fee or structure change"]
+
+  israeli_real_estate:
+    label: Israeli real estate
+    regulators: [boi_interest, israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["רשות מקרקעי ישראל", "מכרזי קרקע", "מכרז קרקע", "שוק הדיור", "משכנתא", "משכנתאות", "Israel Land Authority"]
+    read_across: 0.35
+    peer_read_across: 0.60
+    high_impact_events:
+      ["Bank of Israel rate decision", "Israel Land Authority tender", "rezoning / urban renewal approval", "large acquisition or disposal"]
+
+  israeli_telecom:
+    label: Israeli telecom
+    regulators: [israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["משרד התקשורת", "סיבים אופטיים", "שוק התקשורת", "סלולר", "Ministry of Communications"]
+    read_across: 0.35
+    peer_read_across: 0.60
+    high_impact_events:
+      ["Ministry of Communications wholesale ruling", "fiber/5G competitor price move", "spectrum auction", "dividend change"]
+
+  israeli_oil_gas:
+    label: Israeli oil & gas
+    regulators: [israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["משרד האנרגיה", "הממונה על ענייני הנפט", "גז טבעי", "יצוא גז", "מאגר לוויתן", "מאגר תמר", "Ministry of Energy"]
+    read_across: 0.35
+    peer_read_across: 0.60
+    high_impact_events:
+      ["Leviathan/Tamar export agreement", "Ministry of Energy gas-price ruling", "production outage / shut-in", "Brent move above 5%"]
+
+  israeli_retail_consumer:
+    label: Israeli retail & consumer
+    regulators: [israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["רשתות המזון", "רשתות השיווק", "מחירי המזון", "יוקר המחיה", "רפורמת היבוא", "ספקי המזון"]
+    read_across: 0.35
+    peer_read_across: 0.60
+    high_impact_events:
+      ["food import / pricing reform", "monthly CPI print", "commodity price spike", "competitor price war"]
+
+  israeli_construction_infra:
+    label: Israeli construction & infrastructure
+    regulators: [israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["תשתיות תחבורה", "המטרו", "רכבת קלה", "נתיבי ישראל", "מכרזי תשתית"]
+    read_across: 0.35
+    peer_read_across: 0.60
+    high_impact_events:
+      ["major infrastructure tender award", "state budget infrastructure allocation", "metro / rail contract change", "backlog update"]
+
+  israeli_exchange:
+    label: Israeli exchange operator
+    regulators: [israel_regulators_news]
+    fr_agencies: []
+    fr_terms: ["רשות ניירות ערך", "מחזורי המסחר", "Israel Securities Authority"]
+    read_across: 0.35
+    peer_read_across: 0.40
+    high_impact_events:
+      ["Israel Securities Authority reform", "TASE trading volume record",
+       "TASE clearing fee change"]
 
   unknown:
     label: Unclassified

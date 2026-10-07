@@ -35,6 +35,10 @@ def test_known_event_ids_resolve(event_id, name, expected):
     (7, "יום אקס - ריבית"),
     (7, "יום תשלום - ריבית"),
     (9, "פדיון חלקי"),
+    # Measured live 2026-10-07 on the TA-35 debt issuers (CLIS, MGOR, DSCT, POLI).
+    (8, "יום אקס והקצאה - ריבית"),
+    (10, "יום אקס והקצאה - פדיון סופי"),
+    (12, "פדיון כפוי"),
 ])
 def test_bond_coupon_events_are_skipped(event_id, name):
     """These ride on the debt series, not the share. Filing a coupon date under
@@ -60,6 +64,21 @@ def test_ex_dividend_and_payment_are_not_the_same_calendar_kind():
     ex = _schedule_kind({"eventId": 22, "eventName": "יום אקס - דיבידנד"})
     pay = _schedule_kind({"eventId": 22, "eventName": "יום תשלום - דיבידנד"})
     assert ex != pay
+
+
+def test_a_share_event_on_another_security_is_not_the_shares():
+    """Hapoalim's CoCo bond (6620470) has its own last trading day. Filed under
+    POLI, whose share is 662577, it would announce the bank's delisting."""
+    from harel.collect.maya import _other_security
+
+    bond_row = {"eventId": 101, "eventName": "יום מסחר אחרון", "securityId": 6620470}
+    share_row = {"eventId": 101, "eventName": "יום מסחר אחרון", "securityId": 662577}
+    assert _other_security(bond_row, "last_trading_day", "662577")
+    assert not _other_security(share_row, "last_trading_day", "662577")
+    # A meeting belongs to the company, whatever security the row rides on.
+    assert not _other_security(bond_row, "shareholder_meeting", "662577")
+    # No security id on file (PANW): nothing to compare against, keep the row.
+    assert not _other_security(bond_row, "last_trading_day", "")
 
 
 def test_every_schedule_kind_has_wording_in_the_calendar():

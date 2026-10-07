@@ -114,7 +114,8 @@ class TradingHaltsCollector(Collector):
             tc = self.cfg.ticker(ticker)
             if not tc:
                 continue
-            out[ticker.upper()] = (ticker, "DIRECT")
+            if tc.exchange != "TASE":  # a bare TASE symbol on the US tape is a namesake
+                out[ticker.upper()] = (ticker, "DIRECT")
             for peer in tc.peers or []:
                 # A bare exchange symbol only; entries like "HIK.L" or "X-FAB"
                 # are foreign listings that never appear on the US halt tape.

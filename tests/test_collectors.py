@@ -551,7 +551,7 @@ def test_maya_parses_hebrew_reports_and_converts_to_utc(config, db, monkeypatch)
 def test_maya_public_posts_issuer_keyed_bodies_for_every_name(config, db, monkeypatch):
     """The keyless channel is the new site's own backend: one URL, a JSON body
     per name, keyed on the issuer number - the same registry the official API
-    calls IssuerId. PANW and LPSN carry no tase_id and must still be queried,
+    calls IssuerId. PANW carries no tase_id and must still be queried,
     and none of the old mayaapi spoofing headers belong on the request."""
     monkeypatch.delenv("TASE_API_KEY", raising=False)
     client = FakeHttpClient({'"companyId": 629,': fixture_json("maya_v1_reports.json")})
@@ -573,7 +573,6 @@ def test_maya_public_posts_issuer_keyed_bodies_for_every_name(config, db, monkey
 
     queried = {b["companyId"] for _, b in client.posts}
     assert int(config.ticker("PANW").raw["tase_issuer_id"]) in queried
-    assert int(config.ticker("LPSN").raw["tase_issuer_id"]) in queried
 
     assert not any("X-Maya-With" in h for h in client.headers_seen), \
         "the v1 channel needs no browser spoofing - a clean request only"
@@ -708,18 +707,16 @@ def test_maya_v2_refuses_to_query_a_security_id_as_an_issuer_id(config, db, monk
 
 
 def test_maya_v2_collects_names_that_have_no_security_id(config, db, monkeypatch):
-    """PANW and LPSN carry no tase_id, so the old "dual listed" gate skipped
+    """PANW carries no tase_id, so the old "dual listed" gate skipped
     them. The official API keys on issuer number, which they do have - gating on
-    tase_id would silently drop two names from the highest-value source."""
+    tase_id would silently drop a name from the highest-value source."""
     assert config.ticker("PANW").tase_id is None
-    assert config.ticker("LPSN").tase_id is None
 
     collector, client = _maya_v2(config, db, monkeypatch)
     list(collector.collect())
 
     queried = " ".join(client.calls)
     assert f"IssuerId={config.ticker('PANW').raw['tase_issuer_id']}" in queried
-    assert f"IssuerId={config.ticker('LPSN').raw['tase_issuer_id']}" in queried
 
 
 def test_maya_v2_reports_truncated_pages(config, db, monkeypatch):

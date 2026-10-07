@@ -744,6 +744,7 @@ _SCHEDULE_PREFIX = {
     "shareholder_meeting": "Shareholder meeting: ",
     "last_trading_day": "LAST TRADING DAY (delisting): ",
     "last_exercise_day": "Last exercise day: ",
+    "rate_decision": "Rate decision (banks, insurers and landlords reprice): ",
 }
 
 _REGULATOR_KINDS = frozenset({"federal_register", "federal_register_pi"})

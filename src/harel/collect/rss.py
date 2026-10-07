@@ -20,7 +20,7 @@ from urllib.parse import quote_plus
 
 import feedparser
 
-from ..enrich.linker import direct_evidence
+from ..enrich.linker import AMBIGUOUS_NAMES_HE, direct_evidence
 from ..http import HttpError
 from ..models import FIELD_SEP, RawItem
 from .base import Collector, register
@@ -146,6 +146,8 @@ class RssCollector(Collector):
             tc = self.cfg.ticker(ticker)
             if not tc:
                 continue
+            if tc.exchange == "TASE":
+                continue  # per-symbol US feeds would return a US namesake (BIG, SAE...)
             fields = {
                 "ticker": ticker,
                 "TICKER": ticker.upper(),
@@ -188,6 +190,12 @@ class RssCollector(Collector):
                 continue
             if hebrew:
                 terms = [a for a in tc.aliases if _is_hebrew(a)]
+                # Ask for the unambiguous forms. "לאומי" as a query term
+                # returns National Insurance and Vietnamese national roads,
+                # which the evidence check then throws away one by one; ask
+                # for "בנק לאומי" and the query does that work instead. A
+                # name whose only Hebrew form is ambiguous (טבע) keeps it.
+                terms = [a for a in terms if a not in AMBIGUOUS_NAMES_HE] or terms
                 if not terms:
                     continue
                 query = " OR ".join(f'"{t}"' for t in terms[:3])
@@ -197,7 +205,10 @@ class RssCollector(Collector):
                 # for symbols that are not English words.
                 terms = [f'"{tc.name}"']
                 terms += [f'"{a}"' for a in tc.aliases[:2] if not _is_hebrew(a)]
-                if not _is_wordlike(ticker):
+                # A TASE-only symbol is never how English copy names the
+                # company: "BIG" stock, "SAE" stock and "STRS" stock are Big
+                # Lots, SAE Group and Stratus Properties.
+                if not _is_wordlike(ticker) and tc.exchange != "TASE":
                     terms.append(f'"{ticker}" stock')
                 query = " OR ".join(terms)
             out.append((base.replace("{q}", quote_plus(query)), [ticker], "DIRECT",

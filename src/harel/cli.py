@@ -438,6 +438,9 @@ def cmd_moving(args) -> int:
     return 0
 
 
+GOOGLE_NEWS_SEARCH = "https://news.google.com/rss/search"
+
+
 def cmd_rescore(args) -> int:
     """Apply the current scoring/universe config to already-collected items.
 
@@ -1084,7 +1087,11 @@ def cmd_verify_feeds(args) -> int:
         query_prefix = base.split("{q}")[0] if "{q}" in base else None
         for target in probe._feed_plan():
             url, _seeds, _rel, label, _issuer = target
-            if query_prefix and url.startswith(query_prefix) and not args.queries:
+            # A fixed `feeds:` entry can be a search too (israel_regulators_news
+            # is eight of them) and costs the same requests from the same host.
+            is_search = ((query_prefix and url.startswith(query_prefix))
+                         or url.startswith(GOOGLE_NEWS_SEARCH))
+            if is_search and not args.queries:
                 continue
             if args.only and args.only.lower() not in f"{label} {url}".lower():
                 continue
