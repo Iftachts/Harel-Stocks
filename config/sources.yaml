@@ -535,10 +535,12 @@ sources:
     latency: realtime
     poll_sec: 300
     notes: >
-      The independent path to the issuer's own press release for the eight
-      names whose IR feeds sit behind Akamai (TSEM LPSN ORA ICL ALLT CGEN BWAY
-      PANW), which 403 every request from a datacenter IP no matter the
-      headers. Verified live: 50 items per ticker, keyless, plain UA, and the
+      The independent path to the issuer's own press release for the seven
+      names whose IR hosts block this datacenter IP no matter the headers -
+      Akamai for TSEM ALLT BWAY PANW, Cloudflare for the Q4-hosted ORA ICL CGEN
+      (rechecked 2026-10-07, site roots included). Those IR feeds are switched
+      off in universe.yaml, so for ORA ICL ALLT CGEN PANW this is the only
+      issuer-release channel. Verified live: 50 items per ticker, keyless, plain UA, and the
       pubDate is the ORIGINAL WIRE timestamp rather than an ingestion time.
       Rate-limited to one request every two seconds in http.py - the seventh
       rapid request returns 429.

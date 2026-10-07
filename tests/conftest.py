@@ -145,3 +145,27 @@ def fixture_text(name: str) -> str:
 
 def fixture_json(name: str):
     return json.loads(fixture_text(name))
+
+
+# The issuer-feed tests are built on ORA's and CGEN's Q4 feeds - the incidents
+# they pin happened there. Production switched both feeds off on 2026-10-07
+# (Cloudflare challenges the collector's datacenter IP; see universe.yaml), but
+# the behaviour under test is the Q4 feed shape, not whether we can reach it
+# today, so these tests run against a config copy with the two switched back on.
+REENABLED_ISSUER_FEEDS = ("https://investor.ormat.com/rss/pressrelease.aspx",
+                          "https://ir.cgen.com/rss/pressrelease.aspx")
+
+
+@pytest.fixture(scope="session")
+def issuer_feed_config(tmp_path_factory):
+    import shutil
+
+    cdir = tmp_path_factory.mktemp("issuer_feeds") / "config"
+    shutil.copytree(REPO_ROOT / "config", cdir)
+    universe = cdir / "universe.yaml"
+    text = universe.read_text(encoding="utf-8")
+    for url in REENABLED_ISSUER_FEEDS:
+        assert f"      # - {url}\n" in text, f"{url} is no longer parked in universe.yaml"
+        text = text.replace(f"      # - {url}\n", f"      - {url}\n")
+    universe.write_text(text, encoding="utf-8")
+    return load_config(cdir)

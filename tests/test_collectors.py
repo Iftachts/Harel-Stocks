@@ -363,10 +363,10 @@ def test_a_dateless_listing_row_keeps_the_stamp_it_was_first_given(config, db):
 
 
 # ------------------------------------------------------------------ RSS -- #
-def test_rss_reads_issuer_feed_and_tags_the_owner(config, db):
+def test_rss_reads_issuer_feed_and_tags_the_owner(issuer_feed_config, db):
     routes = {"ir.cgen.com": fixture_text("ir_feed.xml"),
               "cgen.com/rss/pressrelease": fixture_text("ir_feed.xml")}
-    collector = RssCollector(config.sources["company_ir_rss"], ctx(config, db, routes))
+    collector = RssCollector(issuer_feed_config.sources["company_ir_rss"], ctx(issuer_feed_config, db, routes))
     items = [i for i in collector.collect() if "CGEN" in i.seed_tickers]
     assert len(items) == 2
     titles = " ".join(i.title for i in items)
@@ -419,7 +419,7 @@ def _ir_collector(config, db, routes, lookback_hours=12.0):
     )
 
 
-def test_an_issuer_is_read_back_far_enough_to_see_its_own_reporting_date(config, db):
+def test_an_issuer_is_read_back_far_enough_to_see_its_own_reporting_date(issuer_feed_config, db):
     """Ormat announced on 1 July that it would report on 5 August, then its feed
     went quiet. Every pass in between ran a 12- or 72-hour news window, so the
     one item carrying the date was always too old to collect and the calendar
@@ -428,7 +428,7 @@ def test_an_issuer_is_read_back_far_enough_to_see_its_own_reporting_date(config,
     from harel.pipeline import _earnings_date
 
     routes, expected = _issuer_routes()
-    collector = _ir_collector(config, db, routes)
+    collector = _ir_collector(issuer_feed_config, db, routes)
     items = [i for i in collector.collect() if "ORA" in i.seed_tickers]
 
     assert len(items) == 1, [i.title for i in items]
@@ -437,28 +437,28 @@ def test_an_issuer_is_read_back_far_enough_to_see_its_own_reporting_date(config,
     assert _earnings_date(announcement) == (expected, "Q2 results")
 
 
-def test_only_a_future_date_survives_the_longer_issuer_window(config, db):
+def test_only_a_future_date_survives_the_longer_issuer_window(issuer_feed_config, db):
     """The wider window is for one thing: a date that has not happened yet. The
     same feed's storage-facility release is exactly as old and stays dropped -
     otherwise "read further back" quietly means "re-collect stale news"."""
     routes, _ = _issuer_routes()
-    items = list(_ir_collector(config, db, routes).collect())
+    items = list(_ir_collector(issuer_feed_config, db, routes).collect())
     titles = " ".join(i.title for i in items)
     assert "Shirk Energy Storage" not in titles
 
     # And an announcement whose date has already passed is not a schedule.
     stale, _ = _issuer_routes(published_days_ago=200, report_in_days=-170)
-    assert [i for i in _ir_collector(config, db, stale).collect()
+    assert [i for i in _ir_collector(issuer_feed_config, db, stale).collect()
             if "ORA" in i.seed_tickers] == []
 
 
-def test_the_release_body_is_fetched_because_the_feed_withholds_it(config, db):
+def test_the_release_body_is_fetched_because_the_feed_withholds_it(issuer_feed_config, db):
     """TEVA, ORA, ICL and CGEN all publish through `pressrelease.aspx`, which
     emits a headline and an empty description. The date is in the page - and the
     page is an .aspx, so it wraps its whole body in one <form>. Stripping that
     as chrome left 123 characters of <title> and no date at all."""
     routes, expected = _issuer_routes()
-    collector = _ir_collector(config, db, routes)
+    collector = _ir_collector(issuer_feed_config, db, routes)
     item = next(i for i in collector.collect() if "ORA" in i.seed_tickers)
 
     assert item.summary == "", "the fixture must keep the feed's empty description"

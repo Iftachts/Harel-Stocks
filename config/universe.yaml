@@ -76,7 +76,11 @@ tickers:
     sector: semiconductors_foundry
     float_class: mid
     ir_feeds:
-      - https://ir.towersemi.com/rss/news-releases.xml
+      # OFF 2026-10-07: Akamai 403s this whole host (feed and site root) from the
+      # collector's datacenter IP (Contabo AS51167), whatever the UA or IP version.
+      # Never delivered an item. StockTitan carries the same releases.
+      # Re-enable if collection moves off this network:
+      # - https://ir.towersemi.com/rss/news-releases.xml
       # the corporate host is not behind the Akamai block that 403s ir.towersemi.com
       # from a datacenter IP; verified live, 10 real releases incl. 'Tower
       # Semiconductor Announces Record Results for Revenue and Profitability'
@@ -313,7 +317,11 @@ tickers:
     sector: renewable_power
     float_class: mid
     ir_feeds:
-      - https://investor.ormat.com/rss/pressrelease.aspx
+      # OFF 2026-10-07: Cloudflare challenges this Q4-hosted site (429/403, site
+      # root included) from the collector's datacenter IP (Contabo AS51167). TEVA's
+      # Q4 feed still answers - the bot setting is per customer. StockTitan carries
+      # the same releases. Re-enable if collection moves off this network:
+      # - https://investor.ormat.com/rss/pressrelease.aspx
     peers: [NEE, BEP, CEG, VST, RUN, FSLR, ENPH, AES]
     peer_names: ["NextEra Energy", "Brookfield Renewable", "Constellation Energy",
                  "Vistra", "Calpine", "Enel Green Power", "AES", "Sunrun", "Fluence",
@@ -345,7 +353,11 @@ tickers:
     sector: specialty_chemicals_fertilizer
     float_class: mid
     ir_feeds:
-      - https://investors.icl-group.com/rss/pressrelease.aspx
+      # OFF 2026-10-07: Cloudflare challenges this Q4-hosted site (429/403, site
+      # root included) from the collector's datacenter IP (Contabo AS51167). TEVA's
+      # Q4 feed still answers - the bot setting is per customer. StockTitan carries
+      # the same releases. Re-enable if collection moves off this network:
+      # - https://investors.icl-group.com/rss/pressrelease.aspx
     peers: [NTR, MOS, CF, YAR.OL, SQM, CMP, ALB, IPI]
     peer_names: ["Nutrien", "Mosaic", "K+S", "Yara", "Uralkali", "Belaruskali",
                  "Arab Potash", "SQM", "Compass Minerals", "Albemarle", "OCP",
@@ -521,7 +533,11 @@ tickers:
     sector: network_security
     float_class: micro
     ir_feeds:
-      - https://investors.allot.com/rss/news-releases.xml
+      # OFF 2026-10-07: Akamai 403s this whole host (feed and site root) from the
+      # collector's datacenter IP (Contabo AS51167), whatever the UA or IP version.
+      # Never delivered an item. StockTitan carries the same releases.
+      # Re-enable if collection moves off this network:
+      # - https://investors.allot.com/rss/news-releases.xml
     peers: [RDWR, CHKP, CSCO, NOK, ERIC, JNPR]
     # Deepfield is Nokia's analytics PRODUCT and belongs in competitor_products;
     # the company here is Nokia.
@@ -700,7 +716,11 @@ tickers:
     sector: biotech_clinical
     float_class: micro
     ir_feeds:
-      - https://ir.cgen.com/rss/pressrelease.aspx
+      # OFF 2026-10-07: Cloudflare challenges this Q4-hosted site (429/403, site
+      # root included) from the collector's datacenter IP (Contabo AS51167). TEVA's
+      # Q4 feed still answers - the bot setting is per customer. StockTitan carries
+      # the same releases. Re-enable if collection moves off this network:
+      # - https://ir.cgen.com/rss/pressrelease.aspx
     peers: [RCUS, ITOS, MRK, AZN, GILD, BMY, RHHBY]
     peer_names: ["Arcus Biosciences", "iTeos Therapeutics", "Merck", "AstraZeneca",
                  "Gilead", "Bristol Myers Squibb", "Roche", "GSK", "Agenus", "Mereo"]
@@ -739,7 +759,11 @@ tickers:
     sector: medical_devices
     float_class: micro
     ir_feeds:
-      - https://investors.brainsway.com/rss/news-releases.xml
+      # OFF 2026-10-07: Akamai 403s this whole host (feed and site root) from the
+      # collector's datacenter IP (Contabo AS51167), whatever the UA or IP version.
+      # Never delivered an item. StockTitan carries the same releases.
+      # Re-enable if collection moves off this network:
+      # - https://investors.brainsway.com/rss/news-releases.xml
       # same reasoning as TSEM. Verified live: 'BrainsWay Deep TMS Study Shows 70%
       # Reduction in Patients Experiencing Suicidal Ideation' (27 Aug 2026).
       # This is the news CATEGORY feed, not the site-wide WordPress firehose
@@ -817,7 +841,11 @@ tickers:
     sector: cybersecurity_platform
     float_class: large
     ir_feeds:
-      - https://investors.paloaltonetworks.com/rss/news-releases.xml
+      # OFF 2026-10-07: Akamai 403s this whole host (feed and site root) from the
+      # collector's datacenter IP (Contabo AS51167), whatever the UA or IP version.
+      # Never delivered an item. StockTitan carries the same releases.
+      # Re-enable if collection moves off this network:
+      # - https://investors.paloaltonetworks.com/rss/news-releases.xml
     peers: [CRWD, ZS, FTNT, S, CHKP, NET, OKTA, TENB, CYBR, RBRK, MSFT, CSCO]
     peer_names:
       ["CrowdStrike", "Zscaler", "Fortinet", "SentinelOne", "Check Point",

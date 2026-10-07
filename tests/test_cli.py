@@ -12,13 +12,14 @@ that needs the network to be verified is a verifier nobody runs.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from harel.cli import main
 
-from conftest import FakeHttpClient, fixture_text
+from conftest import REENABLED_ISSUER_FEEDS, REPO_ROOT, FakeHttpClient, fixture_text
 
 
 def _issuer_routes(published_days_ago: int = 32, report_in_days: int = 20):
@@ -57,6 +58,9 @@ def _issuer_routes(published_days_ago: int = 32, report_in_days: int = 20):
 def _verify(monkeypatch, capsys, routes, *argv, as_json=True):
     """Run the command end to end. Returns (payload or text, client, exit code)."""
     clients: list[FakeHttpClient] = []
+    # ORA's feed is parked in production (blocked from the collector's IP); the
+    # command is still tested on it. See conftest.issuer_feed_config.
+    monkeypatch.setattr("harel.cli.get_config", lambda *a: _ISSUER_CONFIG())
 
     def build(**kwargs):
         clients.append(FakeHttpClient(routes))
@@ -68,6 +72,28 @@ def _verify(monkeypatch, capsys, routes, *argv, as_json=True):
     code = main((["--json"] if as_json else []) + ["verify-feeds", *argv])
     out = capsys.readouterr().out
     return (json.loads(out) if as_json else out), clients[0], code
+
+
+_issuer_config_cache = []
+
+
+def _ISSUER_CONFIG():
+    """Same config copy as conftest.issuer_feed_config, built once per module."""
+    if not _issuer_config_cache:
+        import shutil
+        import tempfile
+
+        from harel.config import load_config
+
+        cdir = Path(tempfile.mkdtemp()) / "config"
+        shutil.copytree(REPO_ROOT / "config", cdir)
+        universe = cdir / "universe.yaml"
+        text = universe.read_text(encoding="utf-8")
+        for url in REENABLED_ISSUER_FEEDS:
+            text = text.replace(f"      # - {url}\n", f"      - {url}\n")
+        universe.write_text(text, encoding="utf-8")
+        _issuer_config_cache.append(load_config(cdir))
+    return _issuer_config_cache[0]
 
 
 def _feed(payload, label: str) -> dict:
@@ -100,7 +126,7 @@ def test_a_live_feed_is_reported_by_what_reaches_the_calendar(monkeypatch, capsy
 
 
 def test_the_report_agrees_with_the_collector_it_claims_to_describe(
-        monkeypatch, capsys, config, db):
+        monkeypatch, capsys, issuer_feed_config, db):
     """The design rests on driving the real RssCollector rather than a second
     copy of its rules, so assert exactly that: the entries the report calls
     emitted are the ones a collection pass yields from the same feed. A parallel
@@ -113,8 +139,8 @@ def test_the_report_agrees_with_the_collector_it_claims_to_describe(
     payload, _, _ = _verify(monkeypatch, capsys, routes, "--only", "ormat")
 
     collector = RssCollector(
-        config.sources["company_ir_rss"],
-        CollectorContext(config=config, client=FakeHttpClient(routes), db=db,
+        issuer_feed_config.sources["company_ir_rss"],
+        CollectorContext(config=issuer_feed_config, client=FakeHttpClient(routes), db=db,
                          lookback_hours=72.0),
     )
     collected = {item.title for item in collector.collect()
@@ -209,6 +235,7 @@ def test_the_check_never_opens_the_database(monkeypatch, capsys, tmp_path):
     routes, _ = _issuer_routes()
     db_path = tmp_path / "never-created.db"
     clients: list[FakeHttpClient] = []
+    monkeypatch.setattr("harel.cli.get_config", lambda *a: _ISSUER_CONFIG())
     monkeypatch.setattr("harel.http.HttpClient",
                         lambda **kw: clients.append(FakeHttpClient(routes))
                         or clients[-1])
